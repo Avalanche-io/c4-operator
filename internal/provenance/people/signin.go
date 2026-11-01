@@ -57,15 +57,27 @@ type StaticSignIns map[string][]SignIn
 // Load is the sign-ins themselves.
 func (s StaticSignIns) Load(context.Context) (StaticSignIns, error) { return s, nil }
 
-// Person is the person whose sign-ins hold this subject at this provider,
-// or "".
+// Person is the person whose sign-ins hold this subject at this provider:
+// "" when no one's do, or when more than one person's do, since a subject
+// two people hold names neither of them.
 func (s StaticSignIns) Person(issuer, subject string) string {
-	for person, ins := range s {
-		if slices.Contains(ins, SignIn{Issuer: issuer, Subject: subject}) {
-			return person
-		}
+	if p := s.People(issuer, subject); len(p) == 1 {
+		return p[0]
 	}
 	return ""
+}
+
+// People is everyone whose sign-ins hold this subject at this provider,
+// sorted: one, normally; more than one is a mistake an admin corrects.
+func (s StaticSignIns) People(issuer, subject string) []string {
+	var out []string
+	for person, ins := range s {
+		if slices.Contains(ins, SignIn{Issuer: issuer, Subject: subject}) {
+			out = append(out, person)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // canonical is the sign-ins as the index books them: canonical JSON, each
@@ -249,6 +261,12 @@ func (i *Issuer) client() *http.Client {
 // StepUp.MaxAge and more than one factor in acr or amr. The subject is
 // the caller's to match.
 func (i *Issuer) checkIDToken(ctx context.Context, set Provider, raw, device string, stepUp bool) (*signIn, error) {
+	return i.checkToken(ctx, set, raw, device, true, stepUp)
+}
+
+// checkToken is checkIDToken, its nonce checked against device only when
+// forKey: whoami reads whose a token is, and certifies nothing on it.
+func (i *Issuer) checkToken(ctx context.Context, set Provider, raw, device string, forKey, stepUp bool) (*signIn, error) {
 	if set.Issuer == "" || set.ClientID == "" {
 		return nil, refusedToken("this farm has no sign-in provider: an admin sets one (set-sign-in-provider)")
 	}
@@ -276,7 +294,7 @@ func (i *Issuer) checkIDToken(ctx context.Context, set Provider, raw, device str
 		return nil, refusedToken("the ID token says it was issued at %s, which is not before now", tok.IssuedAt.UTC().Format(time.RFC3339))
 	case now.Sub(tok.IssuedAt) > TokenAge:
 		return nil, refusedToken("the ID token was issued %s ago: enrolment and renewal take a fresh one, from the last %s", now.Sub(tok.IssuedAt).Round(time.Second), TokenAge)
-	case tok.Nonce != device:
+	case forKey && tok.Nonce != device:
 		return nil, refusedToken("the ID token's nonce is %q, not the key's device ID %s: a token is certified only for the key it names", tok.Nonce, device)
 	case tok.Subject == "":
 		return nil, refusedToken("the ID token names no subject")

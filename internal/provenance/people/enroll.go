@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
@@ -259,14 +261,80 @@ func (i *Issuer) signedIn(ctx context.Context, raw, device, person string, stepU
 		return nil, err
 	}
 	in.signIns = ins.canonical()
-	who := ins.Person(in.issuer, in.subject)
+	who, err := holder(ins, in.issuer, in.subject)
 	switch {
-	case who == "":
-		return nil, refuse(http.StatusForbidden, "subject %q at %s is no one's sign-in here: a person's signIns name it", in.subject, in.issuer)
+	case err != nil:
+		return nil, err
 	case who != person:
 		return nil, refuse(http.StatusForbidden, "subject %q at %s is %s's sign-in, not %s's", in.subject, in.issuer, who, person)
 	}
 	return in, nil
+}
+
+// holder is the one person whose sign-ins hold the subject: 403 when no
+// one's do, 409 when more than one person's do.
+func holder(ins StaticSignIns, issuer, subject string) (string, error) {
+	switch who := ins.People(issuer, subject); len(who) {
+	case 0:
+		return "", refuse(http.StatusForbidden, "subject %q at %s is no one's sign-in here: a person's signIns name it", subject, issuer)
+	case 1:
+		return who[0], nil
+	default:
+		return "", refuse(http.StatusConflict, "subject %q at %s is in the sign-ins of %s: one subject names one person, and an admin removes it from the others",
+			subject, issuer, strings.Join(who, " and "))
+	}
+}
+
+// Whoami is POST /v1/people/whoami's body: an ID token from the farm's
+// provider. The answer names the person whose sign-in it is, so a client
+// signs its enrolment as them without anyone typing a name.
+type Whoami struct {
+	IDToken string `json:"idToken"`
+}
+
+// WhoamiAnswer is whose sign-in the token is.
+type WhoamiAnswer struct {
+	Person string `json:"person"`
+}
+
+// handleWhoami answers whose sign-in an ID token is: checked as an
+// enrolment's is (issuer, audience, azp, issued in the last 10 minutes,
+// signature), but not its nonce, since it certifies nothing.
+func (i *Issuer) handleWhoami(w http.ResponseWriter, r *http.Request) {
+	var body Whoami
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxBody)).Decode(&body); err != nil || body.IDToken == "" {
+		fail(w, refuse(http.StatusBadRequest, "send {idToken}: an ID token from the farm's sign-in provider"))
+		return
+	}
+	ctx := r.Context()
+	set, err := i.setting(ctx)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	if set == nil {
+		set = &Setting{}
+	}
+	in, err := i.checkToken(ctx, set.Provider, body.IDToken, "", false, false)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	if i.SignIns == nil {
+		fail(w, refuse(http.StatusForbidden, "this farm names no one's sign-ins"))
+		return
+	}
+	ins, err := i.SignIns.Load(ctx)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	who, err := holder(ins, in.issuer, in.subject)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, WhoamiAnswer{Person: who})
 }
 
 // enrollApproved certifies a device on a confirmed approve-machine act
