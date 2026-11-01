@@ -107,3 +107,28 @@ func TestDeviceRecordNotByIssuerRefused(t *testing.T) {
 		}
 	}
 }
+
+// A head at the position this process has read, naming another entry (a
+// fork, or a head rewritten in place), is reported as a rewritten index,
+// never a panic (review probe P3).
+func TestForkedHeadAtTheSamePosition(t *testing.T) {
+	r := studio(t)
+	r.signIn(newDev(t), "dana", danaSub)
+	ctx := context.Background()
+	if err := r.index.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h, _ := r.head.Read(ctx)
+	_, ids, _ := r.index.Entries(ctx, 0)
+	if err := r.head.Write(ctx, h, people.HeadState{ID: ids[0], Position: h.Position}); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			t.Fatalf("Sync panicked: %v", p)
+		}
+	}()
+	if err := r.index.Sync(ctx); !errors.Is(err, people.ErrIndex) || !strings.Contains(err.Error(), "rewritten") {
+		t.Errorf("a forked head: %v", err)
+	}
+}

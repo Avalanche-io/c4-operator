@@ -252,8 +252,11 @@ func (x *Index) sync(ctx context.Context) error {
 	if h.Position == have && (have == 0 || h.ID == x.ids[have-1]) {
 		return nil
 	}
-	if h.Position < have {
-		return fmt.Errorf("%w: the head is at position %d, before %d this process read", ErrIndex, h.Position, have)
+	switch {
+	case h.Position < have:
+		return fmt.Errorf("%w: the head is at position %d, before %d this process read: the index was rewritten", ErrIndex, h.Position, have)
+	case h.Position == have:
+		return fmt.Errorf("%w: the head names entry %.16s at position %d, where this process read %.16s: the index was rewritten", ErrIndex, h.ID, have, x.ids[have-1])
 	}
 	// Walk back from the head to the last entry already read.
 	var news []*Entry
