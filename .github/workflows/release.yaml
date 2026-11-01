@@ -103,6 +103,11 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     - run: make tools
     - run: make tool-locks VERSION=${{ github.ref_name }}
+    # the Mac's c4-farm embeds the same locks (mac-cli)
+    - uses: actions/upload-artifact@v7
+      with:
+        name: tool-locks
+        path: tools/*/tool.lock
     # the tools tool-tests ran, which c4-farm and the operator name as
     # tested in this release
     - run: echo "C4_TESTED_TOOLS=$(make -s tested-tools)" >> "$GITHUB_ENV"
@@ -112,6 +117,46 @@ jobs:
         args: release --clean
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # c4-farm for macOS: built on a Mac, with cgo and the Secure Enclave's
+  # Swift library (internal/keystore, make c4-farm-mac), for macOS 13 and
+  # later, both architectures; GoReleaser builds the rest with cgo off. It
+  # embeds the release job's tool locks, and its archives join the draft
+  # release named as GoReleaser names the others, with their lines added
+  # to checksums.txt.
+  mac-cli:
+    needs: release
+    runs-on: macos-15
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+    - uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+    - uses: actions/download-artifact@v8
+      with:
+        name: tool-locks
+        path: tools
+    - run: make test-keystore-se
+    - run: |
+        tag=${{ github.ref_name }}
+        ver=${tag#v}
+        mkdir -p dist/mac
+        for arch in arm64 amd64; do
+          GOARCH=$arch make c4-farm-mac VERSION=$tag
+          out=dist/mac/c4-farm_${ver}_darwin_${arch}
+          mkdir -p "$out/skills/c4-farm"
+          cp bin/c4-farm LICENSE NOTICE "$out/"
+          cp skills/c4-farm/* "$out/skills/c4-farm/"
+          tar -C "$out" -czf "$out.tar.gz" .
+        done
+        cd dist/mac
+        gh release download "$tag" -p checksums.txt --clobber
+        shasum -a 256 c4-farm_${ver}_darwin_*.tar.gz >> checksums.txt
+        gh release upload "$tag" c4-farm_${ver}_darwin_*.tar.gz checksums.txt --clobber
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # The sample set `c4 farm samples get` downloads, built with this release's
   # images, attached to the draft release with its C4 ID beside it.

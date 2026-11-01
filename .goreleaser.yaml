@@ -26,11 +26,15 @@ builds:
   # the HUD books as tested in it
   ldflags: ["-s -w -X main.version={{ .Tag }} -X github.com/Avalanche-io/c4-operator/tools.tested={{ envOrDefault \"C4_TESTED_TOOLS\" \"\" }}"]
 
+# c4-farm for macOS is not built here: it keeps a person's keys in the
+# Secure Enclave, through a Swift static library linked by cgo, so it is
+# built on a Mac (release.yaml, mac-cli), and its archives join the draft
+# release named as these are.
 - id: c4-farm
   main: ./cmd/c4-farm
   binary: c4-farm
   env: [CGO_ENABLED=0]
-  goos: [linux, darwin, windows]
+  goos: [linux, windows]
   goarch: [amd64, arm64]
   flags: [-trimpath]
   ldflags: ["-s -w -X main.version={{ .Tag }}"]

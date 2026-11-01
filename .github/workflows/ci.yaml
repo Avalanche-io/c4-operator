@@ -46,6 +46,20 @@ jobs:
     - name: cache tiers under the race detector
       run: go test -race -count=1 ./internal/tier/... ./internal/fill/... ./internal/objcache/...
 
+  # c4-farm for macOS, with the Secure Enclave's Swift library: it builds for
+  # both architectures, and the keystore's tests run. A hosted Mac runner
+  # has no Secure Enclave, so its tests of the chip itself skip there; they
+  # run on a developer's Mac (make test-keystore-se).
+  macos-keystore:
+    runs-on: macos-15
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+    - run: make test-keystore-se
+    - run: GOARCH=arm64 make c4-farm-mac && GOARCH=amd64 make c4-farm-mac
+
   linux-privileged:
     name: overlay, layers and capture (privileged container)
     runs-on: ubuntu-latest
