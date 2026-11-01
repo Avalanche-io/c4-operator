@@ -273,7 +273,7 @@ func (i *Issuer) handleCode(w http.ResponseWriter, r *http.Request) {
 
 // code is the booked code with this hash.
 func (x *Index) code(hash string) *Entry {
-	for _, e := range x.entries {
+	for _, e := range x.all() {
 		if e.Kind == KindCode && e.Code == hash {
 			return e
 		}
@@ -283,7 +283,7 @@ func (x *Index) code(hash string) *Entry {
 
 // codeUsed is the device entry a code enrolled, or nil.
 func (x *Index) codeUsed(hash string) *Entry {
-	for _, e := range x.entries {
+	for _, e := range x.all() {
 		if d := x.devices[e.Record]; e.Kind == KindDevice && d != nil && d.Predicate.Code == hash && d.Predicate.Renews == "" {
 			return e
 		}

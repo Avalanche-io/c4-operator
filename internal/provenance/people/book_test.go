@@ -1,0 +1,197 @@
+package people_test
+
+import (
+	"context"
+	"crypto/ed25519"
+	"crypto/x509"
+	"errors"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/go-logr/logr"
+
+	"github.com/Avalanche-io/c4-operator/internal/farmbook"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
+	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
+)
+
+// booked is a rig whose index is kept in a farm book: the book's store and
+// State, and the queue's sealer with the people's checker beside the HUD's.
+type booked struct {
+	*rig
+	store  *farmbook.MemoryStore
+	ptr    *farmbook.MemoryPointer
+	sealer *farmbook.Sealer
+}
+
+// inBook keeps r's index in a new farm book. The index kept before it, if
+// any, is r's own Head, which the book adopts when legacy is set.
+func inBook(r *rig, legacy *people.Index) *booked {
+	r.t.Helper()
+	b := &booked{rig: r, store: &farmbook.MemoryStore{}, ptr: &farmbook.MemoryPointer{}}
+	queue, err := provenance.NewSigner(context.Background(), func(_ context.Context, pub ed25519.PublicKey) ([]*x509.Certificate, error) {
+		c, err := r.farm.CA.Issue(pub, provenance.ComponentIdentity("queue"), 48*time.Hour, r.farm.Now)
+		return []*x509.Certificate{c, r.farm.CA.Cert}, err
+	})
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	r.index = &people.Index{Farm: r.farm.ID, Roots: r.farm.Roots, Store: b.store, Head: r.head,
+		Book: &farmbook.Reader{Farm: r.farm.ID, Roots: r.farm.Roots, Store: b.store, Pointer: b.ptr}}
+	r.iss.Index = r.index
+	b.sealer = &farmbook.Sealer{Farm: r.farm.ID, Roots: r.farm.Roots, Store: b.store, Pointer: b.ptr, Signer: queue, Log: logr.Discard(),
+		Now: func() time.Time { return r.now },
+		Checkers: func() []farmbook.Checker {
+			return []farmbook.Checker{people.NewBookChecker(r.farm.ID, r.farm.Roots, b.store),
+				&farmbook.ControlChecker{Farm: r.farm.ID, Roots: r.farm.Roots, Store: b.store}}
+		}}
+	if legacy != nil {
+		b.sealer.Adopt = legacy.Adoption
+	}
+	return b
+}
+
+func (b *booked) seal() *farmbook.SealResult {
+	b.t.Helper()
+	res, err := b.sealer.Seal(context.Background())
+	if err != nil {
+		b.t.Fatal(err)
+	}
+	return res
+}
+
+func (b *booked) sealedAt() int64 {
+	b.t.Helper()
+	p, err := b.index.Sealed(context.Background())
+	if err != nil {
+		b.t.Fatal(err)
+	}
+	return p
+}
+
+// With a farm book, the issuer writes its entries pending and certifies
+// at once; a verifier judges by sealed position only, so the new device
+// counts for it once the queue seals, at the book's position, in the
+// book's order.
+func TestIndexKeptInTheBook(t *testing.T) {
+	b := inBook(studio(t), nil)
+	d := newDev(t)
+	c := b.signIn(d, "dana", danaSub)
+	if c.Order != people.OrderPending || c.Position == 0 {
+		t.Fatalf("certified at %d in order %q", c.Position, c.Order)
+	}
+	if _, err := b.index.DevicesAt(context.Background(), c.Position, b.now); !errors.Is(err, farmbook.ErrNotSealed) {
+		t.Errorf("a verifier at a pending position: %v", err)
+	}
+	b.seal()
+	devs, err := b.index.DevicesAt(context.Background(), b.sealedAt(), b.now)
+	if err != nil || countPerson(devs, "dana") != 1 {
+		t.Fatalf("dana's devices once sealed: %d, %v", countPerson(devs, "dana"), err)
+	}
+	es, _, _ := b.index.Entries(context.Background(), 0)
+	for _, e := range es {
+		if e.Order != people.OrderBook {
+			t.Errorf("entry %d is in order %q", e.Position, e.Order)
+		}
+	}
+	var cfg people.Config
+	b.caller = "dana"
+	if code, body := b.call("GET", "/v1/people/config", "", nil, &cfg); code != http.StatusOK || cfg.Order != people.OrderBook {
+		t.Errorf("config: %d %s", code, body)
+	}
+	var page people.IndexPage
+	if code, body := b.call("GET", "/v1/people/index", "", nil, &page); code != http.StatusOK || page.Order != people.OrderBook || len(page.Signed) == 0 {
+		t.Errorf("the index page names the book's signed head: %d %s", code, body)
+	}
+	// The issuer renews on the book as on its own index.
+	b.now = b.now.Add(6 * time.Hour)
+	if code, body, _ := b.renew(d, "dana", danaSub); code != http.StatusOK {
+		t.Errorf("renew: %d %s", code, body)
+	}
+}
+
+// A removal pending the seal counts for the issuer, which refuses the
+// removed device's next act at once; a verifier still judges at the
+// sealed position, where the device is in force, until the queue seals
+// the removal. In force at a position is right on both sides of it.
+func TestPendingRemovalCountsForTheIssuerNotAVerifier(t *testing.T) {
+	b := inBook(studio(t), nil)
+	d, other := newDev(t), newDev(t)
+	k := b.key(d, b.signIn(d, "noor", noorSub))
+	ko := b.key(other, b.signIn(other, "noor", noorSub))
+	b.seal()
+	before := b.sealedAt()
+	approve := b.act(k, "noor", "approve", provenance.Subject{}, nil, false)
+	if err := b.checkAt(approve, before); err != nil {
+		t.Fatalf("before the removal: %v", err)
+	}
+	code, body, rm := b.book(b.act(ko, "noor", "remove-device", deviceSubject(d.id), nil, false), "")
+	if code != http.StatusOK || rm.Entry.Order != people.OrderPending {
+		t.Fatalf("remove: %d %s", code, body)
+	}
+	// The issuer: d is out of force now.
+	if code, body, _ := b.book(b.act(k, "noor", "remove-device", deviceSubject(other.id), nil, false), ""); code != http.StatusForbidden || !strings.Contains(body, "no device record in force") {
+		t.Errorf("the removed device acted while its removal was pending: %d %s", code, body)
+	}
+	// A verifier: still in force at the sealed position.
+	if err := b.checkAt(approve, b.sealedAt()); err != nil {
+		t.Errorf("a verifier before the removal is sealed: %v", err)
+	}
+	b.seal()
+	if err := b.checkAt(approve, b.sealedAt()); !errors.Is(err, people.ErrNotInForce) {
+		t.Errorf("a verifier once the removal is sealed: %v", err)
+	}
+	if err := b.checkAt(approve, before); err != nil {
+		t.Errorf("a verifier at a position before the removal: %v", err)
+	}
+}
+
+// An index the issuer kept before the book is adopted at the book's first
+// seal: its entries unchanged, at the same positions, under their own prev
+// links and the issuer's order; the issuer waits until then; and what was
+// in force stays in force.
+func TestIndexAdoptedWithItsOrder(t *testing.T) {
+	r := studio(t)
+	d, other := newDev(t), newDev(t)
+	r.signIn(d, "dana", danaSub)
+	ko := r.key(other, r.signIn(other, "noor", noorSub))
+	if code, body, _ := r.book(r.act(ko, "noor", "remove-device", deviceSubject(other.id), nil, false), ""); code != http.StatusOK {
+		t.Fatalf("remove: %d %s", code, body)
+	}
+	legacy := r.index
+	old, oldIDs, err := legacy.Entries(context.Background(), 0)
+	if err != nil || len(old) < 5 {
+		t.Fatalf("the index before the book: %d entries, %v", len(old), err)
+	}
+	was, _ := legacy.DevicesAt(context.Background(), int64(len(old)), r.now)
+	b := inBook(r, legacy)
+	if code, body := b.call("GET", "/v1/people/devices", "", nil, nil); code != http.StatusServiceUnavailable || !strings.Contains(body, "adopted") {
+		t.Errorf("the issuer before the adoption: %d %s", code, body)
+	}
+	res := b.seal()
+	if res.Segment.Adopted == nil || res.Segment.Adopted.Head != oldIDs[len(oldIDs)-1] || res.Segment.Last != int64(len(old)) {
+		t.Fatalf("the first segment: %+v", res.Segment.BookSegmentPredicate)
+	}
+	es, ids, err := b.index.Entries(context.Background(), 0)
+	if err != nil || len(es) != len(old) {
+		t.Fatalf("adopted %d entries, %v", len(es), err)
+	}
+	for k := range es {
+		if ids[k] != oldIDs[k] || es[k].Position != int64(k+1) || es[k].Order != people.OrderIssuer {
+			t.Errorf("entry %d: %.16s at %d in order %q, was %.16s", k, ids[k], es[k].Position, es[k].Order, oldIDs[k])
+		}
+	}
+	now, _ := b.index.DevicesAt(context.Background(), b.sealedAt(), b.now)
+	if countPerson(now, "dana") != countPerson(was, "dana") || countPerson(now, "noor") != 0 {
+		t.Errorf("in force after the adoption: dana %d, noor %d", countPerson(now, "dana"), countPerson(now, "noor"))
+	}
+	// The next entry follows the adopted ones, in the book's order.
+	b.signIn(newDev(t), "noor", noorSub)
+	b.seal()
+	after, _, _ := b.index.Entries(context.Background(), int64(len(old)))
+	if len(after) == 0 || after[0].Position != int64(len(old))+1 || after[0].Prev != oldIDs[len(oldIDs)-1] || after[0].Order != people.OrderBook {
+		t.Fatalf("the entry after the adopted ones: %+v", after)
+	}
+}

@@ -14,6 +14,7 @@ import (
 
 	"github.com/Avalanche-io/c4"
 
+	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/schema"
 )
@@ -22,19 +23,34 @@ import (
 // provider keys their ID tokens were signed with, and the acts that change
 // who may sign (removals, the sign-in provider setting, a one-person
 // farm's browser codes and countersignatures, a second device's
-// approval), in the order the issuer booked them. Slice 2's farm book
-// takes it unchanged; until then its order is the issuer's own, and every
-// entry says so (order: issuer), not yet the queue-sealed book's.
+// approval), in order.
 //
 // Each entry is canonical JSON (RFC 8785), kept in the Store by its C4 ID,
 // and names the entry before it by its ID, so changing any past entry
-// changes every ID after it. The Head is the one mutable pointer: the last
-// entry's ID and position. The records an entry books (a device record, an
-// act, a provider's key) are in the same Store by their own C4 IDs.
+// changes every ID after it. The records an entry books (a device record,
+// an act, a provider's key) are in the same Store by their own C4 IDs.
+//
+// On a farm that keeps a farm book (internal/farmbook, Index.Book), the
+// index is kept in the book: the issuer writes its entries there, pending,
+// the queue checks each against its record and seals it, and a position is
+// the book's. "In force" is book order. Before an entry is sealed the
+// issuer judges against the sealed book and the pending entries; a
+// verifier (DevicesAt, CheckAct) judges by sealed position only. The first
+// seal adopts an index kept before the book (Adoption), unchanged.
+//
+// On a farm without one, the index is the issuer's own: its Head is the
+// one mutable pointer, the last entry's ID and position, and every entry
+// says its order is the issuer's (order: issuer), not the queue-sealed
+// book's.
 
-// OrderIssuer is every entry's order until the farm book adopts the
-// index: the people's issuer's own, not yet the queue-sealed book's.
-const OrderIssuer = "issuer"
+// OrderIssuer is an entry's order on a farm without a farm book, and of
+// the entries a book adopted: the people's issuer's own. OrderBook is a
+// sealed entry's in the book, OrderPending one written for its seal.
+const (
+	OrderIssuer  = farmbook.OrderIssuer
+	OrderBook    = farmbook.OrderBook
+	OrderPending = farmbook.OrderPending
+)
 
 // What an entry books.
 const (
@@ -272,10 +288,29 @@ type Index struct {
 	Roots *x509.CertPool
 	Store Store
 	Head  Head
+	// Book is the farm book the index is kept in, or nil for the issuer's
+	// own. With a book, Store is the book's store too, so the queue finds
+	// the records the entries cite; Head is the index kept before the book,
+	// read only to wait for its adoption.
+	Book *farmbook.Reader
 
-	mu      sync.Mutex
+	mu sync.Mutex
+	// entries are the entries read, sealed in the book's order with a book,
+	// with their IDs; pend are the pending ones at provisional positions.
 	entries []*Entry
 	ids     []string
+	pend    []*Entry
+	pendIDs []string
+	// sealed is the last sealed position, and pos the last position read,
+	// pending entries (any writer's) counted. Without a book both are the
+	// last entry's.
+	sealed, pos int64
+	// state is the book's State as last read: an append moves it.
+	state farmbook.State
+	// head is the book's head segment as last read.
+	head *farmbook.Segment
+	// pendActs are the payload hashes of the acts pending entries book.
+	pendActs map[string]bool
 	// devices are the device records the index books, by record ID.
 	devices map[string]*schema.Device
 	// raw are the device records' bundles, by record ID.
@@ -302,6 +337,10 @@ func (x *Index) Sync(ctx context.Context) error {
 }
 
 func (x *Index) sync(ctx context.Context) error {
+	if x.Book != nil {
+		return x.syncBook(ctx)
+	}
+	defer func() { x.sealed, x.pos = int64(len(x.entries)), int64(len(x.entries)) }()
 	h, err := x.Head.Read(ctx)
 	if err != nil {
 		return err
@@ -342,7 +381,7 @@ func (x *Index) sync(ctx context.Context) error {
 		return fmt.Errorf("%w: entry %d names %.16s before it, not %.16s: the index was rewritten", ErrIndex, oldest.Position, oldest.Prev, last)
 	}
 	for k := len(news) - 1; k >= 0; k-- {
-		if err := x.load(ctx, news[k]); err != nil {
+		if err := x.load(ctx, news[k], false); err != nil {
 			return fmt.Errorf("%w: entry %d: %v", ErrIndex, news[k].Position, err)
 		}
 		x.entries = append(x.entries, news[k])
@@ -385,11 +424,13 @@ func (x *Index) entry(ctx context.Context, id string) (*Entry, error) {
 // and params the entry's device, person, code, record and from; an
 // approval is confirmed; a code's or an approval's expiry is its TTL from
 // when it was booked, and it was booked within ActSkew of being signed.
-// A setting is the install's, and books no record.
-func (x *Index) load(ctx context.Context, e *Entry) error {
+// A setting is the install's, and books no record. Everything before the
+// entry is read at its position less one: the entries sealed before it,
+// and, for a pending entry, the pending ones before it.
+func (x *Index) load(ctx context.Context, e *Entry, pending bool) error {
 	switch e.Kind {
 	case KindFlag:
-		if e.Record != "" || e.Flag != FlagTwoPlaces || x.at(int64(len(x.entries)))[e.Device] == nil {
+		if e.Record != "" || e.Flag != FlagTwoPlaces || x.at(e.Position - 1)[e.Device] == nil {
 			return fmt.Errorf("a flag is %s, of a device the index books, and books no record", FlagTwoPlaces)
 		}
 		return nil
@@ -436,7 +477,7 @@ func (x *Index) load(ctx context.Context, e *Entry) error {
 			return fmt.Errorf("the entry names key %q of %q, its JWK %q", e.KeyID, e.Issuer, k.KeyID)
 		}
 	default:
-		return x.loadAct(e, b)
+		return x.loadAct(e, b, pending)
 	}
 	return nil
 }
@@ -446,7 +487,7 @@ var actKinds = map[string]string{KindRemoval: ActRemoveDevice, KindCode: ActBrow
 
 // loadAct checks an act entry against its act: still the act it was,
 // signed as it was, and saying what the entry says.
-func (x *Index) loadAct(e *Entry, b []byte) error {
+func (x *Index) loadAct(e *Entry, b []byte, pending bool) error {
 	verb, ok := actKinds[e.Kind]
 	if !ok {
 		return fmt.Errorf("an entry of kind %q", e.Kind)
@@ -490,7 +531,7 @@ func (x *Index) loadAct(e *Entry, b []byte) error {
 	switch e.Kind {
 	case KindRemoval:
 		if device != "" {
-			d := x.at(int64(len(x.entries)))[device]
+			d := x.at(e.Position - 1)[device]
 			err = says(e.Device == device && params["person"] == "" && d != nil && d.person() == e.Person, "the device and whose it is")
 		} else {
 			err = says(onFarm && e.Device == "" && params["person"] == e.Person, "whose devices")
@@ -509,13 +550,17 @@ func (x *Index) loadAct(e *Entry, b []byte) error {
 		return err
 	}
 	hash := provenance.PayloadHash(v.Payload)
-	if x.acts[hash] {
+	if x.acts[hash] || x.pendActs[hash] {
 		return fmt.Errorf("act %.16s is booked twice", hash)
 	}
-	if x.acts == nil {
-		x.acts = map[string]bool{}
+	acts := &x.acts
+	if pending {
+		acts = &x.pendActs
 	}
-	x.acts[hash] = true
+	if *acts == nil {
+		*acts = map[string]bool{}
+	}
+	(*acts)[hash] = true
 	return nil
 }
 
@@ -560,10 +605,14 @@ const maxAppendTries = 8
 // another writer moves the head first, it reads the index again and
 // builds again, so build's checks always see what came before. The
 // records go to the store before the entries, and the entries before the
-// head, so the head never names what the store lacks.
+// head, so the head never names what the store lacks. With a farm book the
+// entries go to the book instead (appendBook).
 func (x *Index) append(ctx context.Context, now time.Time, sign func(context.Context) (*provenance.Signer, error), build func() ([]pending, error)) ([]*Entry, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
+	if x.Book != nil {
+		return x.appendBook(ctx, now, build)
+	}
 	for try := 0; ; try++ {
 		if err := x.sync(ctx); err != nil {
 			return nil, err
@@ -576,7 +625,7 @@ func (x *Index) append(ctx context.Context, now time.Time, sign func(context.Con
 		if err != nil {
 			return nil, err
 		}
-		if from.Position != int64(len(x.entries)) {
+		if from.Position != x.pos {
 			continue
 		}
 		prev, pos := from.ID, from.Position
@@ -618,24 +667,39 @@ func (x *Index) append(ctx context.Context, now time.Time, sign func(context.Con
 			return nil, err
 		}
 		for k, e := range out {
-			if err := x.load(ctx, e); err != nil {
+			if err := x.load(ctx, e, false); err != nil {
 				return nil, err
 			}
 			x.entries = append(x.entries, e)
 			x.ids = append(x.ids, ids[k])
 		}
+		x.sealed, x.pos = int64(len(x.entries)), int64(len(x.entries))
 		return out, nil
 	}
 }
 
 // Position is the index's position now: its last entry's, 0 when empty.
+// With a farm book it counts the entries pending the seal, at provisional
+// positions; Sealed is the last sealed position.
 func (x *Index) Position(ctx context.Context) (int64, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	if err := x.sync(ctx); err != nil {
 		return 0, err
 	}
-	return int64(len(x.entries)), nil
+	return x.pos, nil
+}
+
+// Sealed is the last position the queue sealed: what a verifier judges at.
+// Without a farm book, every entry the issuer booked is its own order's,
+// and Sealed is Position.
+func (x *Index) Sealed(ctx context.Context) (int64, error) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if err := x.sync(ctx); err != nil {
+		return 0, err
+	}
+	return x.sealed, nil
 }
 
 // device is one device as the index has it at a position: its latest
@@ -661,7 +725,7 @@ const Lapse = 90 * 24 * time.Hour
 // only the devices enrolled before it.
 func (x *Index) at(pos int64) map[string]*device {
 	devs := map[string]*device{}
-	for _, e := range x.entries[:min(pos, int64(len(x.entries)))] {
+	for _, e := range x.upTo(pos) {
 		switch e.Kind {
 		case KindDevice:
 			d := devs[e.Device]
@@ -709,11 +773,16 @@ func (x *Index) inForce(pos int64, at time.Time) map[string]*device {
 
 // DevicesAt is the device records in force at position pos and time at,
 // the latest of each device: what CheckTouchKey reads, and what a verifier
-// checks a person's act against at the act's position.
+// checks a person's act against at the act's position. With a farm book,
+// pos is a book position, judged by sealed entries only: a position past
+// the sealed head is farmbook.ErrNotSealed.
 func (x *Index) DevicesAt(ctx context.Context, pos int64, at time.Time) ([]*schema.Device, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	if err := x.sync(ctx); err != nil {
+		return nil, err
+	}
+	if err := x.verifiable(pos); err != nil {
 		return nil, err
 	}
 	var out []*schema.Device
@@ -733,14 +802,27 @@ var ErrNotInForce = errors.New("no device record in force")
 // position pos, as of the act's signedAt: its device key's record is the
 // signer's, on this farm, and is no touch key; and a confirmed act's
 // touch key is that person's touch key for that device (CheckTouchKey).
-// An act that isn't a person's passes.
+// An act that isn't a person's passes. With a farm book, as DevicesAt,
+// only sealed entries count.
 func (x *Index) CheckAct(ctx context.Context, v *provenance.Verified, pos int64) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	if err := x.sync(ctx); err != nil {
 		return err
 	}
+	if err := x.verifiable(pos); err != nil {
+		return err
+	}
 	return x.checkAct(v, pos)
+}
+
+// verifiable refuses a verifier's position past the sealed head, where
+// pending entries would count: a verifier judges by sealed position only.
+func (x *Index) verifiable(pos int64) error {
+	if x.Book != nil && pos > x.sealed {
+		return fmt.Errorf("%w: position %d, the farm book is sealed to %d", farmbook.ErrNotSealed, pos, x.sealed)
+	}
+	return nil
 }
 
 // checkAct is CheckAct on the index as this process has read it.
@@ -773,21 +855,33 @@ func (x *Index) checkAct(v *provenance.Verified, pos int64) error {
 	return provenance.CheckTouchKey(v, devs)
 }
 
-// Entries returns the entries after position from, with their IDs.
+// Entries returns the entries after position from, with their IDs: with a
+// farm book, the sealed ones, at their book positions.
 func (x *Index) Entries(ctx context.Context, from int64) ([]*Entry, []string, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	if err := x.sync(ctx); err != nil {
 		return nil, nil, err
 	}
-	from = max(0, min(from, int64(len(x.entries))))
-	return append([]*Entry(nil), x.entries[from:]...), append([]string(nil), x.ids[from:]...), nil
+	var es []*Entry
+	var ids []string
+	for k, e := range x.entries {
+		if e.Position > from {
+			es, ids = append(es, e), append(ids, x.ids[k])
+		}
+	}
+	return es, ids, nil
 }
 
-// entryByID is the entry with this C4 ID.
+// entryByID is the entry with this C4 ID, sealed or pending.
 func (x *Index) entryByID(id string) (*Entry, bool) {
 	for k, e := range x.entries {
 		if x.ids[k] == id {
+			return e, true
+		}
+	}
+	for k, e := range x.pend {
+		if x.pendIDs[k] == id {
 			return e, true
 		}
 	}
@@ -796,7 +890,7 @@ func (x *Index) entryByID(id string) (*Entry, bool) {
 
 // books reports whether an entry books the record with this C4 ID.
 func (x *Index) books(id string) bool {
-	for _, e := range x.entries {
+	for _, e := range x.all() {
 		if e.Record == id {
 			return true
 		}

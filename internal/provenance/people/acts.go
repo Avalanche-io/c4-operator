@@ -139,7 +139,7 @@ func (i *Issuer) takeAct(r *http.Request, data []byte) (*Booked, error) {
 	// before refuses the removed device's act. The act is taken once only
 	// after they pass, so a refused act isn't used up.
 	es, err := x.append(ctx, now, i.sign, func() ([]pending, error) {
-		if err := x.checkAct(v, int64(len(x.entries))); err != nil {
+		if err := x.checkAct(v, x.pos); err != nil {
 			return nil, err
 		}
 		// The index is shared and lasting, so an act it books is refused a
@@ -193,7 +193,7 @@ func (i *Issuer) removal(r *http.Request, by, device string, farmSubject bool, p
 	return func() (*Entry, error) {
 		person := whole
 		if device != "" {
-			d := x.at(int64(len(x.entries)))[device]
+			d := x.at(x.pos)[device]
 			if d == nil || d.removed {
 				return nil, refuse(http.StatusNotFound, "device %.16s is not enrolled here, or is removed already", device)
 			}
@@ -234,7 +234,7 @@ func (i *Issuer) ownerAct(r *http.Request, v *provenance.Verified, verb, by, dev
 		if owner == nil || owner.Predicate.Person != by || i.owner(r.Context()) != by {
 			return refuse(http.StatusForbidden, "%s is the one-person farm owner's act, and %s is not its enrolled owner", verb, by)
 		}
-		for _, d := range x.inForce(int64(len(x.entries)), now) {
+		for _, d := range x.inForce(x.pos, now) {
 			if d.id == v.Device && d.rec.Predicate.Evidence != schema.EvidenceInstaller {
 				return refuse(http.StatusForbidden, "%s is signed with the owner's own key from c4 farm up, not device %.16s", verb, v.Device)
 			}
@@ -267,7 +267,7 @@ func (i *Issuer) ownerAct(r *http.Request, v *provenance.Verified, verb, by, dev
 			case d.Predicate.Evidence != schema.EvidenceOwner || d.Predicate.Person != by:
 				return nil, refuse(http.StatusForbidden, "the owner countersigns a browser their code enrolled, and %.16s is not one", record)
 			}
-			for _, c := range x.entries {
+			for _, c := range x.all() {
 				if c.Kind == KindCountersign && c.Of == record {
 					return nil, refuse(http.StatusConflict, "record %.16s is countersigned already", record)
 				}

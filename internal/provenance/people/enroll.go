@@ -163,7 +163,7 @@ func (i *Issuer) certify(pub *ecdsa.PublicKey, person, device string, e *Entry, 
 		return nil, err
 	}
 	return &Certified{Farm: i.Farm(), Identity: provenance.CertIdentity(leaf), Device: device, Record: e.Record, Position: e.Position,
-		Order: OrderIssuer, Chain: [][]byte{leaf.Raw, i.CA.Cert.Raw}, Expires: leaf.NotAfter}, nil
+		Order: e.Order, Chain: [][]byte{leaf.Raw, i.CA.Cert.Raw}, Expires: leaf.NotAfter}, nil
 }
 
 // handleEnroll certifies a new device on an ID token, or on a booked
@@ -341,7 +341,7 @@ func (i *Issuer) renew(r *http.Request, e *Enrolment) (*Certified, error) {
 	x.mu.Lock()
 	err = x.sync(ctx)
 	var evidence string
-	if d := x.inForce(int64(len(x.entries)), now)[device]; err == nil && d != nil {
+	if d := x.inForce(x.pos, now)[device]; err == nil && d != nil {
 		evidence = d.rec.Predicate.Evidence
 	}
 	x.mu.Unlock()
@@ -368,7 +368,7 @@ func (i *Issuer) renew(r *http.Request, e *Enrolment) (*Certified, error) {
 	}
 	addr := i.addr(r)
 	es, err := x.append(ctx, now, i.sign, func() ([]pending, error) {
-		d := x.at(int64(len(x.entries)))[device]
+		d := x.at(x.pos)[device]
 		switch {
 		case d == nil:
 			return nil, refuse(http.StatusNotFound, "device %.16s is not enrolled: enrol it", device)
@@ -383,7 +383,7 @@ func (i *Issuer) renew(r *http.Request, e *Enrolment) (*Certified, error) {
 		if p.Person != old.Person || p.TouchFor != old.TouchFor {
 			return nil, refuse(http.StatusForbidden, "device %.16s is %s's (touchFor %q); the request says %s's (%q)", device, old.Person, old.TouchFor, p.Person, p.TouchFor)
 		}
-		if old.TouchFor != "" && x.inForce(int64(len(x.entries)), now)[old.TouchFor] == nil {
+		if old.TouchFor != "" && x.inForce(x.pos, now)[old.TouchFor] == nil {
 			return nil, refuse(http.StatusForbidden, "touch key %.16s's device %.16s is not in force", device, old.TouchFor)
 		}
 		q := *p
@@ -427,7 +427,7 @@ func (i *Issuer) renew(r *http.Request, e *Enrolment) (*Certified, error) {
 // sign-ins in force at the record's position are the ones it rests on.
 func (x *Index) signInsBooked(in *signIn) []pending {
 	var ps []pending
-	if id := c4id(in.signIns); x.signInsAt(int64(len(x.entries))) != id {
+	if id := c4id(in.signIns); x.signInsAt(x.pos) != id {
 		ps = append(ps, pending{entry: &Entry{Kind: KindSignIns}, record: in.signIns})
 	}
 	if !x.booked(KindProviderKey, in.keyID) {
@@ -439,7 +439,7 @@ func (x *Index) signInsBooked(in *signIn) []pending {
 // signInsAt is the C4 ID of the sign-ins in force at position pos, or "".
 func (x *Index) signInsAt(pos int64) string {
 	id := ""
-	for _, e := range x.entries[:min(pos, int64(len(x.entries)))] {
+	for _, e := range x.upTo(pos) {
 		if e.Kind == KindSignIns {
 			id = e.Record
 		}
@@ -450,7 +450,7 @@ func (x *Index) signInsAt(pos int64) string {
 // unseen refuses a key the index has seen before: one in force renews,
 // and a removed or lapsed one never comes back.
 func (x *Index) unseen(device string) error {
-	d := x.at(int64(len(x.entries)))[device]
+	d := x.at(x.pos)[device]
 	switch {
 	case d == nil:
 		return nil
@@ -466,7 +466,7 @@ func (x *Index) touchesFor(p *schema.DevicePredicate, now time.Time) error {
 	if p.TouchFor == "" {
 		return nil
 	}
-	d := x.inForce(int64(len(x.entries)), now)[p.TouchFor]
+	d := x.inForce(x.pos, now)[p.TouchFor]
 	switch {
 	case d == nil:
 		return refuse(http.StatusForbidden, "a touch key confirms for a device in force, and %.16s isn't", p.TouchFor)
@@ -483,7 +483,7 @@ func (x *Index) booked(kind, record string) bool { return x.find(kind, record) !
 
 // find is the entry of this kind that books record.
 func (x *Index) find(kind, record string) *Entry {
-	for _, e := range x.entries {
+	for _, e := range x.all() {
 		if e.Kind == kind && e.Record == record {
 			return e
 		}
@@ -494,7 +494,7 @@ func (x *Index) find(kind, record string) *Entry {
 // settingAt is the sign-in provider setting in force at position pos.
 func (x *Index) settingAt(pos int64) *Setting {
 	var s *Setting
-	for _, e := range x.entries[:min(pos, int64(len(x.entries)))] {
+	for _, e := range x.upTo(pos) {
 		if e.Kind == KindSetting {
 			s = &Setting{Provider: Provider{Issuer: e.Issuer, ClientID: e.ClientID}, Grade: e.Grade, Position: e.Position, Record: e.Record}
 		}
@@ -510,7 +510,7 @@ func (x *Index) settingAt(pos int64) *Setting {
 func (i *Issuer) setting(ctx context.Context) (*Setting, error) {
 	x := i.Index
 	stands := func() (*Setting, bool) {
-		s := x.settingAt(int64(len(x.entries)))
+		s := x.settingAt(x.pos)
 		return s, i.Provider.Issuer == "" || s != nil && (s.Grade != GradeInstall || s.Provider == i.Provider)
 	}
 	x.mu.Lock()
@@ -531,13 +531,13 @@ func (i *Issuer) setting(ctx context.Context) (*Setting, error) {
 	}
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	return x.settingAt(int64(len(x.entries))), nil
+	return x.settingAt(x.pos), nil
 }
 
 // ownerRecord is a one-person farm's owner key's first record, the one
 // the installer path made, or nil.
 func (x *Index) ownerRecord() *schema.Device {
-	for _, e := range x.entries {
+	for _, e := range x.all() {
 		if d := x.devices[e.Record]; e.Kind == KindDevice && d != nil && d.Predicate.Evidence == schema.EvidenceInstaller && d.Predicate.TouchFor == "" {
 			return d
 		}

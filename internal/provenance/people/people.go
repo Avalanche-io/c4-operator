@@ -326,9 +326,9 @@ func (i *Issuer) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	x := i.Index
 	x.mu.Lock()
-	pos, enrolled := int64(len(x.entries)), x.ownerRecord() != nil
+	pos, enrolled := x.pos, x.ownerRecord() != nil
 	x.mu.Unlock()
-	writeJSON(w, http.StatusOK, Config{Farm: i.Farm(), Order: OrderIssuer, Position: pos, Provider: set, WebAuthn: i.WebAuthn,
+	writeJSON(w, http.StatusOK, Config{Farm: i.Farm(), Order: x.Order(), Position: pos, Provider: set, WebAuthn: i.WebAuthn,
 		Nonce:  "the device ID: the C4 ID of the key's DER SubjectPublicKeyInfo, as a string (c4...)",
 		StepUp: StepUpConfig{MaxAge: age.String(), ACR: append(append([]string{}, DefaultStepUpACR...), i.StepUp.ACR...), AMR: "mfa, or factors of two kinds (RFC 8176): known (pwd, pin, kba), held (otp, sms, tel, hwk, swk, sc, pop), being (fpt, face, iris, retina, vbm)"},
 		Owner:  i.owner(r.Context()), OwnerEnrolled: enrolled, LeafTTL: LeafTTL.String(), Lapse: Lapse.String()})
@@ -418,14 +418,26 @@ func (i *Issuer) handleIndex(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	h, err := i.Index.Head.Read(r.Context())
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	page := IndexPage{Farm: i.Farm(), Order: OrderIssuer, Position: from + int64(len(es)), Entries: []IndexEntry{}}
-	if h.Position == page.Position {
-		page.Head, page.Signed = h.ID, h.Signed
+	x := i.Index
+	page := IndexPage{Farm: i.Farm(), Order: x.Order(), Position: from + int64(len(es)), Entries: []IndexEntry{}}
+	if x.Book != nil {
+		// The book's head segment, signed by the queue: a client keeps it
+		// (farmbook.LastHead) and refuses one that goes back.
+		x.mu.Lock()
+		page.Position = x.sealed
+		if x.head != nil {
+			page.Head, page.Signed = x.head.ID, x.head.Signed
+		}
+		x.mu.Unlock()
+	} else {
+		h, err := x.Head.Read(r.Context())
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		if h.Position == page.Position {
+			page.Head, page.Signed = h.ID, h.Signed
+		}
 	}
 	for k := range es {
 		e, red := i.redact(r.Context(), who, es[k])
@@ -524,7 +536,7 @@ func (i *Issuer) handleDevices(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	pos := int64(len(x.entries))
+	pos := x.pos
 	out := []DeviceView{}
 	for _, d := range x.inForce(pos, i.now()) {
 		p := d.rec.Predicate
@@ -534,7 +546,7 @@ func (i *Issuer) handleDevices(w http.ResponseWriter, r *http.Request) {
 		dv := DeviceView{Device: d.id, Record: d.record, Person: p.Person, Kind: p.Kind, Label: p.Label, Protection: p.Protection,
 			Evidence: p.Evidence, TouchFor: p.TouchFor, Enrolled: d.first, Renewed: d.last, RenewedAt: d.lastAt.UTC().Format(time.RFC3339),
 			Countersigned: d.countersigns > 0}
-		for _, e := range x.entries {
+		for _, e := range x.all() {
 			if e.Kind == KindFlag && e.Device == d.id {
 				f, _ := i.redact(r.Context(), who, e)
 				dv.Flags = append(dv.Flags, f)
