@@ -38,7 +38,7 @@ func TestEnrolOnASignIn(t *testing.T) {
 		t.Errorf("the leaf lives %s", got)
 	}
 	keys, devs := r.entries(people.KindProviderKey), r.entries(people.KindDevice)
-	if len(keys) != 1 || len(devs) != 1 || keys[0].Position != 2 || devs[0].Position != 3 || devs[0].Prev == "" {
+	if len(keys) != 1 || len(devs) != 1 || keys[0].Position != 3 || devs[0].Position != 4 || devs[0].Prev == "" {
 		t.Fatalf("index: keys %+v devices %+v", keys, devs)
 	}
 	if set := r.entries(people.KindSetting); len(set) != 1 || set[0].Grade != people.GradeInstall || set[0].Issuer != ssoIssuer {
@@ -318,5 +318,32 @@ func TestTouchForNamesAPlainDeviceInForce(t *testing.T) {
 		if code, body := enrol(touchFor); code != http.StatusForbidden {
 			t.Errorf("touchFor %s: %d %s", name, code, body)
 		}
+	}
+}
+
+// The sign-ins a subject is matched against are booked in the index
+// before the device record certified on them, and again only when they
+// change, so a change is visible and the sign-ins in force at a record's
+// position are the ones it rests on.
+func TestSignInsBookedWhenTheyChange(t *testing.T) {
+	r := studio(t)
+	r.signIn(newDev(t), "dana", danaSub)
+	r.signIn(newDev(t), "dana", danaSub)
+	ins := r.entries(people.KindSignIns)
+	if len(ins) != 1 || ins[0].Position != 2 {
+		t.Fatalf("sign-ins booked %+v", ins)
+	}
+	r.iss.SignIns.(people.StaticSignIns)["lee"] = []people.SignIn{{Issuer: ssoIssuer, Subject: "00u-lee-91b0"}}
+	r.signIn(newDev(t), "dana", danaSub)
+	ins = r.entries(people.KindSignIns)
+	if len(ins) != 2 || ins[1].Record == ins[0].Record {
+		t.Fatalf("changed sign-ins booked %+v", ins)
+	}
+	b, _ := r.store.Get(context.Background(), ins[1].Record)
+	if !strings.Contains(string(b), "00u-lee-91b0") {
+		t.Errorf("the booked sign-ins: %s", b)
+	}
+	if err := r.reread(); err != nil {
+		t.Error(err)
 	}
 }

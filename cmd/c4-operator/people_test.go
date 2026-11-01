@@ -96,11 +96,10 @@ func TestSignInsSecret(t *testing.T) {
 		"dana": []byte("https://sso.studio.example 00u-dana-7f3a\nhttps://login.studio.example dana-2\n"),
 		"noor": []byte("https://sso.studio.example\n"),
 	})
-	ctx := context.Background()
-	if p, _ := ins.Person(ctx, "https://login.studio.example", "dana-2"); p != "dana" {
+	if p := ins.Person("https://login.studio.example", "dana-2"); p != "dana" {
 		t.Errorf("dana's second sign-in is %q's", p)
 	}
-	if p, _ := ins.Person(ctx, "https://sso.studio.example", "00u-dana-7f3a"); p != "dana" {
+	if p := ins.Person("https://sso.studio.example", "00u-dana-7f3a"); p != "dana" {
 		t.Errorf("dana's sign-in is %q's", p)
 	}
 	if len(ins["noor"]) != 0 {

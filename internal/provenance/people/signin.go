@@ -1,6 +1,7 @@
 package people
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,25 +41,66 @@ type SignIn struct {
 	Subject string `json:"subject"`
 }
 
-// SignIns finds whose sign-in a subject is: ORGANIZATION's Party signIns,
-// the provider subject IDs that are each person. Nothing else names a
-// person, the email least of all, which a provider may let people change.
+// SignIns are ORGANIZATION's Party signIns: the provider subject IDs that
+// are each person. Nothing else names a person, the email least of all,
+// which a provider may let people change. The issuer books their content
+// in the index whenever it changes (KindSignIns), so a change is visible,
+// and a verifier reads the sign-ins in force at a record's position.
 type SignIns interface {
-	// Person is the person whose sign-ins hold this subject at this
-	// provider, or "".
-	Person(ctx context.Context, issuer, subject string) (string, error)
+	// Load reads every person's sign-ins as they are now.
+	Load(ctx context.Context) (StaticSignIns, error)
 }
 
 // StaticSignIns is each person's sign-ins, by person.
 type StaticSignIns map[string][]SignIn
 
-func (s StaticSignIns) Person(_ context.Context, issuer, subject string) (string, error) {
+// Load is the sign-ins themselves.
+func (s StaticSignIns) Load(context.Context) (StaticSignIns, error) { return s, nil }
+
+// Person is the person whose sign-ins hold this subject at this provider,
+// or "".
+func (s StaticSignIns) Person(issuer, subject string) string {
 	for person, ins := range s {
 		if slices.Contains(ins, SignIn{Issuer: issuer, Subject: subject}) {
-			return person, nil
+			return person
 		}
 	}
-	return "", nil
+	return ""
+}
+
+// canonical is the sign-ins as the index books them: canonical JSON, each
+// person's sign-ins sorted, no person without one.
+func (s StaticSignIns) canonical() []byte {
+	m := map[string][]SignIn{}
+	for person, ins := range s {
+		if len(ins) == 0 {
+			continue
+		}
+		sorted := slices.Clone(ins)
+		slices.SortFunc(sorted, func(a, b SignIn) int {
+			if c := strings.Compare(a.Issuer, b.Issuer); c != 0 {
+				return c
+			}
+			return strings.Compare(a.Subject, b.Subject)
+		})
+		m[person] = slices.Compact(sorted)
+	}
+	raw, _ := json.Marshal(m)
+	b, _ := schema.Canonical(raw) // strings only, so this cannot fail
+	return b
+}
+
+// parseSignIns reads booked sign-ins, which must be in their canonical
+// form.
+func parseSignIns(b []byte) (StaticSignIns, error) {
+	var s StaticSignIns
+	if err := json.Unmarshal(b, &s); err != nil {
+		return nil, fmt.Errorf("booked sign-ins: %w", err)
+	}
+	if !bytes.Equal(s.canonical(), b) {
+		return nil, errors.New("booked sign-ins are not in their canonical form")
+	}
+	return s, nil
 }
 
 // TokenAge is how long ago an ID token may have been issued: enrolment
@@ -124,6 +167,8 @@ type signIn struct {
 	// that JWK and kid its key ID at the provider.
 	keyID, kid string
 	jwk        []byte
+	// signIns are the sign-ins the subject was matched against, canonical.
+	signIns []byte
 }
 
 // claims are the claims beyond what go-oidc reads.

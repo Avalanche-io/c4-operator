@@ -192,15 +192,15 @@ type secretSignIns struct {
 	ns   string
 }
 
-func (s *secretSignIns) Person(ctx context.Context, issuer, subject string) (string, error) {
+func (s *secretSignIns) Load(ctx context.Context) (people.StaticSignIns, error) {
 	sec, err := s.kube.CoreV1().Secrets(s.ns).Get(ctx, signInsSecret, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		return "", nil
+		return people.StaticSignIns{}, nil
 	}
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return parseSignIns(sec.Data).Person(ctx, issuer, subject)
+	return parseSignIns(sec.Data), nil
 }
 
 // parseSignIns reads c4-sign-ins' data.

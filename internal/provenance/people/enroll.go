@@ -197,10 +197,7 @@ func (i *Issuer) enrollSignIn(r *http.Request, e *Enrolment) (*Certified, error)
 		if err := x.touchesFor(p, now); err != nil {
 			return nil, err
 		}
-		var ps []pending
-		if !x.booked(KindProviderKey, in.keyID) {
-			ps = append(ps, pending{entry: &Entry{Kind: KindProviderKey, Issuer: in.issuer, KeyID: in.kid}, record: in.jwk})
-		}
+		ps := x.signInsBooked(in)
 		rec, err := i.deviceRecord(ctx, p, device, now)
 		if err != nil {
 			return nil, err
@@ -230,10 +227,12 @@ func (i *Issuer) signedIn(ctx context.Context, raw, device, person string, stepU
 	if i.SignIns == nil {
 		return nil, refuse(http.StatusForbidden, "this farm names no one's sign-ins")
 	}
-	who, err := i.SignIns.Person(ctx, in.issuer, in.subject)
+	ins, err := i.SignIns.Load(ctx)
 	if err != nil {
 		return nil, err
 	}
+	in.signIns = ins.canonical()
+	who := ins.Person(in.issuer, in.subject)
 	switch {
 	case who == "":
 		return nil, refuse(http.StatusForbidden, "subject %q at %s is no one's sign-in here: a person's signIns name it", in.subject, in.issuer)
@@ -372,9 +371,7 @@ func (i *Issuer) renew(r *http.Request, e *Enrolment) (*Certified, error) {
 		var ps []pending
 		if in != nil {
 			q.IDToken, q.ProviderKey = in.raw, in.keyID
-			if !x.booked(KindProviderKey, in.keyID) {
-				ps = append(ps, pending{entry: &Entry{Kind: KindProviderKey, Issuer: in.issuer, KeyID: in.kid}, record: in.jwk})
-			}
+			ps = x.signInsBooked(in)
 		}
 		rec, err := i.deviceRecord(ctx, &q, device, now)
 		if err != nil {
@@ -399,6 +396,32 @@ func (i *Issuer) renew(r *http.Request, e *Enrolment) (*Certified, error) {
 		}
 	}
 	return nil, errors.New("the renewal booked no device record")
+}
+
+// signInsBooked is what a device record certified on in must book before
+// it: the provider's key the first time it is seen, and the sign-ins the
+// subject was matched against when they changed since last booked, so the
+// sign-ins in force at the record's position are the ones it rests on.
+func (x *Index) signInsBooked(in *signIn) []pending {
+	var ps []pending
+	if id := c4id(in.signIns); x.signInsAt(int64(len(x.entries))) != id {
+		ps = append(ps, pending{entry: &Entry{Kind: KindSignIns}, record: in.signIns})
+	}
+	if !x.booked(KindProviderKey, in.keyID) {
+		ps = append(ps, pending{entry: &Entry{Kind: KindProviderKey, Issuer: in.issuer, KeyID: in.kid}, record: in.jwk})
+	}
+	return ps
+}
+
+// signInsAt is the C4 ID of the sign-ins in force at position pos, or "".
+func (x *Index) signInsAt(pos int64) string {
+	id := ""
+	for _, e := range x.entries[:min(pos, int64(len(x.entries)))] {
+		if e.Kind == KindSignIns {
+			id = e.Record
+		}
+	}
+	return id
 }
 
 // unseen refuses a key the index has seen before: one in force renews,

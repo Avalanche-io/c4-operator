@@ -57,6 +57,9 @@ const (
 	// KindApproval: a confirmed act approving a new device or touch key
 	// from another of the person's devices.
 	KindApproval = "approval"
+	// KindSignIns: the people's sign-ins, canonical, when they changed
+	// since last booked.
+	KindSignIns = "sign-ins"
 	// KindFlag: something the issuer saw that the person is told of: a
 	// device renewing from two places at once.
 	KindFlag = "flag"
@@ -420,6 +423,10 @@ func (x *Index) load(ctx context.Context, e *Entry) error {
 			x.devices, x.raw = map[string]*schema.Device{}, map[string][]byte{}
 		}
 		x.devices[e.Record], x.raw[e.Record] = d, b
+	case KindSignIns:
+		if _, err := parseSignIns(b); err != nil {
+			return err
+		}
 	case KindProviderKey:
 		k, err := parseJWK(b)
 		if err != nil {

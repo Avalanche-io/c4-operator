@@ -10,6 +10,25 @@ metadata:
   labels:
     pod-security.kubernetes.io/enforce: restricted
 ---
+# The people's sign-ins and the people's store's credentials ship empty, so
+# the manager's unnamed create below can't plant either: a cluster
+# administrator fills them in (kubectl edit or patch), and the issuer books
+# the sign-ins' content in its index whenever it changes. Applying this
+# manifest again leaves what they wrote.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: c4-sign-ins
+  namespace: c4-signing
+type: Opaque
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: c4-people-store
+  namespace: c4-signing
+type: Opaque
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
