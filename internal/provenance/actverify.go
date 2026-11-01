@@ -71,8 +71,9 @@ var actNeeds = map[string]ActNeed{
 	"tag":             touched,
 	"publish-release": touched, // a release of work, not a hold's release
 	// Money.
-	"approve-spend": touched, // spend over a cap
-	"set-cap":       touched, // raising a cap; the act doesn't show the cap it replaces
+	"approve-spend":    touched, // spend over a cap
+	"approve-capacity": touched, // a burst approval: spend, which SPEND 4.2 makes approve-spend
+	"set-cap":          touched, // raising a cap; the act doesn't show the cap it replaces
 	// Accountability: DESIGN 6's adopt a violation.
 	"adopt":  touched,
 	"disown": touched,

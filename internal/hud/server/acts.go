@@ -93,7 +93,19 @@ func (s *Server) citeAct(ctx context.Context, r *http.Request, v *api.Viewer, su
 		return nil, fmt.Errorf("%w is %s, and this request is %s", errAct, p.Act, action)
 	case err != nil || got != want:
 		return nil, fmt.Errorf("%w's params are not this request's body", errAct)
-	case p.Chain.By.Person != "" && v != nil && v.User != p.Chain.By.Person:
+	case p.Chain.By.Person == "":
+		// A unit's act is taken from that unit's own token (K5), an
+		// agent's under a grant in force for the viewer (K5) and a relay's
+		// only through relayed() with its signer bound to the Tracker (K6).
+		// Until each has its caller's check, only a person's own act is.
+		return nil, fmt.Errorf("%w is not a person's: a unit's, an agent's or a relay's act is not taken here yet", errAct)
+	case vr.Identity != provenance.UserIdentity(p.Chain.By.Person):
+		return nil, fmt.Errorf("%w names %s and is signed by %s, not by a device of theirs", errAct, p.Chain.By.Person, vr.Identity)
+	case v == nil:
+		return nil, fmt.Errorf("%w is %s's, and no one signed in sent it", errAct, p.Chain.By.Person)
+	case v.User != p.Chain.By.Person && s.ownerFor(ctx, v) != p.Chain.By.Person:
+		// The person is the viewer, or on a one-person farm the person a
+		// role's sign-in acts for (ownerFor): noor signs as artist.
 		return nil, fmt.Errorf("%w is %s's, and %s sent it", errAct, p.Chain.By.Person, v.User)
 	}
 	if _, _, err := provenance.VerifyAct(data, s.trust(ctx).roots, time.Now(), s.actsSeen()); err != nil {

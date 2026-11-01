@@ -63,7 +63,16 @@ func TestControlRecordCitesTheSignedAct(t *testing.T) {
 	}
 	stale := on
 	stale.Digest = map[string]string{"sha256": strings.Repeat("0", 64)}
+	// Until K5 and K6 check their callers, only a person's own act is
+	// taken: a relay's key would otherwise grade the record relayed
+	// around relayed()'s checks, whoever sent it.
+	relay := f.Relay(t, "c4-system", "importer", "flow", "dana")
+	agent := f.Agent(t, "assistant", "")
+	unit := f.Unit(t, "show-a", "sh040-light-v007", "ruling", provtest.JobUID, 1)
 	for name, h := range map[string]string{
+		"a relay's act":            act(relay, provtest.Act{}),
+		"an agent's act":           act(agent, provtest.Act{}),
+		"a unit's act":             act(unit, provtest.Act{}),
 		"the same act again":       signed,
 		"an act for another verb":  act(dana, provtest.Act{Act: "steer"}),
 		"an act with other params": act(dana, provtest.Act{Params: map[string]any{"do": "reject", "unit": "ruling"}}),

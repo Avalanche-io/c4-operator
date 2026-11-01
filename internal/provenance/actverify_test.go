@@ -207,6 +207,8 @@ func TestActKindsThatNeedAPersonOrATouch(t *testing.T) {
 		{"a person removes a device from the past without a touch", dana, provtest.Act{Act: "remove-device", Params: map[string]any{"from": past}}, false},
 		{"a person removes a device from the past with a touch", dana, provtest.Act{Act: "remove-device", Params: map[string]any{"from": past}, Confirmed: true}, true},
 		{"a person sets a cap by its C4 ID without a touch", dana, provtest.Act{Act: "set-cap", Params: provtest.ID("cap")}, false},
+		{"a person approves a burst without a touch", dana, provtest.Act{Act: "approve-capacity"}, false},
+		{"a person approves a burst with a touch", dana, provtest.Act{Act: "approve-capacity", Confirmed: true}, true},
 		{"a person approves, silent", dana, provtest.Act{Act: "approve"}, true},
 	} {
 		v, err := provenance.VerifyBundle(f.SignAct(t, c.key, c.act), f.Roots)
