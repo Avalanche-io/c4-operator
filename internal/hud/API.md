@@ -2524,8 +2524,9 @@ its C4 ID:
   - `GET /v1/people/index` returns the sealed entries at their book
     positions, `order: book`, and the book's head segment as the queue
     signed it (`head`, `signed`);
-  - the issuer judges with the pending entries; `DevicesAt` and `CheckAct`
-    judge by sealed position only;
+  - the issuer, and the HUD taking a person's act (`CheckActNow`), judge
+    with the pending entries at the clock; `DevicesAt` and `CheckAct` judge
+    by sealed position only, at the time it was sealed;
   - the book's first seal adopts an index kept before it, unchanged, at the
     same positions and in `order: issuer`; the issuer answers `503` until
     then.
