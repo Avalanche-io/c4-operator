@@ -29,6 +29,7 @@ import catalog from './views/catalog.js';
 import yourPage from './views/me.js';
 import needsYou from './views/needs.js';
 import sessions from './views/sessions.js';
+import { learnJobs } from './act.js';
 
 const VIEWS = { queue, job, pools, workers: pools, map, tiers, graph, cost, wall, widget, mine, catalog, me: yourPage, needs: needsYou, sessions };
 // each view and the mode it arrives at (docs/intro/ladder.md)
@@ -565,6 +566,8 @@ function own(snap) {
 function setSnap(snap) {
   state.raw = snap;
   state.snap = own(snap);
+  // what a signed act on each job names: its UID and spec digest (act.js)
+  learnJobs(snap && snap.jobs);
 }
 
 window.addEventListener('hashchange', () => {

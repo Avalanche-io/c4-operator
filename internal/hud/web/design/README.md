@@ -39,6 +39,21 @@ in the binary order the operator renders it.
 | edge code                       | a job's output view and the changesets folded into its chain                         | `output.view`, `output.changesets`                 |
 | the sweep                       | the wall's now line; persistence for what just happened                              | snapshots over time                                |
 
+## Pictures of the HUD show it running normally
+
+Every review still, mock, tutorial image and film frame shows the farm in
+ordinary operation: work running, forecasts holding, nothing waiting for a
+person. **Needs you is an exceptional event.** The maintainer's words: "It's
+like showing every web page design with error popups."
+- **An exception gets a still of its own,** made to show it and labelled as
+  such: a file name that says so (`exception-usage-limit-queue-L2-dark.png`,
+  `sp-approval-dark.png`) and a caption naming the exception.
+- **Take default stills at a calm moment.** Pick a scenario moment with
+  nothing in Needs you and no job projected late, or add one to the farm.
+  An exception arrives at its own moment, later.
+- **A beat whose subject is an exception** (a failed frame, a burst approval)
+  may show it. A beat about something else waits until it has gone.
+
 ## Tokens
 
 `tokens.css` is the single source: a 20-step grey ramp (`--g00` to `--g19`,

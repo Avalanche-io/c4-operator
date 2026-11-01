@@ -5,6 +5,8 @@
 // without a preflight the farm refuses, so it cannot post to a control
 // with the cookie.
 
+import { actHeaders } from './act.js';
+
 const params = new URLSearchParams(location.search);
 export const as = params.get('as') || '';
 export const staticMode = params.get('static') === '1';
@@ -30,11 +32,14 @@ export async function get(path) {
 
 const WRITE = { 'X-C4-HUD': '1' };
 
+// post: a write; a job control carries its act, signed by this browser's
+// key, when the page can sign it (act.js)
 export async function post(path, body) {
+  const sent = body || {};
   const r = await fetch(withViewer('/api/v1' + path), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...WRITE },
-    body: JSON.stringify(body || {}),
+    headers: { 'Content-Type': 'application/json', ...WRITE, ...(await actHeaders(path, sent)) },
+    body: JSON.stringify(sent),
   });
   if (!r.ok) throw await failed(r);
   return r.json().catch(() => ({}));
