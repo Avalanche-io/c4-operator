@@ -209,7 +209,7 @@ func TestUpKeysPinsTheOwnersKey(t *testing.T) {
 		t.Errorf("up again, pinned: %v %+v", err, again)
 	}
 	other := "c4" + out.Owner.Device[2:len(out.Owner.Device)-1] + "x"
-	if _, err := UpKeys(ctx, o.client, st, "noor", other, false); !errors.Is(err, ErrOwnerKey) {
+	if _, err := UpKeys(ctx, o.client, st, "noor", other, false); !errors.Is(err, ErrOwnerKey) || !strings.Contains(err.Error(), other) || !strings.Contains(err.Error(), out.Owner.Device) {
 		t.Errorf("another owner key than the pinned one: %v", err)
 	}
 

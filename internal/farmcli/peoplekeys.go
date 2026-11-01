@@ -138,8 +138,10 @@ func UpKeys(ctx context.Context, c *Client, st keystore.Store, owner, pinned str
 		return nil, err
 	}
 	if pinned != "" && out.Owner.Device != pinned {
+		// whole IDs: two keys can share a short form, and a refusal must
+		// tell them apart
 		return nil, fmt.Errorf("%w: it is %s, and this machine pinned %s when up enrolled it; if the farm was made again, remove its keys (%s) and run up again",
-			ErrOwnerKey, ShortDevice(out.Owner.Device), ShortDevice(pinned), st.Dir)
+			ErrOwnerKey, out.Owner.Device, pinned, st.Dir)
 	}
 	return out, nil
 }
