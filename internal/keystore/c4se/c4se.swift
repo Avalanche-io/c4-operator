@@ -18,8 +18,9 @@ public func c4se_available() -> Int32 {
 // X9.63 public key into pub (65 bytes). kind 0 is a person's device key:
 // silent, usable while the Mac is unlocked. kind 1 is their touch key: each
 // signature needs the person's presence (Touch ID, or their password where
-// there is no sensor). It returns the blob's length, or -1 with why in
-// errbuf.
+// there is no sensor). kind 2 is a workload's key (an agent's, a cron
+// job's): silent, usable after the Mac's first unlock, behind a locked
+// screen too. It returns the blob's length, or -1 with why in errbuf.
 @_cdecl("c4se_make")
 public func c4se_make(_ kind: Int32, _ blob: UnsafeMutablePointer<UInt8>, _ cap: Int32, _ pub: UnsafeMutablePointer<UInt8>,
                       _ errbuf: UnsafeMutablePointer<CChar>, _ errcap: Int32) -> Int32 {
@@ -27,8 +28,9 @@ public func c4se_make(_ kind: Int32, _ blob: UnsafeMutablePointer<UInt8>, _ cap:
     if kind == 1 {
         flags.insert(.userPresence)
     }
+    let protection = kind == 2 ? kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly : kSecAttrAccessibleWhenUnlockedThisDeviceOnly
     var cfErr: Unmanaged<CFError>?
-    guard let ac = SecAccessControlCreateWithFlags(nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, flags, &cfErr) else {
+    guard let ac = SecAccessControlCreateWithFlags(nil, protection, flags, &cfErr) else {
         return fail(errbuf, errcap, "access control: \(String(describing: cfErr?.takeRetainedValue()))")
     }
     do {

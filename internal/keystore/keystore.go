@@ -37,6 +37,12 @@ const (
 	Touch Kind = "touch"
 )
 
+// Workload is a key of a workload's own (an agent's, a cron job's): any
+// kind but Device and Touch, named for what it signs as (K5). It is
+// silent, and works behind a locked screen: in the Secure Enclave, usable
+// after the Mac's first unlock.
+func Workload(name string) Kind { return Kind("workload-" + name) }
+
 // Key is a person's key on this machine.
 type Key interface {
 	// SPKI is its public key, DER SubjectPublicKeyInfo.

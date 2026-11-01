@@ -95,3 +95,22 @@ func TestFileOnlyKeepsAFileOnAMac(t *testing.T) {
 		t.Fatalf("%v %v", k, err)
 	}
 }
+
+// A workload's key is in the Secure Enclave too, and works after the Mac's
+// first unlock, behind a locked screen.
+func TestTheSecureEnclaveKeepsAWorkloadsKey(t *testing.T) {
+	if !seAvailable() {
+		t.Skip("no Secure Enclave on this Mac")
+	}
+	s := Store{Dir: filepath.Join(t.TempDir(), "keys")}
+	k, err := s.Key(Workload("planner"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Remove(Workload("planner")) })
+	sig, err := k.Sign([]byte("act"))
+	if err != nil || k.Protection() != schema.ProtectionHardware {
+		t.Fatalf("%v %q", err, k.Protection())
+	}
+	verify(t, k, []byte("act"), sig)
+}

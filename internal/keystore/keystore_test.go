@@ -98,3 +98,22 @@ func TestLowS(t *testing.T) {
 		t.Error("a low S changed")
 	}
 }
+
+// A workload's key is a key of its own, beside the person's, by its name.
+func TestAWorkloadHasAKeyOfItsOwn(t *testing.T) {
+	s := Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
+	person, err := s.Key(Device)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := s.Key(Workload("planner"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(person.SPKI(), agent.SPKI()) || !s.Has(Workload("planner")) || s.Has(Workload("other")) {
+		t.Error("the workload's key is not its own")
+	}
+	if _, err := os.Stat(filepath.Join(s.Dir, "workload-planner.key")); err != nil {
+		t.Error(err)
+	}
+}

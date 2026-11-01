@@ -34,8 +34,11 @@ type seKey struct {
 }
 
 func makeSE(path string, kind Kind) (Key, error) {
-	k := C.int32_t(0)
-	if kind == Touch {
+	k := C.int32_t(2) // a workload's
+	switch kind {
+	case Device:
+		k = 0
+	case Touch:
 		k = 1
 	}
 	blob, pub, errbuf := make([]byte, 1024), make([]byte, 65), make([]byte, 512)
