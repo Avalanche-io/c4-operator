@@ -40,6 +40,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/auth"
 	"github.com/Avalanche-io/c4-operator/internal/controller"
+	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/hud"
 	hudserver "github.com/Avalanche-io/c4-operator/internal/hud/server"
 	"github.com/Avalanche-io/c4-operator/internal/project"
@@ -120,6 +121,8 @@ func runManager(args []string) error {
 	signingNS := fs.String("signing-namespace", "c4-signing", "namespace of the farm's signing CA, readable only by the manager (empty turns signing off)")
 	signerAddr := fs.String("signer-addr", ":8092", "certificate issuer listen address, for node daemons and importers")
 	peopleStore := fs.String("people-store", "", "the people's issuer's store, shards as [name=]url,... (as a project's): it certifies people's device keys and keeps their device records and its index there, its credentials in the Secret c4-people-store of the signing namespace; empty serves no people's issuer")
+	systemStore := fs.String("system-store", "", "the installation's system store, shards as [name=]url,... (as a project's): it keeps the farm book, the farm-wide log of farm-level acts the HUD and the people's issuer write and the queue seals, its credentials in the Secret c4-system-store of the signing namespace; empty keeps no farm book")
+	farmBookSeal := fs.Duration("farm-book-seal", farmbook.DefaultSealEvery, "with --system-store: how often the queue seals the farm book, at most "+farmbook.MaxSealEvery.String()+"; a record counts from the first sealed segment that names it, so this is how fine its time is")
 	signInProvider := fs.String("sign-in-provider", "", "with --people-store: the install's sign-in provider (an OIDC issuer URL) people's device keys are certified on; until a touch can confirm a farm admin's act, it changes only by redeploying with another")
 	signInClient := fs.String("sign-in-client-id", "", "with --sign-in-provider: the farm's own client ID there; a token for any other client is refused")
 	hudOrigin := fs.String("hud-origin", "", "the HUD's origin as people's browsers reach it (https://hud.studio.example, or http://localhost:<port>): where a browser's passkey touch key is made and signs; without it, passkeys are refused")
@@ -178,13 +181,23 @@ func runManager(args []string) error {
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &c4v1.Project{}, project.NamespaceIndex, project.IndexNamespaces); err != nil {
 		return err
 	}
+	if err := checkFarmBookFlags(*systemStore, *farmBookSeal, sig.ca != nil); err != nil {
+		return err
+	}
+	book, err := newFarmBook(ctx, sig, kube, mgr, *signingNS, *namespace, *systemStore, *farmBookSeal)
+	if err != nil {
+		return err
+	}
+	if book != nil && !*work {
+		log.Info("--system-store without --work: nothing seals the farm book, and its entries wait")
+	}
 	if *peopleStore != "" {
 		installer, err := installerToken(*hudDev, *hudInstaller, *hudDevOpen)
 		if err != nil {
 			return err
 		}
 		iss, err := newPeopleIssuer(ctx, sig, kube, mgr.GetAPIReader(), *signingNS, peopleOptions{store: *peopleStore, provider: *signInProvider,
-			clientID: *signInClient, stepUpACR: splitList(*stepUpACR), singlePerson: *singlePerson, installer: installer, hudOrigin: *hudOrigin})
+			clientID: *signInClient, stepUpACR: splitList(*stepUpACR), singlePerson: *singlePerson, installer: installer, hudOrigin: *hudOrigin}, book)
 		if err != nil {
 			return err
 		}
@@ -238,6 +251,9 @@ func runManager(args []string) error {
 			Progress: &queue.ProgressCache{}, Safepoints: &queue.SafepointCache{}, PriorityClass: *unitPriority,
 			HolderTransfer: *holderTransfer == "allow", EgressProxy: *egressProxy, HUDService: *hudService,
 			LeadIdleClose: *leadIdle}
+		if book != nil {
+			q.FarmBook = book.sealer
+		}
 		// The farm's telemetry ring (DESIGN.md section 6.9): the queue tells
 		// it each decision; the HUD writes bundles from it. Its key is read,
 		// or made, the first time it is needed.

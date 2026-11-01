@@ -21,13 +21,21 @@ const StateConfigMap = "c4-farm-book"
 // ConfigMapPointer is the manager's Pointer: StateConfigMap, written by
 // resourceVersion, so writers and the sealer move it one at a time.
 type ConfigMapPointer struct {
-	Client    client.Client
+	Client client.Client
+	// Reader, when set, reads the ConfigMap uncached (the manager's API
+	// reader), so a write isn't made from a version the cache hasn't
+	// caught up with.
+	Reader    client.Reader
 	Namespace string
 }
 
 func (p *ConfigMapPointer) Read(ctx context.Context) (State, error) {
 	var cm corev1.ConfigMap
-	err := p.Client.Get(ctx, client.ObjectKey{Namespace: p.Namespace, Name: StateConfigMap}, &cm)
+	var r client.Reader = p.Client
+	if p.Reader != nil {
+		r = p.Reader
+	}
+	err := r.Get(ctx, client.ObjectKey{Namespace: p.Namespace, Name: StateConfigMap}, &cm)
 	if apierrors.IsNotFound(err) {
 		return State{}, nil
 	}

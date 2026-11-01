@@ -59,7 +59,12 @@ type peopleOptions struct {
 
 // newPeopleIssuer makes the people's issuer, or nil when the install
 // names no people's store.
-func newPeopleIssuer(ctx context.Context, s *signing, kube kubernetes.Interface, reader client.Reader, signingNS string, o peopleOptions) (*people.Issuer, error) {
+//
+// With a farm book, the index is kept in the book: its records go to the
+// system store, and the people's store holds only the index kept before
+// the book, which the book's first seal adopts (PEOPLE-KEYS-2 10.4 item
+// 11).
+func newPeopleIssuer(ctx context.Context, s *signing, kube kubernetes.Interface, reader client.Reader, signingNS string, o peopleOptions, book *farmBook) (*people.Issuer, error) {
 	if o.store == "" || s.ca == nil {
 		return nil, nil
 	}
@@ -89,8 +94,13 @@ func newPeopleIssuer(ctx context.Context, s *signing, kube kubernetes.Interface,
 		}
 		return b.Spec.SingleOwner()
 	}
+	index := &people.Index{Farm: farmOf(s), Roots: s.pool, Store: shardStore{st}, Head: &secretHead{kube: kube, ns: signingNS}}
+	if book != nil {
+		book.sealer.Adopt = index.Adoption
+		index = &people.Index{Farm: farmOf(s), Roots: s.pool, Store: book.store, Head: index.Head, Book: book.reader}
+	}
 	iss := &people.Issuer{CA: s.ca,
-		Index:    &people.Index{Farm: farmOf(s), Roots: s.pool, Store: shardStore{st}, Head: &secretHead{kube: kube, ns: signingNS}},
+		Index:    index,
 		Provider: people.Provider{Issuer: o.provider, ClientID: o.clientID}, StepUp: people.StepUp{ACR: o.stepUpACR}, WebAuthn: rp,
 		SignIns: &secretSignIns{kube: kube, ns: signingNS}, Owner: owner, InstallerToken: o.installer,
 		// The farm owner's admins: before ORGANIZATION's Parties and their
@@ -131,12 +141,22 @@ func farmBinding(ctx context.Context, reader client.Reader) *c4v1.DeploymentBind
 // peopleCredentials reads the people's store's credentials, the Secret
 // c4-people-store in the signing namespace, when there is one.
 func peopleCredentials(ctx context.Context, kube kubernetes.Interface, ns string) (storeurl.Credentials, error) {
-	sec, err := kube.CoreV1().Secrets(ns).Get(ctx, peopleStoreSecret, metav1.GetOptions{})
+	c, err := secretCredentials(ctx, kube, ns, peopleStoreSecret)
+	if err != nil {
+		return storeurl.Credentials{}, fmt.Errorf("the people's store credentials: %w", err)
+	}
+	return c, nil
+}
+
+// secretCredentials reads an object store's credentials from the Secret
+// name in ns, or none when there is no such Secret.
+func secretCredentials(ctx context.Context, kube kubernetes.Interface, ns, name string) (storeurl.Credentials, error) {
+	sec, err := kube.CoreV1().Secrets(ns).Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return storeurl.Credentials{}, nil
 	}
 	if err != nil {
-		return storeurl.Credentials{}, fmt.Errorf("the people's store credentials: %w", err)
+		return storeurl.Credentials{}, err
 	}
 	return storeurl.Credentials{AccessKeyID: string(sec.Data["AWS_ACCESS_KEY_ID"]), SecretAccessKey: string(sec.Data["AWS_SECRET_ACCESS_KEY"])}, nil
 }
