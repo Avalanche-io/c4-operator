@@ -83,7 +83,7 @@ func TestIndexKeptInTheBook(t *testing.T) {
 	b := inBook(studio(t), nil)
 	d := newDev(t)
 	c := b.signIn(d, "dana", danaSub)
-	if c.Order != people.OrderPending || c.Position == 0 {
+	if c.Order != people.OrderPending || c.Position == 0 || !c.Provisional {
 		t.Fatalf("certified at %d in order %q", c.Position, c.Order)
 	}
 	if _, err := b.index.DevicesAt(context.Background(), c.Position, b.now); !errors.Is(err, farmbook.ErrNotSealed) {
