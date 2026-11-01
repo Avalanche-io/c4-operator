@@ -1258,14 +1258,85 @@ payload hash the index already books is refused at any replica.
   - **A compromised manager,** which holds the issuer's key.
   - **A rollback to an older head** the issuer signed.
 
-  K4's CLI keeps the last head it saw and refuses one that goes back, and
-  slice 2's sealed book covers both.
+  K4's CLI keeps the last head it saw and refuses one that goes back. On
+  a farm with a farm book, the index is kept in the book, and the book's
+  head stops neither by signing alone either (below).
 
 A device is in force by the index's order: enrolled, not removed, and
-renewed within 90 days. Each entry says the order is the issuer's own
-(`order: issuer`), until slice 2's farm book adopts the index. A leaf for
-`user/<name>` with no device record in force behind it is refused as a
-forgery (`Index.CheckAct`, which also feeds `CheckTouchKey`).
+renewed within 90 days. On a farm without a farm book each entry says the
+order is the issuer's own (`order: issuer`). A leaf for `user/<name>` with
+no device record in force behind it is refused as a forgery
+(`Index.CheckAct`). A confirmed act's touch key must be the signing
+device's own: its record names that device (`touchFor`), for the same
+person, on this farm (`CheckTouchKey`). The issuer checks both when it
+books an act, every read of the index checks them again at the position
+before the act's entry, and the queue checks them at the seal, so a
+confirmed grade is never sealed on a touch key nobody checked.
+
+**The farm book** (`internal/farmbook`, accountability DESIGN 5.4 and 5.5)
+is the farm-wide, hash-linked log of farm-level acts, in the installation's
+system store (`--system-store`), never a project's. A farm whose install
+names no system store keeps none, and nothing else changes.
+- **What it holds:** only signed acts. These are the farm-level acts the
+  HUD signs as control records (binding the farm; a person's submit grant
+  and its revocation; a tracker login confirmed as a person, and that
+  ended; a host node offered and enrolled; a node disabled and enabled,
+  now signed too), and the people's index's entries. A change made around
+  C4 isn't booked: slice 2's violations show it (S2c).
+- **Who writes it:** the HUD and the people's issuer. A writer stores the
+  record an entry cites, then the entry, pending, then lists it in the
+  book's one mutable object, the ConfigMap `c4-farm-book` (by
+  resourceVersion). The HUD books an act once the write that carries it out
+  has succeeded.
+- **Who seals it:** the leader-elected queue, alone. Every
+  `--farm-book-seal` (2 seconds by default, never more than 30) it checks
+  each pending entry against the record it cites: the record verifies,
+  passes the signer policy (`CheckSigner`), and says the same as the entry
+  (act, subject, actor, person, device, expiry and change; for the people's
+  entries, everything the index checks). An entry that doesn't is refused,
+  never sealed, logged, and listed in the segment that refused it. The rest
+  get their position and the C4 ID of the entry before them, and the run is
+  one segment (`book/v1`, `schema/book-1.schema.json`), signed as
+  `component/queue`, naming the segment before it.
+- **The book is the time** (DESIGN 5.4). A record counts from the first
+  sealed segment that names it (`Book.PositionOf`), and whether a grant,
+  binding, device or membership was in force when it was made is answered
+  by sealed position (`Book.InForce`), at the time that position was
+  sealed, never by the record's own `signedAt`. A record whose `signedAt`
+  falls outside the window its position allows (from the seal before less
+  five minutes, to its own seal plus five) is flagged in its segment, not
+  refused (`Book.Flags`); refusing is slice 3's. The seal interval is how
+  fine that time is.
+- **Pending and sealed.** Before an entry is sealed, the HUD and the
+  people's issuer judge a request against the sealed book and the pending
+  entries (`View`), so a removal or revocation counts at once. A verifier
+  judges by sealed position only, and a position past the sealed head is
+  `ErrNotSealed`.
+- **What stops a rollback, and what doesn't.** Each segment is signed and
+  names the one before, so rewriting any past entry or segment shows:
+  every reader refuses it. Signing alone doesn't stop a rollback: whoever
+  can write `c4-farm-book` can point it back at an older segment the queue
+  signed, and that segment verifies by itself. What stops it is the
+  reader's last head. `Reader.Last` and `LastHead` are the last head a
+  reader accepted; a client keeps it (K4's CLI, on disk) and checks each
+  page against it (`CheckPage`), refusing a head that goes back or forks
+  (`ErrRollback`). The HUD's own reader does the same. Nor does signing
+  stop a compromised manager, which holds the queue's key: a client that
+  kept its head still sees a rewrite of what it read.
+- **The people's index in the book** (PEOPLE-KEYS-2 10.4 item 11). With a
+  farm book the issuer writes its entries to the book, pending, instead of
+  to its own head, and its positions are the book's. **Migration:** the
+  book's first seal adopts an index the issuer kept before it, once, as
+  the book's first entries: unchanged, at the same positions, under their
+  own prev links, in the issuer's order (`adopted` in that segment). Their
+  records are copied to the system store. The issuer waits until then, and
+  the old head Secret is left as it was. The entries after them are in the
+  book's order.
+- **Reading it:** `GET /book/farm?since=` (internal/hud/API.md). Device
+  entries' addresses go only to their person and the farm's admins, and
+  anyone else reads them redacted, labelled.
+- **Beside it:** K8's shared replay store can live in the same system store
+  (PEOPLE-KEYS-2 10.4 item 17); nothing in the book stands in its way.
 
 **The farm binding.** `c4 farm up --owner` names a local farm's one
 person; the farm binding, a signed record, follows when the installer
@@ -1312,13 +1383,16 @@ source ingested with signing off) is reported as a gap, not a failure.
   Sigstore (Fulcio and Rekor inside the studio) is the upgrade path when an
   independent timestamp and an append-only log are wanted.
 
-**Designed, not built.** `signedAt` is the signer's own claim; an RFC 3161
+**Designed, not built.** `signedAt` is the signer's own claim. The farm
+book anchors it where the farm keeps one: a record counts from its sealed
+position, and a `signedAt` outside its window is flagged. An RFC 3161
 timestamp authority or a private Rekor makes it independent. Revocation is
 by short lifetimes, with no revocation list. People still act through the
 HUD (the HUD signs that it authenticated and authorized them). The people's
 issuer certifies their keys on the studio's OIDC provider, but the web app
 and the CLI don't make or use those keys yet (slices K3 and K4). Node disable and
-enable are recorded as Events only, for want of a farm-level audit store.
+enable are signed control records, booked in the farm book where the farm
+keeps one, and Events beside it.
 Records are not yet batched at chain checkpoints (section 2.5).
 
 **Storage and use.**
@@ -1329,10 +1403,10 @@ Records are not yet batched at chain checkpoints (section 2.5).
   log (`GET /book?since`, internal/hud/API.md): job transitions numbered
   farm-wide by the queue, sealed in each project's store as hash-linked
   segments, the head in ConfigMaps (`c4-work-book` for the number, one
-  `c4-work-book-<project>` per project, so none grows with the farm); the
-  farm-wide index,
-  kept in the installation's system store as a hash-chained log like the
-  usage ledger (section 12.2), is designed.
+  `c4-work-book-<project>` per project, so none grows with the farm); and
+  the farm-wide index of farm-level acts, the farm book, kept in the
+  installation's system store as a hash-chained log of signed segments
+  (above).
 - Usage records (section 12) and license usage (section 16.2) reference the
   task records they come from, so the same signed records are the audit
   trail for content, for keys, for billing and for licenses.

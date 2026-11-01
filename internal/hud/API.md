@@ -770,6 +770,57 @@ comes first) are sealed as an object in the project's own store, naming
 the previous one by C4 ID; the head lists the latest 64 per project. Any
 HUD replica serves it.
 
+## GET /book/farm?since={position}&limit=N
+
+The farm book (DESIGN.md 9.2, The farm book): the farm-wide, hash-linked
+log of farm-level acts, where the install names a system store
+(`--system-store`). It holds only signed acts: the farm-level acts the HUD
+signs as control records, and the people's index's entries. The HUD and the
+people's issuer write the entries; the queue checks each against the record
+it cites and seals them in signed segments. A farm that keeps no book
+answers `404`.
+
+```
+{ farm, since, head: { segment, number, position, entry },
+  segments: [ <book/v1 bundle> ],
+  entries: [ { id, position, segment, entry, redacted? } ],
+  pending: [ { id, position, entry, redacted? } ],
+  more?, next }
+```
+
+- `segments` are the signed segments (`book/v1`, `GET /schema/book`)
+  sealing positions after `since`, oldest first, and always the last one
+  the page reaches, so a client whose head is current still gets it to
+  compare. Each is signed by the queue (`component/queue`) and names the
+  one before it.
+- `entries` are the sealed entries after `since`, each as stored by its C4
+  ID, at its position, with the segment that sealed it. An entry's `kind` is
+  `control` for one of the HUD's control records (with `act`, `subject`,
+  `by`, `person`, `expires` and `settings`, the C4 ID of the record's
+  change), or one of the people's index's kinds (`device`, `removal`,
+  `setting` and the rest).
+- `pending` are the entries waiting for the seal, at provisional positions.
+  The HUD and the people's issuer judge with them; no verifier counts them.
+  The queue seals every `--farm-book-seal` (2 seconds by default, never more
+  than 30).
+- A device entry's addresses go only to its person and the farm's admins.
+  Anyone else gets the entry without `addr` and `seen`, and `redacted` names
+  what was left out. A redacted entry is checked by its ID alone.
+- Whole segments are returned until about `limit` entries (1000 by default,
+  at most 5000). `more` says the page stopped before the head: read again
+  from `next`.
+- **Rollback.** Signing shows a rewrite, not a rollback: an older segment
+  the queue signed verifies by itself. A client keeps the last head it
+  accepted and reads from `since` set to that head's position; the Go reader
+  (`farmbook.CheckPage`, with `farmbook.LastHead`) checks the page follows
+  it and refuses one that goes back or forks. `409` when this HUD's own
+  reader finds the book rewritten or rolled back.
+- Signed-in people read it; a unit is refused.
+
+The entries and segments are in the system store by C4 ID; the ConfigMap
+`c4-farm-book` in the operator's namespace holds the sealed head and the
+pending entries' IDs, written by resourceVersion. Any HUD replica serves it.
+
 ## GET /needs-me
 
 Only what this viewer may act on now: the one-person view, and MCP's
@@ -2425,16 +2476,34 @@ its C4 ID:
   that disagrees:
   - an act's verb, signer, subject and params are the entry's;
   - an approval is confirmed;
+  - an act's device is in force at the position before its entry, and a
+    confirmed act's touch key is that device's own (`touchFor`), the same
+    person's, on this farm;
   - a code's or approval's expiry is its TTL from its booking;
   - no act is booked twice;
   - a head the issuer didn't sign, or one at another place, is refused.
-- **`order: issuer`** says the order is the issuer's own. Slice 2's farm
-  book takes the index unchanged; until then a device is in force by the
-  index's order:
+- **`order: issuer`** says the order is the issuer's own, on a farm that
+  keeps no farm book. A device is in force by the index's order:
   - enrolled;
   - not removed at or before the position;
   - renewed within 90 days;
   - for a touch key, its device in force too.
+- **In the farm book** (`GET /book/farm`, where the install names a system
+  store), the index is kept in the book instead:
+  - the issuer writes each entry `order: pending`, with no position or
+    `prev`, and the queue checks it as every read does and seals it, giving
+    it the book's position and the entry before it (`order: book`);
+  - a response's `position` (an enrolment's, a booked act's) is then
+    provisional, `order: pending`, until the queue seals it, within
+    seconds;
+  - `GET /v1/people/index` returns the sealed entries at their book
+    positions, `order: book`, and the book's head segment as the queue
+    signed it (`head`, `signed`);
+  - the issuer judges with the pending entries; `DevicesAt` and `CheckAct`
+    judge by sealed position only;
+  - the book's first seal adopts an index kept before it, unchanged, at the
+    same positions and in `order: issuer`; the issuer answers `503` until
+    then.
 - **Who reads it.** `people.Index.DevicesAt` and `CheckAct` are what a
   verifier and `CheckTouchKey` read. `Index.VerifyBookedToken`
   (`CheckBookedToken`) checks a record's ID token later, after the
