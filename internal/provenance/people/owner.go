@@ -6,8 +6,6 @@ import (
 	"encoding/hex"
 	"net"
 	"net/http"
-	"net/url"
-	"strings"
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/schema"
@@ -15,49 +13,37 @@ import (
 
 // A one-person farm (PEOPLE-KEYS-2 3.3, 10.4 item 13). There is no sign-in
 // provider: the person is the farm's owner, and their acts rest on their
-// own machine. c4 farm up enrols the owner's key and touch key once, over
-// loopback, with the installer token as evidence; the issuer refuses that
-// path once an owner key exists. After that the owner's key enrols the
-// browser: the CLI makes a one-time code, books its SHA-256 in a signed
-// act (browser-code), and opens the HUD with it; the browser presents the
-// code with its key within CodeTTL, over loopback; the CLI reads back the
-// key the code enrolled and countersigns it (countersign-device). A code
-// someone else used first shows as a key the CLI didn't see the browser
-// make.
+// own machine. c4 farm up enrols the owner's key and touch key once, with
+// the installer token as evidence; the issuer refuses that path once an
+// owner key exists. After that the owner's key enrols the browser: the CLI
+// makes a one-time code, books its SHA-256 in a signed act (browser-code),
+// and opens the HUD with it; the browser presents the code with its key
+// within CodeTTL, once; the CLI reads back the key the code enrolled and
+// countersigns it (countersign-device). A code someone else used first
+// shows as a key the CLI didn't see the browser make.
+//
+// What protects these routes is the installer token, which only the
+// owner's machine holds, and the code: a secret that works once, for a
+// minute, and is countersigned. Where a request comes from proves nothing
+// a client can set (its Host and Origin). Where the HUD listens only on a
+// loopback address, its remote address does mean something, and the
+// owner's routes then need the machine's own (LocalOnly).
 
 // CodeTTL is how long a one-time code works.
 const CodeTTL = time.Minute
 
-// loopback reports whether a request was made to a loopback address, as a
-// browser or the CLI on the farm's own machine makes it: its Host, and its
-// Origin when it has one, are 127.0.0.0/8, ::1 or localhost. A local
-// farm's HUD is published on 127.0.0.1 only. A request through the farm's
-// Service names the Service, and a page on any other site its own origin.
-// A program in the cluster can claim a loopback Host; the code, a secret
-// that works once for a minute, is what it would lack.
-func loopback(r *http.Request) bool {
-	if !loopbackHost(r.Host) {
-		return false
-	}
-	if o := r.Header.Get("Origin"); o != "" {
-		u, err := url.Parse(o)
-		if err != nil || !loopbackHost(u.Host) {
-			return false
-		}
-	}
-	return true
-}
-
-func loopbackHost(hostport string) bool {
-	h := hostport
-	if host, _, err := net.SplitHostPort(hostport); err == nil {
-		h = host
-	}
-	h = strings.Trim(h, "[]")
-	if h == "localhost" {
+// local reports whether a request may take the owner's routes: from the
+// machine's own address where the HUD listens only on a loopback address
+// (LocalOnly), and from anywhere the HUD is reached otherwise.
+func (i *Issuer) local(r *http.Request) bool {
+	if !i.LocalOnly {
 		return true
 	}
-	ip := net.ParseIP(h)
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
 }
 
@@ -74,14 +60,14 @@ type OwnerCertified struct {
 	Touch *Certified `json:"touch,omitempty"`
 }
 
-// handleOwner enrols a one-person farm's owner over loopback on the
-// installer token (evidence installer), once.
+// handleOwner enrols a one-person farm's owner on the installer token
+// (evidence installer), once.
 func (i *Issuer) handleOwner(w http.ResponseWriter, r *http.Request) {
 	ctx, now := r.Context(), i.now()
 	owner := i.owner(ctx)
 	switch {
-	case !loopback(r):
-		fail(w, refuse(http.StatusForbidden, "the owner is enrolled over loopback, from the farm's own machine"))
+	case !i.local(r):
+		fail(w, refuse(http.StatusForbidden, "the owner is enrolled from the farm's own machine (c4 farm up)"))
 		return
 	case len(i.InstallerToken) == 0 || owner == "":
 		fail(w, refuse(http.StatusForbidden, "this is not a one-person farm: its people enrol on a sign-in"))
@@ -176,12 +162,12 @@ func CodeHash(code string) string {
 }
 
 // handleBrowser enrols the browser the owner's CLI opened with a one-time
-// code (evidence owner): over loopback, within CodeTTL of the code's
+// code (evidence owner): within CodeTTL of the code's
 // booking, once.
 func (i *Issuer) handleBrowser(w http.ResponseWriter, r *http.Request) {
 	ctx, now := r.Context(), i.now()
-	if !loopback(r) {
-		fail(w, refuse(http.StatusForbidden, "a one-time code works only on loopback: open the HUD from the farm's own machine (c4 farm open)"))
+	if !i.local(r) {
+		fail(w, refuse(http.StatusForbidden, "a one-time code works on the farm's own machine: open the HUD there (c4 farm open)"))
 		return
 	}
 	var e Enrolment

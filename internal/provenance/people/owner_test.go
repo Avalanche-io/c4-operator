@@ -11,8 +11,8 @@ import (
 	"github.com/Avalanche-io/c4-operator/schema"
 )
 
-// up enrols noor's CLI key and touch key as c4 farm up does: over
-// loopback, with the installer token.
+// up enrols noor's CLI key and touch key as c4 farm up does: from the
+// farm's own machine, with the installer token.
 func (r *rig) up(cli, touch *dev) (int, string, *people.OwnerCertified) {
 	req := people.OwnerEnrolment{Owner: r.enrolment(cli, "noor", "", "mac")}
 	if touch != nil {
@@ -24,16 +24,16 @@ func (r *rig) up(cli, touch *dev) (int, string, *people.OwnerCertified) {
 	return code, body, &out
 }
 
-// The owner of a one-person farm is enrolled once, over loopback, on the
-// installer token: the owner's key and its touch key, evidence installer.
-// The path is refused once an owner key exists, off loopback, and without
-// the token.
+// The owner of a one-person farm is enrolled once, on the installer
+// token: the owner's key and its touch key, evidence installer. The path
+// is refused once an owner key exists, without the token, and, where the
+// HUD listens only on a loopback address, from another machine.
 func TestInstallerPathOnce(t *testing.T) {
 	r := onePerson(t)
 	cli, touch := newDev(t), newDev(t)
 	req := people.OwnerEnrolment{Owner: r.enrolment(cli, "noor", "", "mac")}
 	if code, _ := r.call("POST", "/v1/people/owner", "", req, nil, people.InstallerHeader, installerToken); code != http.StatusForbidden {
-		t.Errorf("off loopback: %d", code)
+		t.Errorf("from another machine: %d", code)
 	}
 	if code, _ := r.call("POST", "/v1/people/owner", local, req, nil, people.InstallerHeader, strings.Repeat("0", 64)); code != http.StatusForbidden {
 		t.Errorf("another token: %d", code)
@@ -69,9 +69,10 @@ func (r *rig) browserCode(cli *dev, c *people.Certified, code string) (int, stri
 }
 
 // The owner's key enrols the browser: the CLI books a one-time code, the
-// browser presents it with its key within a minute over loopback, the
-// CLI reads back the key its code enrolled and countersigns it. A code
-// used after its minute, from off loopback or a second time is refused,
+// browser presents it with its key within a minute, the CLI reads back
+// the key its code enrolled and countersigns it. A code used after its
+// minute, from another machine where the HUD listens only on a loopback
+// address, or a second time is refused,
 // and only the key the installer path enrolled books a code.
 func TestBrowserCode(t *testing.T) {
 	r := onePerson(t)
@@ -85,10 +86,7 @@ func TestBrowserCode(t *testing.T) {
 	e := r.enrolment(browser, "noor", "", "browser")
 	e.Code = code
 	if status, _ := r.call("POST", "/v1/people/browser", "", e, nil); status != http.StatusForbidden {
-		t.Errorf("off loopback: %d", status)
-	}
-	if status, _ := r.call("POST", "/v1/people/browser", local, e, nil, "Origin", "https://pages.example"); status != http.StatusForbidden {
-		t.Errorf("from another site's page: %d", status)
+		t.Errorf("from another machine: %d", status)
 	}
 	var c people.Certified
 	if status, body := r.call("POST", "/v1/people/browser", local, e, &c, "Origin", "http://"+local); status != http.StatusOK {

@@ -32,7 +32,7 @@ import (
 //     one-person farm or a touch key on a second device.
 //   - browser-code: on farm:<farm ID>, params {code: the SHA-256 of a
 //     one-time code}, by a one-person farm's owner with the key the
-//     installer path enrolled, over loopback.
+//     installer path enrolled.
 //   - countersign-device: on device:<ID>, params {record: the device
 //     record its code enrolled}, the same.
 
@@ -222,11 +222,11 @@ func (i *Issuer) approval(by, device string, now time.Time) (func() (*Entry, err
 }
 
 // ownerAct books a one-person farm's browser code or countersignature:
-// the owner's, over loopback, signed with the key the installer path
+// the owner's, signed with the key the installer path
 // enrolled.
 func (i *Issuer) ownerAct(r *http.Request, v *provenance.Verified, verb, by, device string, farmSubject bool, params map[string]string, now time.Time) (func() (*Entry, error), error) {
-	if !loopback(r) {
-		return nil, refuse(http.StatusForbidden, "%s is made over loopback, from the farm's own machine", verb)
+	if !i.local(r) {
+		return nil, refuse(http.StatusForbidden, "%s is made from the farm's own machine", verb)
 	}
 	x := i.Index
 	check := func() error {

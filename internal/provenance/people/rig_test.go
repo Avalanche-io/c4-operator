@@ -147,6 +147,7 @@ func onePerson(t *testing.T) *rig {
 	r := newRig(t)
 	r.iss.Owner = func(context.Context) string { return "noor" }
 	r.iss.InstallerToken = []byte(installerToken)
+	r.iss.LocalOnly = true
 	r.iss.Admin = func(_ context.Context, p string) bool { return p == "noor" }
 	r.caller = "noor"
 	return r
@@ -190,9 +191,9 @@ func (r *rig) enrolment(d *dev, person, touchFor, kind string) people.Enrolment 
 	return people.Enrolment{Request: q, Proof: base64.RawURLEncoding.EncodeToString(sig), Protection: protection, Kind: kind, Label: person + "'s " + kind}
 }
 
-// call sends a request to the issuer, from host (example.com when "", as
-// httptest makes it; a loopback host for a one-person farm's own
-// machine), and decodes the answer into out when it is 200.
+// call sends a request to the issuer, from host: local is the farm's own
+// machine, "" anywhere else, as httptest makes it. It decodes the answer
+// into out when it is 200.
 func (r *rig) call(method, path, host string, body any, out any, hdr ...string) (int, string) {
 	r.t.Helper()
 	var b []byte
@@ -207,8 +208,8 @@ func (r *rig) call(method, path, host string, body any, out any, hdr ...string) 
 	if r.caller != "" {
 		req = req.WithContext(people.WithCaller(req.Context(), r.caller))
 	}
-	if host != "" {
-		req.Host = host
+	if host == local {
+		req.RemoteAddr = local
 	}
 	for k := 0; k+1 < len(hdr); k += 2 {
 		req.Header.Set(hdr[k], hdr[k+1])
@@ -223,7 +224,8 @@ func (r *rig) call(method, path, host string, body any, out any, hdr ...string) 
 	return w.Code, w.Body.String()
 }
 
-const local = "127.0.0.1:30080"
+// local is a request from the farm's own machine.
+const local = "127.0.0.1:52144"
 
 // signIn enrols d for person on a token the provider issued for sub, and
 // fails the test unless it is certified.

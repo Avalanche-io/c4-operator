@@ -6,7 +6,7 @@
 //   - on a studio farm, an ID token from the farm's one sign-in provider,
 //     pinned to the provider, the farm's client ID, the nonce (the device
 //     ID) and the subject (the person's sign-ins), never the email;
-//   - on a one-person farm, the installer token over loopback, once, for
+//   - on a one-person farm, the installer token, once, for
 //     the owner's key and touch key; then the owner's key enrols the
 //     browser with a one-time code;
 //   - a touch key on a fresh step-up sign-in, or on a touch from another
@@ -79,6 +79,10 @@ type Issuer struct {
 	// InstallerToken is a one-person farm's installer token
 	// (--hud-installer-token-file); nil refuses the installer path.
 	InstallerToken []byte
+	// LocalOnly says the HUD listens only on a loopback address, so a
+	// request's remote address is where it came from: the owner's routes
+	// then need the machine's own.
+	LocalOnly bool
 	// Acts takes each act once, by its payload hash; nil keeps them in
 	// this process's memory. K8 gives it a shared, lasting store.
 	Acts provenance.SeenSet

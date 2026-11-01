@@ -44,6 +44,7 @@ import (
 	hudserver "github.com/Avalanche-io/c4-operator/internal/hud/server"
 	"github.com/Avalanche-io/c4-operator/internal/project"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
+	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	"github.com/Avalanche-io/c4-operator/internal/telemetry"
 	"github.com/Avalanche-io/c4-operator/internal/telemetry/farmkey"
@@ -467,6 +468,12 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 	// The browser and the CLI reach the people's issuer at the HUD's own
 	// origin, where the web app's key lives.
 	srv.People = sig.people
+	if iss, ok := sig.people.(*people.Issuer); ok {
+		// Where the HUD listens only on a loopback address, a request's
+		// remote address is the machine's own, and the owner's routes need
+		// it.
+		iss.LocalOnly = loopbackOnly(addr)
+	}
 	if sandbox != "" {
 		if srv.DevViewers == nil {
 			return errors.New("--hud-sandbox is for a development farm: it needs --hud-dev-viewers")
