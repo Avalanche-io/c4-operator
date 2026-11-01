@@ -20,7 +20,20 @@ rules:
   resources: [secrets]
   resourceNames: [c4-signing-ca]
   verbs: [get]
-# create cannot be limited by name; the namespace holds nothing else.
+# The people's issuer (PEOPLE-KEYS-2 3.1, --people-store): its index's head,
+# which it moves by resourceVersion; its store's credentials; and the
+# people's sign-ins, which a cluster administrator writes until
+# ORGANIZATION's Parties carry them.
+- apiGroups: [""]
+  resources: [secrets]
+  resourceNames: [c4-people-index]
+  verbs: [get, update]
+- apiGroups: [""]
+  resources: [secrets]
+  resourceNames: [c4-people-store, c4-sign-ins]
+  verbs: [get]
+# create cannot be limited by name; the namespace holds nothing else but
+# the people's issuer's Secrets.
 - apiGroups: [""]
   resources: [secrets]
   verbs: [create]

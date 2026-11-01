@@ -118,6 +118,10 @@ func runManager(args []string) error {
 	tierToken := fs.String("tier-token-file", "/var/run/secrets/c4-tier/token", "with --staging: the operator's service account token (audience c4-tier) for the sites' regional replicas")
 	signingNS := fs.String("signing-namespace", "c4-signing", "namespace of the farm's signing CA, readable only by the manager (empty turns signing off)")
 	signerAddr := fs.String("signer-addr", ":8092", "certificate issuer listen address, for node daemons and importers")
+	peopleStore := fs.String("people-store", "", "the people's issuer's store, shards as [name=]url,... (as a project's): it certifies people's device keys and keeps their device records and its index there, its credentials in the Secret c4-people-store of the signing namespace; empty serves no people's issuer")
+	signInProvider := fs.String("sign-in-provider", "", "with --people-store: the install's sign-in provider (an OIDC issuer URL) people's device keys are certified on, until a farm admin's signed act sets one")
+	signInClient := fs.String("sign-in-client-id", "", "with --sign-in-provider: the farm's own client ID there; a token for any other client is refused")
+	stepUpACR := fs.String("sign-in-step-up-acr", "", "acr values that mean multi-factor at the sign-in provider, comma-separated, beside OpenID PAPE's: what a touch key's step-up sign-in may show")
 	telemetryRing := fs.Bool("telemetry-ring", false, "the telemetry tier a farm starts at before its farm admin sets one: keep the last two hours of the work queue's decisions, redacted, in memory, so a diagnostic bundle (GET /api/v1/diagnose) covers the moment a problem happened; off, a bundle holds the present moment alone. Nothing leaves the farm either way; C4_TELEMETRY=off holds it off")
 	holderTransfer := fs.String("holder-transfer", "disallow", "holder-transfer credential leases, a holder's own sign-in materialized for the holder's own unit pods: allow or disallow")
 	policyFile := fs.String("policy-file", "", "the farm's policy: a YAML map of policy keys to {value, limit} (internal/work/policy), the farm's value and its limit on a project's; empty keeps the built-in ones")
@@ -171,6 +175,20 @@ func runManager(args []string) error {
 	}
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &c4v1.Project{}, project.NamespaceIndex, project.IndexNamespaces); err != nil {
 		return err
+	}
+	if *peopleStore != "" {
+		installer, err := installerToken(*hudDev, *hudInstaller, *hudDevOpen)
+		if err != nil {
+			return err
+		}
+		iss, err := newPeopleIssuer(ctx, sig, kube, mgr.GetAPIReader(), *signingNS, peopleOptions{store: *peopleStore, provider: *signInProvider,
+			clientID: *signInClient, stepUpACR: splitList(*stepUpACR), singlePerson: *singlePerson, installer: installer})
+		if err != nil {
+			return err
+		}
+		if iss != nil {
+			sig.people = iss
+		}
 	}
 	reg := &project.Registry{Cache: mgr.GetClient(), Secrets: mgr.GetAPIReader(), Namespace: *namespace}
 	if err := (&controller.ProjectReconciler{Client: mgr.GetClient(), Projects: reg}).SetupWithManager(mgr); err != nil {
@@ -446,6 +464,9 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		// installer token, never on the listen address.
 		srv.Loopback = loopbackOnly(addr)
 	}
+	// The browser and the CLI reach the people's issuer at the HUD's own
+	// origin, where the web app's key lives.
+	srv.People = sig.people
 	if sandbox != "" {
 		if srv.DevViewers == nil {
 			return errors.New("--hud-sandbox is for a development farm: it needs --hud-dev-viewers")
