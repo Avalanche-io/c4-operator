@@ -1,0 +1,34 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "device:c43dXuCrk3h7NR12xYMjZy6PcUNdC5g3g5vt9tgur7RjBR8o2rtZ6CVWLmjtUWpgeSSN1aJWrH4H9XEoxL1AjYuWsH",
+      "digest": {
+        "c4": "c43dXuCrk3h7NR12xYMjZy6PcUNdC5g3g5vt9tgur7RjBR8o2rtZ6CVWLmjtUWpgeSSN1aJWrH4H9XEoxL1AjYuWsH"
+      }
+    }
+  ],
+  "predicateType": "https://cccc.io/provenance/device/v1",
+  "predicate": {
+    "farm": "c44idf4JMNHVz2qxyvz7f6uEYWzv4JCZ9sAfgtubwd7WeHAXcGjbK4pUuZtQ5uoUoafSYNFdhgUWohqTkLtNMvYjBy",
+    "person": "dana",
+    "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEGERdy4xpd1JrLox8T9VNH_FmsH3jrsFdWvkbkZdIvSuK9Q00dkkeZuBWxgNW1h9qPm8V2lCbrqju3o5QOGN61g",
+    "protection": "hardware",
+    "kind": "browser",
+    "label": "Safari on dana's Mac, a passkey",
+    "evidence": "id-token",
+    "idToken": "eyJhbGciOiJSUzI1NiIsImtpZCI6InNzby0yMDI2LTEwIn0.eyJhY3IiOiJwaHJoIiwiYW1yIjpbInB3ZCIsImh3ayJdLCJhdWQiOiJjNC1zYWx0bWFyc2giLCJhdXRoX3RpbWUiOjE3OTM0ODI3OTAsImVtYWlsIjoiZGFuYUBzdHVkaW8uZXhhbXBsZSIsImV4cCI6MTc5MzQ4NjQwMCwiaWF0IjoxNzkzNDgyODAwLCJpc3MiOiJodHRwczovL3Nzby5zdHVkaW8uZXhhbXBsZSIsIm5vbmNlIjoiYzQzZFh1Q3JrM2g3TlIxMnhZTWpaeTZQY1VOZEM1ZzNnNXZ0OXRndXI3UmpCUjhvMnJ0WjZDVldMbWp0VVdwZ2VTU04xYUpXckg0SDlYRW94TDFBall1V3NIIiwic3ViIjoiMDB1MmRhbmEifQ.r6nOlZuvILYZlCk3VoOxqVhmwFV_I89OVPOyKzPuF8A",
+    "providerKey": "c41XTDxYDxbWpYNFsuRSqZgGMq44NSntvhit3n8VBLJSC4iThQqB4hpD9tvNTwdWKrD3sGjMkJ9vYrPxeMephia4vE",
+    "nonce": "XTulGEo-_mFR-kd4NbX_Zw",
+    "requestedAt": "2026-11-01T21:12:40Z",
+    "webauthn": {
+      "rpId": "hud.studio.example",
+      "origin": "https://hud.studio.example",
+      "credentialId": "8RwWuFugLTHhEQ32SQDqN3FXj108n70g1Hg7CPXyTQw",
+      "authenticatorData": "Q_ZsxKUbkbMspqvBJYHDyqRJeIUSaiKjoGyZu1aVRLYFAAAAAA",
+      "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoib1V5dm9HV3JKU0VZS05fbGpTU0dDclZ1U2lEQVZpMmtsT2kzbWp3UkRGZyIsIm9yaWdpbiI6Imh0dHBzOi8vaHVkLnN0dWRpby5leGFtcGxlIiwiY3Jvc3NPcmlnaW4iOmZhbHNlfQ",
+      "signature": "MEUCIGHMUKQ4U6UFpAYK_45XoOgwe5ZjqPq9cajqjHAclWNGAiEAmkQ4gDakOwwLRTNtic7mSdCfttWDTdBGZWxmtYO9YY0"
+    },
+    "signedAt": "2026-11-01T21:12:40.4Z"
+  }
+}

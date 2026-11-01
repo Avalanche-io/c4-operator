@@ -63,6 +63,9 @@ type Key struct {
 	Chain    []*x509.Certificate
 	// Touch is a person's touch key, a device of its own.
 	Touch *Key
+	// RPID and Origin make a touch key a browser's passkey (Passkey): it
+	// signs as WebAuthn, for that relying party at that origin.
+	RPID, Origin string
 
 	by schema.Actor
 }
@@ -81,6 +84,63 @@ func (f *Farm) Person(t testing.TB, name string, touch bool) *Key {
 		k.Touch = f.p256(t, k.Identity, true, "", 12*time.Hour)
 	}
 	return k
+}
+
+// Passkey makes k's touch key a browser's passkey for rpID at origin, so
+// a confirmed act's touch is a WebAuthn assertion, as a browser makes it.
+func (k *Key) Passkey(rpID, origin string) *Key {
+	k.Touch.RPID, k.Touch.Origin = rpID, origin
+	return k
+}
+
+// UP and UV are the authenticator data flags a passkey sets when the
+// person was present and verified.
+const (
+	UP = 0x01
+	UV = 0x04
+)
+
+// Assertion signs for msg as the passkey k: the WebAuthn assertion whose
+// challenge is msg's (provenance.WebAuthnChallenge), made at k's origin
+// for its relying party with the person present and verified, and its DER
+// signature.
+func (k *Key) Assertion(t testing.TB, msg []byte) (provenance.WebAuthn, []byte) {
+	t.Helper()
+	cd, _ := json.Marshal(map[string]any{"type": "webauthn.get", "challenge": provenance.WebAuthnChallenge(msg), "origin": k.Origin, "crossOrigin": false})
+	return k.AssertionOf(t, cd, UP|UV)
+}
+
+// AssertionOf signs the given client data and flags as the passkey k, so
+// a test can break one part of an assertion.
+func (k *Key) AssertionOf(t testing.TB, clientData []byte, flags byte) (provenance.WebAuthn, []byte) {
+	t.Helper()
+	rp := sha256.Sum256([]byte(k.RPID))
+	ad := append(rp[:], flags, 0, 0, 0, 0)
+	cdHash := sha256.Sum256(clientData)
+	h := sha256.Sum256(append(append([]byte{}, ad...), cdHash[:]...))
+	sig, err := ecdsa.SignASN1(rand.Reader, k.P256, h[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return provenance.WebAuthn{AuthenticatorData: ad, ClientDataJSON: clientData}, sig
+}
+
+// TouchRecord is k's touch key's device record, as the people's issuer
+// keeps it: k's person, the touch key, the device key it confirms for,
+// and a passkey's relying party and origin.
+func (f *Farm) TouchRecord(t testing.TB, k *Key) *schema.Device {
+	t.Helper()
+	spki, err := x509.MarshalPKIXPublicKey(&k.Touch.P256.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := schema.DevicePredicate{Farm: f.ID, Person: k.by.Person, Key: base64.RawURLEncoding.EncodeToString(spki), TouchFor: k.Device,
+		Protection: schema.ProtectionHardware, Kind: "browser", Evidence: schema.EvidenceIDToken}
+	if k.Touch.RPID != "" {
+		p.WebAuthn = &schema.DeviceWebAuthn{RPID: k.Touch.RPID, Origin: k.Touch.Origin}
+	}
+	return &schema.Device{Type: schema.StatementType, PredicateType: provenance.PredicateDevice, Predicate: p,
+		Subject: []schema.Subject{{Name: "device:" + k.Touch.Device, Digest: map[string]string{"c4": k.Touch.Device}}}}
 }
 
 // Agent makes an agent's key and its leaf (agent/<name>), naming the
@@ -259,7 +319,8 @@ func (f *Farm) SignAct(t testing.TB, k *Key, a Act) []byte {
 
 // Sign signs a payload as k, and with k's touch key too when confirmed:
 // each signature keyed by its leaf's fingerprint, the device key's
-// first, the touch key's chain in touchCertificateChain.
+// first, the touch key's chain in touchCertificateChain. A passkey's
+// touch is a WebAuthn assertion, in touchWebAuthn beside its signature.
 func Sign(t testing.TB, payload []byte, k *Key, confirmed bool) []byte {
 	t.Helper()
 	b := provenance.Bundle{MediaType: provenance.BundleMediaType, DSSEEnvelope: provenance.Envelope{PayloadType: provenance.PayloadType,
@@ -273,9 +334,18 @@ func Sign(t testing.TB, payload []byte, k *Key, confirmed bool) []byte {
 		b.VerificationMaterial.TouchCertificateChain = chainOf(k.Touch)
 	}
 	b.VerificationMaterial.X509CertificateChain = *chainOf(k)
+	msg := provenance.PAE(provenance.PayloadType, payload)
 	for _, s := range signers {
+		sig := []byte(nil)
+		if s.RPID != "" {
+			var w provenance.WebAuthn
+			w, sig = s.Assertion(t, msg)
+			b.VerificationMaterial.TouchWebAuthn = &w
+		} else {
+			sig = s.SignRaw(t, msg)
+		}
 		b.DSSEEnvelope.Signatures = append(b.DSSEEnvelope.Signatures, provenance.Signature{KeyID: provenance.Fingerprint(s.Leaf()),
-			Sig: base64.StdEncoding.EncodeToString(s.SignRaw(t, provenance.PAE(provenance.PayloadType, payload)))})
+			Sig: base64.StdEncoding.EncodeToString(sig)})
 	}
 	out, err := json.Marshal(b)
 	if err != nil {

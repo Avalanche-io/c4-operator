@@ -35,11 +35,13 @@ type Request struct {
 type Enrolment struct {
 	Request Request `json:"request"`
 	// Proof is the key's raw r||s signature (low S) over the request's
-	// canonical JSON, base64url.
-	Proof      string `json:"proof"`
-	Protection string `json:"protection"`
-	Kind       string `json:"kind"`
-	Label      string `json:"label,omitempty"`
+	// canonical JSON, base64url. A passkey sends WebAuthn instead: its
+	// assertion over the request's challenge, made at the HUD's origin.
+	Proof      string                 `json:"proof,omitempty"`
+	WebAuthn   *schema.DeviceWebAuthn `json:"webauthn,omitempty"`
+	Protection string                 `json:"protection"`
+	Kind       string                 `json:"kind"`
+	Label      string                 `json:"label,omitempty"`
 	// IDToken is the sign-in provider's ID token, whose nonce is the
 	// device ID.
 	IDToken string `json:"idToken,omitempty"`
@@ -73,7 +75,7 @@ type Certified struct {
 func (i *Issuer) predicate(e *Enrolment, now time.Time) (*schema.DevicePredicate, *ecdsa.PublicKey, string, error) {
 	q := e.Request
 	p := &schema.DevicePredicate{Farm: q.Farm, Person: q.Person, Key: q.Key, TouchFor: q.TouchFor, Nonce: q.Nonce, RequestedAt: q.RequestedAt,
-		Proof: e.Proof, Protection: e.Protection, Kind: e.Kind, Label: e.Label}
+		Proof: e.Proof, WebAuthn: e.WebAuthn, Protection: e.Protection, Kind: e.Kind, Label: e.Label}
 	if q.Farm != i.Farm() {
 		return nil, nil, "", refuse(http.StatusBadRequest, "the request is for farm %.16s, and this is %.16s", q.Farm, i.Farm())
 	}
@@ -87,13 +89,28 @@ func (i *Issuer) predicate(e *Enrolment, now time.Time) (*schema.DevicePredicate
 	if err := checkProof(p); err != nil {
 		return nil, nil, "", refuse(http.StatusForbidden, "%v", err)
 	}
+	if w := p.WebAuthn; w != nil {
+		// A passkey is this farm's only if it was made for the HUD and
+		// signed at its origin; its record keeps both, and every touch is
+		// held to them.
+		switch rp := i.WebAuthn; {
+		case p.TouchFor == "":
+			return nil, nil, "", refuse(http.StatusBadRequest, "a passkey is a touch key: name the device key it confirms for (touchFor)")
+		case rp == nil:
+			return nil, nil, "", refuse(http.StatusForbidden, "this farm takes no passkeys: it names no HUD origin (--hud-origin)")
+		case w.RPID != rp.ID || w.Origin != rp.Origin:
+			return nil, nil, "", refuse(http.StatusForbidden, "the passkey is for %s at %s; this farm's HUD is %s at %s", w.RPID, w.Origin, rp.ID, rp.Origin)
+		}
+	}
 	spki, _ := p.PublicKey()
 	pub, _ := x509.ParsePKIXPublicKey(spki)
 	return p, pub.(*ecdsa.PublicKey), schema.DeviceID(spki), nil
 }
 
 // checkProof checks a device record's key is P-256 and its proof is the
-// key's own signature over the request.
+// key's own signature over the request: raw, or a passkey's WebAuthn
+// assertion over the request's challenge, made at the relying party and
+// origin the record names.
 func checkProof(p *schema.DevicePredicate) error {
 	spki, err := p.PublicKey()
 	if err != nil {
@@ -106,6 +123,9 @@ func checkProof(p *schema.DevicePredicate) error {
 	pub, ok := pk.(*ecdsa.PublicKey)
 	if !ok || pub.Curve != elliptic.P256() {
 		return errors.New("a device key is ECDSA P-256")
+	}
+	if w := p.WebAuthn; w != nil {
+		return checkPasskeyProof(pub, p.ProofMessage(), w)
 	}
 	sig, err := base64.RawURLEncoding.DecodeString(p.Proof)
 	if err != nil {
@@ -520,4 +540,25 @@ func (x *Index) ownerRecord() *schema.Device {
 		}
 	}
 	return nil
+}
+
+// checkPasskeyProof checks a passkey's enrolment assertion over msg, and
+// that it was made for the record's relying party at its origin.
+func checkPasskeyProof(pub *ecdsa.PublicKey, msg []byte, w *schema.DeviceWebAuthn) error {
+	var ad, cd, sig []byte
+	for _, f := range []struct {
+		into *[]byte
+		s    string
+	}{{&ad, w.AuthenticatorData}, {&cd, w.ClientDataJSON}, {&sig, w.Signature}} {
+		b, err := base64.RawURLEncoding.DecodeString(f.s)
+		if err != nil {
+			return errors.New("the passkey's assertion is not base64url")
+		}
+		*f.into = b
+	}
+	a, err := provenance.VerifyWebAuthn(pub, msg, provenance.WebAuthn{AuthenticatorData: ad, ClientDataJSON: cd}, sig)
+	if err != nil {
+		return fmt.Errorf("the passkey's assertion is not over its request: %w", err)
+	}
+	return a.CheckRP(w.RPID, w.Origin)
 }

@@ -120,6 +120,20 @@ readable, because records made before personal keys keep them.
   key's and then the touch key's, each with its key ID. The bundle carries
   the touch key's chain as `verificationMaterial.touchCertificateChain`, beside
   `x509CertificateChain`.
+- **A browser's touch key is a passkey,** which signs only as WebAuthn. Its
+  signature is an assertion: DER over `authenticatorData ||
+  SHA-256(clientDataJSON)`, whose challenge is base64url of the SHA-256 of
+  the DSSE payload's PAE. The bundle carries the assertion as
+  `verificationMaterial.touchWebAuthn` (`authenticatorData`,
+  `clientDataJSON`), beside the second signature. The verifier checks that:
+  - the client data is a `webauthn.get` with that challenge, not from another
+    origin's frame;
+  - the person was present and verified (UP and UV);
+  - the signature is the touch key's, its S folded to the low form first;
+  - the relying party and origin are the ones the passkey's device record
+    names.
+
+  The CLI's touch key signs raw, as a device key does.
 - **The farm takes each act once,** by the SHA-256 of the DSSE payload as
   signed, never by the envelope's C4 ID.
 
@@ -140,7 +154,10 @@ the evidence the key was certified on:
 - `approval`: a confirmed act of the person's from another device.
 
 A touch key is a device of its own, naming the device key it confirms for
-(`touchFor`). A renewal is a record of its own, naming the record it renews.
+(`touchFor`). A passkey's record has `webauthn` in place of `proof`: its
+relying party (`rpId`), the HUD's `origin`, its `credentialId`, and its
+enrolment assertion over the same request, whose challenge is base64url of
+the SHA-256 of `ProofMessage`. A renewal is a record of its own, naming the record it renews.
 `proof` is the key's own signature over its enrolment request, the canonical
 JSON of `{farm, person, key, touchFor, nonce, requestedAt}`
 (`ProofMessage`); `go test ./schema` verifies every fixture's.

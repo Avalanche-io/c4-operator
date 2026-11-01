@@ -1,0 +1,27 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "device:c44qgqYoBWC4nZSQDksrxGnddkVVg2sc5sbSMRmuzD8e83ECw3Yg2QP1tMzCFM3LJ6zceVVGNpvXhruDDzodWKuzkQ",
+      "digest": {
+        "c4": "c44qgqYoBWC4nZSQDksrxGnddkVVg2sc5sbSMRmuzD8e83ECw3Yg2QP1tMzCFM3LJ6zceVVGNpvXhruDDzodWKuzkQ"
+      }
+    }
+  ],
+  "predicateType": "https://cccc.io/provenance/device/v1",
+  "predicate": {
+    "farm": "c44idf4JMNHVz2qxyvz7f6uEYWzv4JCZ9sAfgtubwd7WeHAXcGjbK4pUuZtQ5uoUoafSYNFdhgUWohqTkLtNMvYjBy",
+    "person": "dana",
+    "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmKvc0u30Zh6ddUEvv8s-BVDAtf0Fm66zD_Q6Snsvbrh6iDDuem96aPadSL3GpiH6MXFzNguYbKpb-fizPaOPEQ",
+    "protection": "software-browser",
+    "kind": "browser",
+    "label": "Safari on dana's Mac",
+    "evidence": "id-token",
+    "idToken": "eyJhbGciOiJSUzI1NiIsImtpZCI6InNzby0yMDI2LTEwIn0.eyJhdWQiOiJjNC1zYWx0bWFyc2giLCJlbWFpbCI6ImRhbmFAc3R1ZGlvLmV4YW1wbGUiLCJleHAiOjE3OTM0ODY0MDAsImlhdCI6MTc5MzQ4MjgwMCwiaXNzIjoiaHR0cHM6Ly9zc28uc3R1ZGlvLmV4YW1wbGUiLCJub25jZSI6ImM0NHFncVlvQldDNG5aU1FEa3NyeEduZGRrVlZnMnNjNXNiU01SbXV6RDhlODNFQ3czWWcyUVAxdE16Q0ZNM0xKNnpjZVZWR05wdlhocnVERHpvZFdLdXprUSIsInN1YiI6IjAwdTJkYW5hIn0.wgSKTjoO6JSHudhNStKj986aaG0lMiMv7VUU9sfm8Zo",
+    "providerKey": "c41XTDxYDxbWpYNFsuRSqZgGMq44NSntvhit3n8VBLJSC4iThQqB4hpD9tvNTwdWKrD3sGjMkJ9vYrPxeMephia4vE",
+    "nonce": "nLNh7Dw8Sml7AilHlpiDtQ",
+    "requestedAt": "2026-11-01T21:10:02Z",
+    "proof": "ixa74X1tv6BN8bbETT7UQ8GI5bM_vMfS4iabGn3aJYBSsCWDYTcxiC8aj4nziZ3RDSDeYqjsqldB8SPKOMEGsQ",
+    "signedAt": "2026-11-01T21:10:02.4Z"
+  }
+}

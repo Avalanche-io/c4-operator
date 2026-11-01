@@ -442,6 +442,15 @@ func TestDeviceFixtureProofs(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		if w := d.Predicate.WebAuthn; w != nil {
+			// A passkey's proof is its WebAuthn assertion over the request.
+			dec := func(s string) []byte { b, _ := base64.RawURLEncoding.DecodeString(s); return b }
+			a, err := provenance.VerifyWebAuthn(k, d.Predicate.ProofMessage(), provenance.WebAuthn{AuthenticatorData: dec(w.AuthenticatorData), ClientDataJSON: dec(w.ClientDataJSON)}, dec(w.Signature))
+			if err != nil {
+				return err
+			}
+			return a.CheckRP(w.RPID, w.Origin)
+		}
 		sig, err := base64.RawURLEncoding.DecodeString(d.Predicate.Proof)
 		if err != nil {
 			return err

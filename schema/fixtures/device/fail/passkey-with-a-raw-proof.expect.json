@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "not",
+  "errors": [
+    {
+      "path": "predicate.proof",
+      "message": "a passkey proves itself with its WebAuthn assertion, never a raw proof",
+      "fix": "remove proof"
+    }
+  ]
+}

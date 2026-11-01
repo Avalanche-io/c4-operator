@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "proof",
+  "errors": [
+    {
+      "path": "predicate",
+      "message": "a device key proves itself with its own signature over its request",
+      "fix": "add proof:, or webauthn: for a passkey"
+    }
+  ]
+}

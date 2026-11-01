@@ -74,7 +74,6 @@
         "evidence",
         "nonce",
         "requestedAt",
-        "proof",
         "signedAt"
       ],
       "properties": {
@@ -162,6 +161,9 @@
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]{86}$",
           "description": "The key's own signature over its enrolment request: ECDSA P-256 with SHA-256, raw r||s (64 bytes, low S), base64url, over the canonical JSON (RFC 8785) of {farm, person, key, touchFor if any, nonce, requestedAt}."
+        },
+        "webauthn": {
+          "$ref": "#/$defs/webauthn"
         },
         "signedAt": {
           "type": "string",
@@ -259,6 +261,28 @@
         },
         {
           "if": {
+            "required": [
+              "webauthn"
+            ]
+          },
+          "then": {
+            "required": [
+              "touchFor"
+            ],
+            "not": {
+              "required": [
+                "proof"
+              ]
+            }
+          },
+          "else": {
+            "required": [
+              "proof"
+            ]
+          }
+        },
+        {
+          "if": {
             "properties": {
               "evidence": {
                 "const": "installer"
@@ -281,6 +305,52 @@
           }
         }
       ]
+    },
+    "webauthn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rpId",
+        "origin",
+        "credentialId",
+        "authenticatorData",
+        "clientDataJSON",
+        "signature"
+      ],
+      "description": "A passkey: a browser's touch key, which signs only as WebAuthn. It stands in for proof: an assertion over the enrolment request, whose challenge is base64url(SHA-256(the request's canonical JSON)), with the person present and verified (UP and UV). The passkey's every touch is held to the relying party and origin named here.",
+      "properties": {
+        "rpId": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$",
+          "description": "The relying party the passkey was made for: the HUD's host (hud.studio.example), or localhost."
+        },
+        "origin": {
+          "type": "string",
+          "pattern": "^(https://[^/\\s]+|http://localhost(:[0-9]+)?)$",
+          "description": "The HUD's origin, where the browser signs: https://hud.studio.example."
+        },
+        "credentialId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{16,}$",
+          "maxLength": 1366,
+          "description": "The passkey's credential ID, base64url, so the HUD asks for this passkey and no other."
+        },
+        "authenticatorData": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{50,}$",
+          "description": "The enrolment assertion's authenticator data, base64url: the relying party's hash, the flags and the counter."
+        },
+        "clientDataJSON": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "description": "The enrolment assertion's client data, base64url: type webauthn.get, the challenge and the origin."
+        },
+        "signature": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{8,100}$",
+          "description": "The passkey's signature over authenticatorData || SHA-256(clientDataJSON): ECDSA P-256, DER, base64url."
+        }
+      }
     },
     "id": {
       "type": "string",

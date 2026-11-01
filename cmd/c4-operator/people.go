@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -51,6 +52,9 @@ type peopleOptions struct {
 	singlePerson string
 	// installer is a one-person farm's installer token.
 	installer []byte
+	// hudOrigin is the HUD's origin, where a browser's passkey touch key
+	// is made and signs (--hud-origin); "" takes no passkeys.
+	hudOrigin string
 }
 
 // newPeopleIssuer makes the people's issuer, or nil when the install
@@ -74,6 +78,10 @@ func newPeopleIssuer(ctx context.Context, s *signing, kube kubernetes.Interface,
 	if err != nil {
 		return nil, fmt.Errorf("--people-store: %w", err)
 	}
+	rp, err := passkeyRP(o.hudOrigin)
+	if err != nil {
+		return nil, err
+	}
 	owner := func(ctx context.Context) string {
 		b := farmBinding(ctx, reader)
 		if b == nil {
@@ -83,7 +91,7 @@ func newPeopleIssuer(ctx context.Context, s *signing, kube kubernetes.Interface,
 	}
 	iss := &people.Issuer{CA: s.ca,
 		Index:    &people.Index{Farm: farmOf(s), Roots: s.pool, Store: shardStore{st}, Head: &secretHead{kube: kube, ns: signingNS}},
-		Provider: people.Provider{Issuer: o.provider, ClientID: o.clientID}, StepUp: people.StepUp{ACR: o.stepUpACR},
+		Provider: people.Provider{Issuer: o.provider, ClientID: o.clientID}, StepUp: people.StepUp{ACR: o.stepUpACR}, WebAuthn: rp,
 		SignIns: &secretSignIns{kube: kube, ns: signingNS}, Owner: owner, InstallerToken: o.installer,
 		// The farm owner's admins: before ORGANIZATION's Parties and their
 		// purposes, the farm binding's owner.
@@ -92,6 +100,21 @@ func newPeopleIssuer(ctx context.Context, s *signing, kube kubernetes.Interface,
 			return b != nil && b.Spec.Owner == person
 		}}
 	return iss, nil
+}
+
+// passkeyRP is the relying party passkeys are made for: the HUD's origin,
+// and its host as the relying party's ID. An origin is https, or
+// http://localhost, the only plain-HTTP origin a browser makes passkeys at.
+func passkeyRP(origin string) (*people.WebAuthnRP, error) {
+	if origin == "" {
+		return nil, nil
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" || u.Path != "" || u.RawQuery != "" || u.User != nil ||
+		!(u.Scheme == "https" || u.Scheme == "http" && u.Hostname() == "localhost") {
+		return nil, fmt.Errorf("--hud-origin %q is not an origin: write https://<the HUD's host>, or http://localhost:<port>", origin)
+	}
+	return &people.WebAuthnRP{ID: strings.ToLower(u.Hostname()), Origin: u.Scheme + "://" + strings.ToLower(u.Host)}, nil
 }
 
 func farmOf(s *signing) string { return provenance.FarmID(s.ca.Cert) }

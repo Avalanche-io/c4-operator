@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "origin",
+  "errors": [
+    {
+      "path": "predicate.webauthn.origin",
+      "message": "\"http://hud.studio.example\" is not the HUD's origin",
+      "fix": "write https://<the HUD's host>, or http://localhost:<port> on a one-person farm"
+    }
+  ]
+}

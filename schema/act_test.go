@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/sha256"
@@ -163,14 +164,18 @@ func TestDeviceRecords(t *testing.T) {
 		if !ok || pub.Curve != elliptic.P256() {
 			t.Fatalf("%s: the key is %T, not P-256", c.Name, k)
 		}
-		sig, _ := base64.RawURLEncoding.DecodeString(p.Proof)
-		r, s := new(big.Int).SetBytes(sig[:32]), new(big.Int).SetBytes(sig[32:])
-		if s.Cmp(new(big.Int).Rsh(elliptic.P256().Params().N, 1)) > 0 {
-			t.Errorf("%s: the proof's S is high", c.Name)
-		}
-		h := sha256.Sum256(p.ProofMessage())
-		if !ecdsa.Verify(pub, h[:], r, s) {
-			t.Errorf("%s: the proof does not verify over %s", c.Name, p.ProofMessage())
+		if w := p.WebAuthn; w != nil {
+			checkPasskeyProof(t, c.Name, pub, p.ProofMessage(), w)
+		} else {
+			sig, _ := base64.RawURLEncoding.DecodeString(p.Proof)
+			r, s := new(big.Int).SetBytes(sig[:32]), new(big.Int).SetBytes(sig[32:])
+			if s.Cmp(new(big.Int).Rsh(elliptic.P256().Params().N, 1)) > 0 {
+				t.Errorf("%s: the proof's S is high", c.Name)
+			}
+			h := sha256.Sum256(p.ProofMessage())
+			if !ecdsa.Verify(pub, h[:], r, s) {
+				t.Errorf("%s: the proof does not verify over %s", c.Name, p.ProofMessage())
+			}
 		}
 		if p.Evidence == EvidenceIDToken {
 			payload, _ := base64.RawURLEncoding.DecodeString(strings.Split(p.IDToken, ".")[1])
@@ -218,5 +223,30 @@ func TestActFixturesRead(t *testing.T) {
 	}
 	if id, err := ParamsID(p.Params); err != nil || !strings.HasPrefix(id, "c4") {
 		t.Errorf("params ID %q, %v", id, err)
+	}
+}
+
+// checkPasskeyProof checks a passkey's enrolment assertion as WebAuthn
+// says: a get, whose challenge is the request's, at the record's origin,
+// for its relying party, with the person present and verified, and the
+// key's DER signature over authenticatorData || SHA-256(clientDataJSON).
+func checkPasskeyProof(t *testing.T, name string, pub *ecdsa.PublicKey, msg []byte, w *DeviceWebAuthn) {
+	t.Helper()
+	dec := func(s string) []byte { b, _ := base64.RawURLEncoding.DecodeString(s); return b }
+	ad, cd, sig := dec(w.AuthenticatorData), dec(w.ClientDataJSON), dec(w.Signature)
+	var client struct{ Type, Challenge, Origin string }
+	json.Unmarshal(cd, &client)
+	h := sha256.Sum256(msg)
+	rp := sha256.Sum256([]byte(w.RPID))
+	switch {
+	case client.Type != "webauthn.get" || client.Challenge != base64.RawURLEncoding.EncodeToString(h[:]) || client.Origin != w.Origin:
+		t.Errorf("%s: the client data %s is not a get of this request at %s", name, cd, w.Origin)
+	case len(ad) < 37 || !bytes.Equal(ad[:32], rp[:]) || ad[32]&0x05 != 0x05:
+		t.Errorf("%s: the authenticator data is not %s's with the person present and verified", name, w.RPID)
+	}
+	cdHash := sha256.Sum256(cd)
+	signed := sha256.Sum256(append(append([]byte{}, ad...), cdHash[:]...))
+	if !ecdsa.VerifyASN1(pub, signed[:], sig) {
+		t.Errorf("%s: the passkey's signature does not verify", name)
 	}
 }

@@ -106,3 +106,24 @@ func TestSignInsSecret(t *testing.T) {
 		t.Errorf("noor's sign-ins %v", ins["noor"])
 	}
 }
+
+// --hud-origin names the relying party passkeys are made for: an https
+// origin, or http://localhost, and nothing with a path.
+func TestPasskeyRP(t *testing.T) {
+	for origin, want := range map[string]*people.WebAuthnRP{
+		"":                                nil,
+		"https://hud.studio.example":      {ID: "hud.studio.example", Origin: "https://hud.studio.example"},
+		"https://HUD.studio.example:8443": {ID: "hud.studio.example", Origin: "https://hud.studio.example:8443"},
+		"http://localhost:8080":           {ID: "localhost", Origin: "http://localhost:8080"},
+	} {
+		got, err := passkeyRP(origin)
+		if err != nil || (got == nil) != (want == nil) || got != nil && *got != *want {
+			t.Errorf("%q: %+v, %v; want %+v", origin, got, err, want)
+		}
+	}
+	for _, bad := range []string{"http://hud.studio.example", "https://hud.studio.example/hud", "hud.studio.example", "https://dana@hud.studio.example", "http://127.0.0.1:8080"} {
+		if _, err := passkeyRP(bad); err == nil {
+			t.Errorf("%q: taken", bad)
+		}
+	}
+}

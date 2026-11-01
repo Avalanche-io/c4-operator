@@ -169,8 +169,24 @@ type DevicePredicate struct {
 	Nonce       string `json:"nonce"`
 	RequestedAt string `json:"requestedAt"`
 	// Proof is the key's raw r||s signature over ProofMessage, base64url.
-	Proof    string `json:"proof"`
-	SignedAt string `json:"signedAt"`
+	// A passkey has WebAuthn instead.
+	Proof    string          `json:"proof,omitempty"`
+	WebAuthn *DeviceWebAuthn `json:"webauthn,omitempty"`
+	SignedAt string          `json:"signedAt"`
+}
+
+// DeviceWebAuthn is a passkey's: a browser's touch key, which signs only
+// as WebAuthn. Its enrolment assertion stands in for the proof, signed
+// over ProofMessage's challenge (base64url of its SHA-256), and every
+// touch it makes is held to RPID and Origin. The binary fields are
+// base64url.
+type DeviceWebAuthn struct {
+	RPID              string `json:"rpId"`
+	Origin            string `json:"origin"`
+	CredentialID      string `json:"credentialId"`
+	AuthenticatorData string `json:"authenticatorData"`
+	ClientDataJSON    string `json:"clientDataJSON"`
+	Signature         string `json:"signature"`
 }
 
 // ParseDevice reads a device record and checks its shape.

@@ -2253,7 +2253,7 @@ want of it until slice K8.
 
 ```
 { request: { farm, person, key, touchFor?, nonce, requestedAt },
-  proof, protection, kind, label?, idToken?, approval?, code? }
+  proof?, webauthn?, protection, kind, label?, idToken?, approval?, code? }
 ```
 
 - `key` is the DER SubjectPublicKeyInfo, base64url. Its device ID is the C4
@@ -2270,6 +2270,24 @@ want of it until slice K8.
   same person, in force: never a touch key. A touch key comes only from a
   step-up sign-in, from `c4 farm up`, or on a touch from another of the
   person's touch keys (4.3).
+- **A passkey,** a browser's touch key, sends `webauthn` instead of
+  `proof`, because a passkey signs only as WebAuthn:
+  `{ rpId, origin, credentialId, authenticatorData, clientDataJSON, signature }`,
+  the binary fields base64url.
+  - **What it signs:** an assertion (`navigator.credentials.get`, user
+    verification required) whose challenge is base64url of the SHA-256 of the
+    request's canonical JSON.
+  - **What the issuer checks:** the client data is a `webauthn.get` with that
+    challenge and isn't from another origin's frame; the authenticator says
+    the person was present and verified (UP and UV); the signature (DER) is
+    the key's.
+  - **Whose passkey it is:** `rpId` and `origin` must be the farm's HUD, as
+    `--hud-origin` names it (`https://hud.studio.example`, or
+    `http://localhost:<port>`). A farm without that setting refuses passkeys
+    (`403`). A passkey is a touch key only, so it names `touchFor`.
+  - **What the record keeps:** the device record keeps `webauthn`. Every touch
+    the passkey makes after that is held to the same relying party and
+    origin, so a passkey used from another page confirms nothing.
 - **The ID token's nonce is the device ID** (the `c4…` string), never the
   request's `nonce`. A client sends the person to the provider with
   `nonce=<device ID>`, silently (`prompt=none`) once a session is open.
@@ -2285,7 +2303,7 @@ position, order, chain, expires }`.
 
 | route                         | body                                               | answer                                                                                                                                                                                                                                                                                                                                                                                                                       | caller                                       |
 | ----------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| `GET /v1/people/config`       |                                                    | `{ farm, order, position, provider?: { issuer, clientID, grade, position }, nonce, stepUp: { maxAge, acr, amr }, owner?, ownerEnrolled, leafTTL, lapse }`: where to send the person and how. The one read anyone may make                                                                                                                                                                                                    | the web app (K3), the CLI (K4)               |
+| `GET /v1/people/config`       |                                                    | `{ farm, order, position, provider?: { issuer, clientID, grade, position }, nonce, stepUp: { maxAge, acr, amr }, webauthn?: { id, origin }, owner?, ownerEnrolled, leafTTL, lapse }`: where to send the person and how. The one read anyone may make                                                                                                                                                                         | the web app (K3), the CLI (K4)               |
 | `POST /v1/people/enroll`      | `Enrolment` with `idToken`, or with `approval`     | `Certified`. On a token: from the provider in force, for the farm's client ID, issued in the last 10 minutes, its nonce the device ID, its subject the person's sign-in. A touch key needs a step-up. On `approval`: a booked approval naming this key, unexpired; on a farm with a sign-in provider, for a touch key only, since a new device enrols by signing in. `409` for a key seen before, `403` for anything refused | the web app (K3), `c4 farm login` (K4)       |
 | `POST /v1/people/renew`       | `Enrolment` with a fresh `idToken`, the same nonce | `Certified` for a device in force: a device record of its own naming the one it renews. On a farm with a sign-in provider every device renews on a fresh token for its person, whatever it was enrolled on, so a leaver's last leaf ends. A farm with no provider renews on the device's own proof. `403` once removed or lapsed: make a new key                                                                             | the web app (K3), the CLI (K4)               |
 | `POST /v1/people/owner`       | `{ owner: Enrolment, touch?: Enrolment }`          | `{ owner: Certified, touch? }`: a one-person farm's owner key and touch key, evidence `installer`, on `X-C4-Installer`. `409` once an owner key exists                                                                                                                                                                                                                                                                       | `c4 farm up` (K4, K7)                        |

@@ -122,6 +122,7 @@ func runManager(args []string) error {
 	peopleStore := fs.String("people-store", "", "the people's issuer's store, shards as [name=]url,... (as a project's): it certifies people's device keys and keeps their device records and its index there, its credentials in the Secret c4-people-store of the signing namespace; empty serves no people's issuer")
 	signInProvider := fs.String("sign-in-provider", "", "with --people-store: the install's sign-in provider (an OIDC issuer URL) people's device keys are certified on; until a touch can confirm a farm admin's act, it changes only by redeploying with another")
 	signInClient := fs.String("sign-in-client-id", "", "with --sign-in-provider: the farm's own client ID there; a token for any other client is refused")
+	hudOrigin := fs.String("hud-origin", "", "the HUD's origin as people's browsers reach it (https://hud.studio.example, or http://localhost:<port>): where a browser's passkey touch key is made and signs; without it, passkeys are refused")
 	stepUpACR := fs.String("sign-in-step-up-acr", "", "acr values that mean multi-factor at the sign-in provider, comma-separated, beside OpenID PAPE's: what a touch key's step-up sign-in may show")
 	telemetryRing := fs.Bool("telemetry-ring", false, "the telemetry tier a farm starts at before its farm admin sets one: keep the last two hours of the work queue's decisions, redacted, in memory, so a diagnostic bundle (GET /api/v1/diagnose) covers the moment a problem happened; off, a bundle holds the present moment alone. Nothing leaves the farm either way; C4_TELEMETRY=off holds it off")
 	holderTransfer := fs.String("holder-transfer", "disallow", "holder-transfer credential leases, a holder's own sign-in materialized for the holder's own unit pods: allow or disallow")
@@ -183,7 +184,7 @@ func runManager(args []string) error {
 			return err
 		}
 		iss, err := newPeopleIssuer(ctx, sig, kube, mgr.GetAPIReader(), *signingNS, peopleOptions{store: *peopleStore, provider: *signInProvider,
-			clientID: *signInClient, stepUpACR: splitList(*stepUpACR), singlePerson: *singlePerson, installer: installer})
+			clientID: *signInClient, stepUpACR: splitList(*stepUpACR), singlePerson: *singlePerson, installer: installer, hudOrigin: *hudOrigin})
 		if err != nil {
 			return err
 		}

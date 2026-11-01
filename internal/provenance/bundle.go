@@ -56,10 +56,13 @@ type Bundle struct {
 // VerificationMaterial carries the signer's certificate chain, leaf first.
 // A confirmed act (act/v1) has two signatures over its one payload, the
 // device key's and then its touch key's, each with its key ID; the touch
-// key's chain is TouchCertificateChain.
+// key's chain is TouchCertificateChain. A browser's touch key is a
+// passkey, whose signature is a WebAuthn assertion: TouchWebAuthn carries
+// what it signed beside its DER signature (webauthn.go).
 type VerificationMaterial struct {
 	X509CertificateChain  CertificateChain  `json:"x509CertificateChain"`
 	TouchCertificateChain *CertificateChain `json:"touchCertificateChain,omitempty"`
+	TouchWebAuthn         *WebAuthn         `json:"touchWebAuthn,omitempty"`
 }
 
 // CertificateChain is DER certificates, leaf first.
@@ -138,6 +141,10 @@ type Verified struct {
 	// TouchDevice is a confirmed act's touch key, by its device ID: the
 	// second of its two signatures.
 	TouchDevice string
+	// TouchAssertion is a passkey touch's origin and relying party, when
+	// the touch key signed as WebAuthn; CheckTouchKey holds them to the
+	// passkey's device record.
+	TouchAssertion *Assertion
 	// Expires is when the first of the signer's certificates ends: how
 	// long the farm keeps the record's payload hash.
 	Expires time.Time
@@ -201,7 +208,9 @@ var ErrChain = errors.New("the signer's certificate does not chain to a trusted 
 // touch key's chain, has exactly two: the device key's, then the touch
 // key's, each keyed by its leaf's fingerprint. An extra, missing or
 // unknown signature, or two in the other order, refuses the record; it
-// is never skipped (PEOPLE-KEYS-2 10.4 item 5).
+// is never skipped (PEOPLE-KEYS-2 10.4 item 5). A passkey's touch is a
+// WebAuthn assertion over the PAE's challenge (TouchWebAuthn,
+// VerifyWebAuthn), never a raw signature.
 func VerifyBundle(data []byte, roots *x509.CertPool) (*Verified, error) {
 	var b Bundle
 	if err := json.Unmarshal(data, &b); err != nil {
@@ -223,6 +232,10 @@ func VerifyBundle(data []byte, roots *x509.CertPool) (*Verified, error) {
 	}
 	msg := PAE(b.DSSEEnvelope.PayloadType, payload)
 	sigs := b.DSSEEnvelope.Signatures
+	var assertion *Assertion
+	if b.VerificationMaterial.TouchWebAuthn != nil && b.VerificationMaterial.TouchCertificateChain == nil {
+		return nil, fmt.Errorf("%w: a WebAuthn assertion is a touch key's, and the bundle has no touch key", ErrUntrusted)
+	}
 	var touch *x509.Certificate
 	var touchInter *x509.CertPool
 	_, device := leaf.PublicKey.(*ecdsa.PublicKey)
@@ -240,7 +253,12 @@ func VerifyBundle(data []byte, roots *x509.CertPool) (*Verified, error) {
 		if err := signedBy(leaf, sigs[0], msg); err != nil {
 			return nil, fmt.Errorf("the first signature, the device key's: %w", err)
 		}
-		if err := signedBy(touch, sigs[1], msg); err != nil {
+		if w := b.VerificationMaterial.TouchWebAuthn; w != nil {
+			assertion, err = signedByPasskey(touch, sigs[1], msg, *w)
+		} else {
+			err = signedBy(touch, sigs[1], msg)
+		}
+		if err != nil {
 			return nil, fmt.Errorf("the second signature, the touch key's: %w", err)
 		}
 	case device:
@@ -316,7 +334,7 @@ func VerifyBundle(data []byte, roots *x509.CertPool) (*Verified, error) {
 	case CertDevice(touch) == v.Device:
 		return nil, fmt.Errorf("%w: the touch key is the device key itself", ErrUntrusted)
 	}
-	v.TouchDevice = CertDevice(touch)
+	v.TouchDevice, v.TouchAssertion = CertDevice(touch), assertion
 	if touch.NotAfter.Before(v.Expires) {
 		v.Expires = touch.NotAfter
 	}
@@ -368,6 +386,19 @@ func signedBy(leaf *x509.Certificate, s Signature, msg []byte) error {
 		return fmt.Errorf("%w: the signature is not base64", ErrSignatureForm)
 	}
 	return VerifyP256(leaf.PublicKey.(*ecdsa.PublicKey), msg, sig)
+}
+
+// signedByPasskey checks a passkey touch's signature: keyed by its leaf's
+// fingerprint, a WebAuthn assertion over msg's challenge.
+func signedByPasskey(leaf *x509.Certificate, s Signature, msg []byte, w WebAuthn) (*Assertion, error) {
+	if s.KeyID != Fingerprint(leaf) {
+		return nil, fmt.Errorf("%w: signature key ID %.16s is not its leaf's fingerprint", ErrUntrusted, s.KeyID)
+	}
+	sig, err := base64.StdEncoding.DecodeString(s.Sig)
+	if err != nil {
+		return nil, fmt.Errorf("%w: the signature is not base64", ErrSignatureForm)
+	}
+	return VerifyWebAuthn(leaf.PublicKey.(*ecdsa.PublicKey), msg, w, sig)
 }
 
 // FarmID is a farm's ID: the C4 ID of its CA's certificate (DER), the CA

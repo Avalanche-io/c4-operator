@@ -394,7 +394,8 @@ func sameSubjects(a, b []Subject) bool {
 // records in force at the act's book position, which the people's issuer
 // keeps (K2): the touch key's record is the same person's, on the same
 // farm, and names the device key that signed first as the one it
-// confirms for (touchFor). An act that isn't confirmed passes.
+// confirms for (touchFor); a passkey's touch was made at the relying
+// party and origin its record names. An act that isn't confirmed passes.
 func CheckTouchKey(v *Verified, devices []*schema.Device) error {
 	if !v.Confirmed() {
 		return nil
@@ -418,6 +419,19 @@ func CheckTouchKey(v *Verified, devices []*schema.Device) error {
 			return fmt.Errorf("touch key %s is %s's, the act %s's", v.TouchDevice, d.Predicate.Person, person)
 		case d.Predicate.TouchFor != v.Device:
 			return fmt.Errorf("key %s is not a touch key for device %s (its record names %q)", v.TouchDevice, v.Device, d.Predicate.TouchFor)
+		}
+		// A passkey's touch is held to the relying party and origin its
+		// record was enrolled at, so a passkey used from another page is
+		// refused; a passkey never signs raw.
+		switch w := d.Predicate.WebAuthn; {
+		case w == nil && v.TouchAssertion != nil:
+			return fmt.Errorf("touch key %s signed as a passkey, and its record is not a passkey's", v.TouchDevice)
+		case w != nil && v.TouchAssertion == nil:
+			return fmt.Errorf("touch key %s is a passkey, which signs only as WebAuthn", v.TouchDevice)
+		case w != nil:
+			if err := v.TouchAssertion.CheckRP(w.RPID, w.Origin); err != nil {
+				return fmt.Errorf("touch key %s: %w", v.TouchDevice, err)
+			}
 		}
 		return nil
 	}

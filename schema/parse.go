@@ -236,7 +236,7 @@ var nouns = map[string]string{
 	"use": "a use", "needs": "needs", "runs": "runs", "param": "a parameter", "userInterface": "userInterface",
 	"progressRule": "a progress rule", "fileFilter": "a file filter",
 	"by": "by", "for": "for", "delegation": "a delegation", "credential": "a credential", "deployment": "a deployment",
-	"subject": "a subject", "act": "an act", "actChain": "an act's chain", "device": "a device record",
+	"subject": "a subject", "act": "an act", "actChain": "an act's chain", "device": "a device record", "webauthn": "a passkey",
 }
 
 // elem is one step of a path: a key, or an index (key "").
@@ -873,7 +873,17 @@ func (c *checker) say(kind string, shape []string, path []elem, v any, ctx map[s
 			return "a browser the owner enrolled keeps the hash of its one-time code", "add code: the SHA-256 of the code"
 		case "approval":
 			return "a device approved from another names the act that approved it", "add approval: the C4 ID of the confirmed act"
+		case "proof":
+			return "a device key proves itself with its own signature over its request", "add proof:, or webauthn: for a passkey"
+		case "touchFor":
+			return "a passkey is a touch key: it names the device key it confirms for", "add touchFor: that device key's ID"
 		}
+	case "forbidden device predicate.proof":
+		return "a passkey proves itself with its WebAuthn assertion, never a raw proof", "remove proof"
+	case "pattern device predicate.webauthn.origin":
+		return fmt.Sprintf("%s is not the HUD's origin", quote(v)), "write https://<the HUD's host>, or http://localhost:<port> on a one-person farm"
+	case "pattern device predicate.webauthn.rpId":
+		return fmt.Sprintf("%s is not a relying party's ID", quote(v)), "write the HUD's host alone, as hud.studio.example"
 	case "forbidden device predicate.idToken", "forbidden device predicate.providerKey", "forbidden device predicate.code", "forbidden device predicate.approval":
 		return fmt.Sprintf("%s is not the evidence this record says", field), fmt.Sprintf("remove %s, or set evidence: to what it is", field)
 	case "const device predicate.kind":

@@ -69,6 +69,10 @@ type Issuer struct {
 	SignIns SignIns
 	// StepUp is what a touch key's sign-in must show.
 	StepUp StepUp
+	// WebAuthn is the relying party a browser's passkey touch key must be
+	// made for: the HUD's host and origin (--hud-origin). nil refuses
+	// passkeys; the CLI's touch key needs none.
+	WebAuthn *WebAuthnRP
 	// Owner is a one-person farm's person, from its farm binding or
 	// --single-person-farm; nil or "" on a studio farm.
 	Owner func(ctx context.Context) string
@@ -260,6 +264,13 @@ func decode(r *http.Request, v any) error {
 	return nil
 }
 
+// WebAuthnRP is the relying party passkeys are made for: its ID (the
+// HUD's host) and the HUD's origin.
+type WebAuthnRP struct {
+	ID     string `json:"id"`
+	Origin string `json:"origin"`
+}
+
 // Config is what a client reads before it enrols: the farm, the sign-in
 // provider to send the person to and how, and whether a one-person farm's
 // owner is enrolled.
@@ -274,6 +285,9 @@ type Config struct {
 	Nonce string `json:"nonce"`
 	// StepUp says what a touch key's sign-in must show.
 	StepUp StepUpConfig `json:"stepUp"`
+	// WebAuthn is the relying party a passkey touch key is made for (its
+	// rp.id) and the origin it signs at; nil when the farm takes none.
+	WebAuthn *WebAuthnRP `json:"webauthn,omitempty"`
 	// Owner is a one-person farm's person, and OwnerEnrolled whether the
 	// installer path has been used (it is then refused).
 	Owner         string `json:"owner,omitempty"`
@@ -314,7 +328,7 @@ func (i *Issuer) handleConfig(w http.ResponseWriter, r *http.Request) {
 	x.mu.Lock()
 	pos, enrolled := int64(len(x.entries)), x.ownerRecord() != nil
 	x.mu.Unlock()
-	writeJSON(w, http.StatusOK, Config{Farm: i.Farm(), Order: OrderIssuer, Position: pos, Provider: set,
+	writeJSON(w, http.StatusOK, Config{Farm: i.Farm(), Order: OrderIssuer, Position: pos, Provider: set, WebAuthn: i.WebAuthn,
 		Nonce:  "the device ID: the C4 ID of the key's DER SubjectPublicKeyInfo, as a string (c4...)",
 		StepUp: StepUpConfig{MaxAge: age.String(), ACR: append(append([]string{}, DefaultStepUpACR...), i.StepUp.ACR...), AMR: "mfa, or factors of two kinds (RFC 8176): known (pwd, pin, kba), held (otp, sms, tel, hwk, swk, sc, pop), being (fpt, face, iris, retina, vbm)"},
 		Owner:  i.owner(r.Context()), OwnerEnrolled: enrolled, LeafTTL: LeafTTL.String(), Lapse: Lapse.String()})

@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "touchFor",
+  "errors": [
+    {
+      "path": "predicate",
+      "message": "a passkey is a touch key: it names the device key it confirms for",
+      "fix": "add touchFor: that device key's ID"
+    }
+  ]
+}
