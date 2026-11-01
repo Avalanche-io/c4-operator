@@ -237,7 +237,7 @@ func fail(w http.ResponseWriter, err error) {
 	case errors.As(err, &tk):
 		code = http.StatusForbidden
 	case errors.Is(err, provenance.ErrUntrusted), errors.Is(err, provenance.ErrChain), errors.Is(err, provenance.ErrSignatureForm),
-		errors.Is(err, provenance.ErrClock), errors.Is(err, provenance.ErrNeedsTouch), errors.Is(err, ErrNotInForce):
+		errors.Is(err, provenance.ErrClock), errors.Is(err, provenance.ErrNeedsTouch), errors.Is(err, ErrNotInForce), errors.Is(err, ErrTouchKey):
 		code = http.StatusForbidden
 	case errors.Is(err, provenance.ErrSeen):
 		code = http.StatusConflict

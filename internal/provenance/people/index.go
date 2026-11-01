@@ -486,7 +486,11 @@ func (x *Index) load(ctx context.Context, e *Entry, pending bool) error {
 var actKinds = map[string]string{KindRemoval: ActRemoveDevice, KindCode: ActBrowserCode, KindCountersign: ActCountersign, KindApproval: ActApprove}
 
 // loadAct checks an act entry against its act: still the act it was,
-// signed as it was, and saying what the entry says.
+// signed as it was, by a device in force at the position before the entry
+// and, for a confirmed act, beside that device's own touch key there
+// (checkAct), and saying what the entry says. The queue makes the same
+// check at the seal (BookChecker), so a confirmed grade is never sealed
+// on a touch key nobody checked.
 func (x *Index) loadAct(e *Entry, b []byte, pending bool) error {
 	verb, ok := actKinds[e.Kind]
 	if !ok {
@@ -498,6 +502,9 @@ func (x *Index) loadAct(e *Entry, b []byte, pending bool) error {
 	}
 	if v.PredicateType != provenance.PredicateAct {
 		return fmt.Errorf("a %s entry books a %s record, not an act", e.Kind, v.PredicateType)
+	}
+	if err := x.checkAct(v, e.Position-1); err != nil {
+		return err
 	}
 	a, errs := schema.ParseAct(v.Payload)
 	if errs != nil {
@@ -850,10 +857,19 @@ func (x *Index) checkAct(v *provenance.Verified, pos int64) error {
 	case d.Predicate.Person != person || d.Predicate.Farm != v.Farm:
 		return fmt.Errorf("%w: device %.16s is %s's at farm %.16s, the act %s's at %.16s", ErrNotInForce, v.Device, d.Predicate.Person, d.Predicate.Farm, person, v.Farm)
 	case d.Predicate.TouchFor != "":
-		return fmt.Errorf("device %.16s is a touch key: it signs beside its device key, never first", v.Device)
+		return fmt.Errorf("%w: device %.16s is a touch key: it signs beside its device key, never first", ErrTouchKey, v.Device)
 	}
-	return provenance.CheckTouchKey(v, devs)
+	if err := provenance.CheckTouchKey(v, devs); err != nil {
+		return fmt.Errorf("%w: %v", ErrTouchKey, err)
+	}
+	return nil
 }
+
+// ErrTouchKey means a confirmed act's touch key isn't, by the device
+// records in force at its position, the signer's touch key for the device
+// that signed it: its record doesn't name that device (touchFor), or is
+// another person's or farm's. Or a touch key signed first.
+var ErrTouchKey = errors.New("not the signer's touch key")
 
 // Entries returns the entries after position from, with their IDs: with a
 // farm book, the sealed ones, at their book positions.

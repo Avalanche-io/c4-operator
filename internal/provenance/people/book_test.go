@@ -15,6 +15,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
+	"github.com/Avalanche-io/c4-operator/internal/provenance/provtest"
 )
 
 // booked is a rig whose index is kept in a farm book: the book's store and
@@ -193,5 +194,63 @@ func TestIndexAdoptedWithItsOrder(t *testing.T) {
 	after, _, _ := b.index.Entries(context.Background(), int64(len(old)))
 	if len(after) == 0 || after[0].Position != int64(len(old))+1 || after[0].Prev != oldIDs[len(oldIDs)-1] || after[0].Order != people.OrderBook {
 		t.Fatalf("the entry after the adopted ones: %+v", after)
+	}
+}
+
+// A confirmed act is confirmed only by the signer's own touch key: one
+// whose record names the device that signed (touchFor), the same person's.
+// Another enrolled device of the person's, beside the signer, is refused at
+// the issuer and, written into the book around it, at the seal; the same
+// act confirmed by the real touch key passes both.
+func TestTouchKeyMustNameTheSigner(t *testing.T) {
+	b := inBook(studio(t), nil)
+	laptop, desk, laptopTouch := newDev(t), newDev(t), newDev(t)
+	k := b.key(laptop, b.signIn(laptop, "dana", danaSub))
+	deskKey := b.key(desk, b.signIn(desk, "dana", danaSub))
+	e := b.enrolment(laptopTouch, "dana", laptop.id, "mac")
+	e.IDToken = b.sso.Token(b.now, danaSub, laptopTouch.id, map[string]any{"auth_time": b.now.Unix(), "amr": []string{"hwk", "pin"}})
+	var tc people.Certified
+	if code, body := b.call("POST", "/v1/people/enroll", "", e, &tc); code != http.StatusOK {
+		t.Fatalf("touch: %d %s", code, body)
+	}
+	b.seal()
+	target := newDev(t)
+	k.Touch = deskKey
+	wrong := b.act(k, "dana", "approve-machine", deviceSubject(target.id), map[string]string{}, true)
+	if code, body, _ := b.book(wrong, ""); code != http.StatusForbidden || !strings.Contains(body, "not a touch key for device") {
+		t.Errorf("the issuer took an act confirmed by another of dana's devices: %d %s", code, body)
+	}
+	if st, _ := b.ptr.Read(context.Background()); len(st.Pending) != 0 {
+		t.Errorf("an act the issuer refused was left pending: %v", st.Pending)
+	}
+	// Written into the book around the issuer, the queue refuses it.
+	approval := func(act []byte) farmbook.Submission {
+		return farmbook.Submission{Record: act, Entry: &people.Entry{Kind: people.KindApproval, Device: target.id, Person: "dana", By: "dana",
+			Order: people.OrderPending, Farm: b.farm.ID, At: b.now.Format(time.RFC3339Nano), Expires: b.now.Add(people.ApprovalTTL).Format(time.RFC3339Nano),
+			Record: provtest.ID(string(act))}}
+	}
+	if _, err := (&farmbook.Writer{Store: b.store, Pointer: b.ptr}).Append(context.Background(), approval(wrong)); err != nil {
+		t.Fatal(err)
+	}
+	res := b.seal()
+	if len(res.Refused) != 1 || !strings.Contains(res.Refused[0].Why, "not a touch key for device") || res.Segment.Last != res.Segment.First-1 {
+		t.Fatalf("the seal: refused %+v, sealed %d to %d", res.Refused, res.Segment.First, res.Segment.Last)
+	}
+	// The real touch key passes both.
+	k.Touch = b.key(laptopTouch, &tc)
+	b.now = b.now.Add(time.Second)
+	if code, body, _ := b.book(b.act(k, "dana", "approve-machine", deviceSubject(target.id), map[string]string{}, true), ""); code != http.StatusOK {
+		t.Fatalf("the issuer, confirmed by dana's touch key: %d %s", code, body)
+	}
+	other := newDev(t)
+	b.now = b.now.Add(time.Second)
+	right := b.act(k, "dana", "approve-machine", deviceSubject(other.id), map[string]string{}, true)
+	sub := approval(right)
+	sub.Entry.(*people.Entry).Device = other.id
+	if _, err := (&farmbook.Writer{Store: b.store, Pointer: b.ptr}).Append(context.Background(), sub); err != nil {
+		t.Fatal(err)
+	}
+	if res := b.seal(); len(res.Refused) != 0 || res.Segment.Last != res.Segment.First+1 {
+		t.Fatalf("the seal, confirmed by dana's touch key: refused %+v, sealed %d to %d", res.Refused, res.Segment.First, res.Segment.Last)
 	}
 }

@@ -139,8 +139,11 @@ func (i *Issuer) takeAct(r *http.Request, data []byte) (*Booked, error) {
 	// before refuses the removed device's act. The act is taken once only
 	// after they pass, so a refused act isn't used up.
 	es, err := x.append(ctx, now, i.sign, func() ([]pending, error) {
+		// The device that signed it is in force here, and a confirmed
+		// act's touch key is that device's own (CheckTouchKey): its record
+		// names the device, and it is the same person's, on this farm.
 		if err := x.checkAct(v, x.pos); err != nil {
-			return nil, err
+			return nil, refuse(http.StatusForbidden, "%v", err)
 		}
 		// The index is shared and lasting, so an act it books is refused a
 		// second time at any replica, after any restart, by its payload

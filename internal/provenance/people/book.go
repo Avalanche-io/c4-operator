@@ -136,7 +136,24 @@ func (x *Index) appendBook(ctx context.Context, now time.Time, build func() ([]p
 				}
 			}
 			e.Farm, e.Position, e.Prev, e.Order, e.At = x.Farm, 0, "", OrderPending, now.UTC().Format(time.RFC3339Nano)
-			subs = append(subs, farmbook.Submission{Entry: e})
+			raw, err := json.Marshal(e)
+			if err != nil {
+				return nil, err
+			}
+			subs = append(subs, farmbook.Submission{Entry: json.RawMessage(raw)})
+		}
+		// Each entry is checked at its provisional position, as the queue
+		// will check it, before it is written: one this process refuses is
+		// never left pending. The next read drops what this one added.
+		var out []*Entry
+		for k, p := range ps {
+			e := p.entry
+			e.Position = x.pos + int64(k) + 1
+			if err := x.load(ctx, e, true); err != nil {
+				return nil, err
+			}
+			x.pend = append(x.pend, e)
+			out = append(out, e)
 		}
 		ids, err := farmbook.Submit(ctx, x.Book.Store, x.Book.Pointer, x.state, subs)
 		if errors.Is(err, farmbook.ErrMoved) && try < maxAppendTries {
@@ -145,17 +162,8 @@ func (x *Index) appendBook(ctx context.Context, now time.Time, build func() ([]p
 		if err != nil {
 			return nil, err
 		}
-		var out []*Entry
-		for k, p := range ps {
-			e := p.entry
-			x.pos++
-			e.Position = x.pos
-			if err := x.load(ctx, e, true); err != nil {
-				return nil, err
-			}
-			x.pend, x.pendIDs = append(x.pend, e), append(x.pendIDs, ids[k])
-			out = append(out, e)
-		}
+		x.pos += int64(len(out))
+		x.pendIDs = append(x.pendIDs, ids...)
 		return out, nil
 	}
 }
