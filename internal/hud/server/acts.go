@@ -33,8 +33,9 @@ const ActHeader = "X-C4-Act"
 // ActIndex is the people's index as the HUD checks a person's act against
 // it (people.Index).
 type ActIndex interface {
-	Position(ctx context.Context) (int64, error)
-	CheckAct(ctx context.Context, v *provenance.Verified, pos int64) error
+	// CheckActNow is the live check: against every entry, pending ones
+	// too, at the clock.
+	CheckActNow(ctx context.Context, v *provenance.Verified) error
 }
 
 // errAct marks a request whose act the HUD refuses.
@@ -124,11 +125,7 @@ func (s *Server) citeAct(ctx context.Context, r *http.Request, v *api.Viewer, su
 		// confirmed act's touch key that device's: a removed device's
 		// certificate lives on up to 12 hours, and the index ends it at
 		// once. Checked before the act is taken, so a refusal spends none.
-		pos, err := s.PeopleIndex.Position(ctx)
-		if err == nil {
-			err = s.PeopleIndex.CheckAct(ctx, vr, pos)
-		}
-		if err != nil {
+		if err := s.PeopleIndex.CheckActNow(ctx, vr); err != nil {
 			return nil, fmt.Errorf("%w: %v", errAct, err)
 		}
 	}

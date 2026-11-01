@@ -924,6 +924,18 @@ func (x *Index) CheckAct(ctx context.Context, v *provenance.Verified, pos int64)
 	return x.checkAct(v, pos, x.timeAt(pos, v.SignedAt))
 }
 
+// CheckActNow is CheckAct as a live decision makes it: against every entry
+// read, pending ones too, at the clock, so a removal or a lapse counts at
+// once. The HUD takes a person's act by it.
+func (x *Index) CheckActNow(ctx context.Context, v *provenance.Verified) error {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if err := x.sync(ctx); err != nil {
+		return err
+	}
+	return x.checkAct(v, x.pos, time.Now())
+}
+
 // verifiable refuses a verifier's position past the sealed head, where
 // pending entries would count: a verifier judges by sealed position only.
 func (x *Index) verifiable(pos int64) error {

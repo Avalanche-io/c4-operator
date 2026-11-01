@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -232,5 +233,36 @@ func TestLiveCheckUsesTheClockOnAQuietBook(t *testing.T) {
 	}
 	if err := b.checkAt(act, pos); err != nil {
 		t.Errorf("a verifier at the old seal: %v", err)
+	}
+}
+
+// The HUD takes a person's act by the live check: in a farm book, a device
+// enrolled a moment ago, still pending, signs at once, and a removal still
+// pending refuses at once; the verifier's check at a pending position is
+// ErrNotSealed.
+func TestLiveCheckCountsPendingEntries(t *testing.T) {
+	b := inBook(studio(t), nil)
+	d, other := newDev(t), newDev(t)
+	k := b.key(d, b.signIn(d, "dana", danaSub))
+	ko := b.key(other, b.signIn(other, "dana", danaSub))
+	act := b.act(k, "dana", "approve", provenance.Subject{}, nil, false)
+	v, err := provenance.VerifyBundle(act, b.farm.Roots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := b.index.CheckActNow(ctx, v); err != nil {
+		t.Errorf("a device pending its seal: %v", err)
+	}
+	pos, _ := b.index.Position(ctx)
+	if err := b.index.CheckAct(ctx, v, pos); !errors.Is(err, farmbook.ErrNotSealed) {
+		t.Errorf("a verifier at a pending position: %v", err)
+	}
+	b.seal()
+	if code, body, _ := b.book(b.act(ko, "dana", "remove-device", deviceSubject(d.id), nil, false), ""); code != http.StatusOK {
+		t.Fatalf("remove: %d %s", code, body)
+	}
+	if err := b.index.CheckActNow(ctx, v); !errors.Is(err, people.ErrNotInForce) {
+		t.Errorf("a device whose removal is pending: %v", err)
 	}
 }
