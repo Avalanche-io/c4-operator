@@ -390,6 +390,9 @@ func (i *Issuer) renew(r *http.Request, e *Enrolment) (*Certified, error) {
 		q.Protection, q.Kind, q.Label, q.Evidence, q.Code, q.Approval, q.Renews = old.Protection, old.Kind, old.Label, old.Evidence, old.Code, old.Approval, d.record
 		var ps []pending
 		if in != nil {
+			// The renewal is certified on the fresh token, whatever the
+			// device was first enrolled on: its evidence is the token.
+			q.Evidence, q.Code, q.Approval = schema.EvidenceIDToken, "", ""
 			q.IDToken, q.ProviderKey = in.raw, in.keyID
 			ps = x.signInsBooked(in)
 		}
