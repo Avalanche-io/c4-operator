@@ -45,6 +45,11 @@ const (
 	// of farm-level acts (internal/farmbook). Signed by the queue, which
 	// seals it.
 	PredicateBook = schema.BookPredicateType
+	// PredicateBookEntry: an entry the people's issuer wrote for the farm
+	// book, as written (its subject the entry's C4 ID without this
+	// signature). Signed by the issuer, so the queue seals only what it
+	// wrote.
+	PredicateBookEntry = "https://cccc.io/provenance/book-entry/v1"
 )
 
 // BundleMediaType identifies an attestation bundle: a DSSE envelope and the
@@ -442,7 +447,7 @@ func CheckSigner(v *Verified) error {
 		// The actor's own key, or a tracker's relay (checkAct).
 		_, err := checkAct(v)
 		return err
-	case PredicateDevice:
+	case PredicateDevice, PredicateBookEntry:
 		want = ComponentIdentity("issuer")
 	case PredicateImport, PredicateIngest:
 		if strings.HasPrefix(v.Identity, IdentityBase+"sa/") {
