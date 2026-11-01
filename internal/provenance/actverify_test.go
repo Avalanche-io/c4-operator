@@ -92,7 +92,10 @@ func TestDeviceSignatureHasOneForm(t *testing.T) {
 		t.Fatal("the high-S twin is not a valid ECDSA signature, so this test proves nothing")
 	}
 	der, _ := ecdsa.SignASN1(rand.Reader, noor.P256, sha(provenance.PAE(provenance.PayloadType, payload)))
-	for name, sig := range map[string][]byte{"high S": high, "DER": der, "65 bytes": append(raw, 0), "63 bytes": raw[:63]} {
+	// S with a leading zero byte is the same number, so ECDSA alone takes
+	// it: only the length tells it apart.
+	padded := append(append(append([]byte{}, raw[:32]...), 0), raw[32:]...)
+	for name, sig := range map[string][]byte{"high S": high, "DER": der, "S with a leading zero": padded, "65 bytes": append(raw, 0), "63 bytes": raw[:63]} {
 		b.DSSEEnvelope.Signatures[0].Sig = base64.StdEncoding.EncodeToString(sig)
 		if _, err := provenance.VerifyBundle(encode(t, b), f.Roots); !errors.Is(err, provenance.ErrSignatureForm) {
 			t.Errorf("%s: %v, want ErrSignatureForm", name, err)
