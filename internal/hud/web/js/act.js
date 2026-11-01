@@ -69,7 +69,23 @@ export function b64(bytes) {
   for (const b of bytes) s += String.fromCharCode(b);
   return btoa(s);
 }
-const b64url = (bytes) => b64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+export const b64url = (bytes) => b64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+export const unb64 = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+
+// canonical: JSON in its canonical form (RFC 8785) for the values the
+// HUD signs: objects' keys sorted, no whitespace, strings and numbers as
+// JSON.stringify writes them, which is what RFC 8785 asks of them
+export function canonical(v) {
+  if (Array.isArray(v)) return '[' + v.map(canonical).join(',') + ']';
+  if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map((k) => JSON.stringify(k) + ':' + canonical(v[k])).join(',') + '}';
+  return JSON.stringify(v);
+}
+
+// signRaw: the device key's signature over bytes in its one form, raw r||s
+// with a low S
+export async function signRaw(key, bytes) {
+  return lowS(new Uint8Array(await subtle().sign({ name: 'ECDSA', hash: 'SHA-256' }, key, bytes)));
+}
 const hex = (bytes) => [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
 
 // c4id: the C4 ID of bytes (SMPTE ST 2114): "c4" and the SHA-512 in
@@ -135,11 +151,11 @@ export async function signAct(signer, { subject, act, params, as }, now = new Da
   const st = statement({ farm: signer.farm, subject, act, params: params === undefined ? {} : params, user: signer.user, identity: signer.identity,
     device: signer.device, as, signedAt: now.toISOString(), nonce: b64url(nonce) });
   const payload = enc.encode(JSON.stringify(st));
-  const raw = new Uint8Array(await subtle().sign({ name: 'ECDSA', hash: 'SHA-256' }, signer.key, pae(PAYLOAD_TYPE, payload)));
+  const sig = await signRaw(signer.key, pae(PAYLOAD_TYPE, payload));
   const keyid = hex(new Uint8Array(await subtle().digest('SHA-256', signer.chain[0])));
   const bundle = {
     mediaType: BUNDLE_TYPE,
-    dsseEnvelope: { payloadType: PAYLOAD_TYPE, payload: b64(payload), signatures: [{ keyid, sig: b64(lowS(raw)) }] },
+    dsseEnvelope: { payloadType: PAYLOAD_TYPE, payload: b64(payload), signatures: [{ keyid, sig: b64(sig) }] },
     verificationMaterial: { x509CertificateChain: { certificates: signer.chain.map((c) => ({ rawBytes: b64(c) })) } },
   };
   return enc.encode(JSON.stringify(bundle));
@@ -181,6 +197,19 @@ export async function deviceKey(farm) {
   }
   return rec;
 }
+
+// saveCertified: keep what the issuer certified beside the key it is for
+export async function saveCertified(farm, certified) {
+  const rec = await idbDo('readonly', (s) => s.get(farm));
+  if (!rec) throw new Error('no device key for this farm');
+  rec.certified = certified;
+  await idbDo('readwrite', (s) => s.put(rec, farm));
+  return rec;
+}
+
+// forgetKey: drop this browser's key for a farm, once removed or lapsed:
+// the next load makes a new one
+export async function forgetKey(farm) { await idbDo('readwrite', (s) => s.delete(farm)); }
 
 // The signer this page signs with once the issuer has certified its key
 // (K2), and the jobs it can name by UID and spec digest.

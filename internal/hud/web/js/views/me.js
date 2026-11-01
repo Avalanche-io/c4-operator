@@ -19,12 +19,22 @@
 //     who else has let the tracker submit for them
 //     who has confirmed their login on each tracker
 //   3 each grant's and confirmation's signed record (its C4 ID)
+//
+// This browser's key and your devices (enrol.js, PEOPLE-KEYS-2 K3): whether
+// this browser signs your acts, and each device the farm's issuer holds in
+// force for you, with Remove. Removing is itself an act, signed by this
+// browser, so it shows only once this browser's key is certified.
+//   1 this browser's key, your devices, Remove
+//   2 how each was enrolled and when renewed, a countersignature, Remove
+//     all your devices
+//   3 each device's ID and its record (C4 IDs)
 
 import { h } from '../dom.js';
 import * as f from '../fmt.js';
 import { get } from '../api.js';
 import { c4idEl } from '../../design/components/c4id.js';
 import { heldSection } from './held.js';
+import * as enrol from '../enrol.js';
 
 const st = { trackers: null, grants: null, people: null, who: new Map(), logins: new Map(), err: null, terr: null, busy: false, at: null, notMe: new Set() };
 document.addEventListener('hud:changed', () => { st.at = null; st.who.clear(); st.logins.clear(); });
@@ -46,6 +56,87 @@ function load(ctx) {
   // an operator without people answers 404: the section stays away
   const people = get('/people?mine=1').then((p) => { st.people = p.entries || []; }, () => { st.people = false; });
   Promise.all([grants, trackers, people]).finally(() => { st.busy = false; ctx.refresh(); });
+}
+
+// ------------------------------------------------------------ devices
+
+const dv = { list: null, err: null, at: null, busy: false };
+document.addEventListener('hud:changed', () => { dv.at = null; });
+
+function loadDevices(ctx, user) {
+  if (dv.busy || dv.at === ctx.snap.now) return;
+  dv.busy = true;
+  dv.at = ctx.snap.now;
+  enrol.devices(user).then((d) => { dv.list = d.devices || []; dv.err = null; }, (e) => { dv.err = e.message; })
+    .finally(() => { dv.busy = false; ctx.refresh(); });
+}
+
+// a device removed, or all of them, or the person asked to sign in
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-device]');
+  if (!b) return;
+  e.preventDefault();
+  if (b.dataset.device === 'sign-in') return enrol.signInNow();
+  b.disabled = true;
+  try {
+    await enrol.remove(b.dataset.device === 'all' ? { all: true } : { device: b.dataset.device });
+    dv.at = null;
+    dv.err = null;
+  } catch (err) {
+    dv.err = err.message;
+  } finally {
+    b.disabled = false;
+    document.dispatchEvent(new CustomEvent('hud:refresh'));
+  }
+});
+
+const KINDS = { browser: 'Browser', mac: 'Mac', windows: 'Windows PC', linux: 'Linux machine' };
+const KEPT = { hardware: 'its key is in hardware and can’t be copied off it', 'software-browser': 'its key is kept by the browser', 'software-file': 'its key is in a file' };
+const EVIDENCE = { 'id-token': 'on your sign-in', installer: 'when the farm was set up', owner: 'with a code from the farm’s machine', approval: 'on your approval from another device' };
+
+// thisBrowser: whether this browser signs your acts, in a line
+function thisBrowser() {
+  const s = enrol.status;
+  switch (s.state) {
+    case 'signing': return h('p', null, `This browser signs your acts. Its key is certified until ${f.clock(s.expires)} and renews on its own.`);
+    case 'enrolling': return h('p', { class: 'dim' }, s.message || 'This browser is getting its key certified.');
+    case 'open': return h('p', null, 'This browser doesn’t sign your acts yet. On the farm’s machine, run ', h('code', null, 'c4 farm open'), ': it opens the HUD with a one-time code that certifies this browser’s key.');
+    case 'sign-in': return h('p', null, 'This browser doesn’t sign your acts yet: your sign-in provider wants you to sign in first. ',
+      h('button', { class: 'btn small primary', 'data-device': 'sign-in' }, 'Sign in'));
+    case 'refused': return h('p', { class: 'warn red' }, `This browser’s key was not certified: ${s.message}`);
+    default: return null;
+  }
+}
+
+function deviceRow(ctx, d, signing) {
+  const mine = d.device === enrol.status.device;
+  return h('div', { class: 'grow', 'data-key': 'd-' + d.device },
+    h('div', { class: 'gmain' },
+      h('b', null, d.label || KINDS[d.kind] || d.kind), mine ? h('span', { class: 'dim' }, ' · this browser') : null,
+      d.touchFor ? h('span', { class: 'dim' }, ' · your touch key') : null,
+      h('div', { class: 'gline' }, `${KINDS[d.kind] || d.kind}: ${KEPT[d.protection] || d.protection}.`),
+      ctx.level >= 2 ? h('div', { class: 'gline dim' }, `Enrolled ${EVIDENCE[d.evidence] || d.evidence}${d.renewedAt ? `, last renewed ${f.when(d.renewedAt)}` : ''}.${d.countersigned ? ' The farm’s machine countersigned it.' : ''}`) : null,
+      (d.flags || []).map((x) => h('div', { class: 'gline t-fail' }, `Seen from two places at once: ${(x.seen || []).join(' and ')}. If that wasn’t you, remove it.`)),
+      ctx.level >= 3 ? h('div', { class: 'gline dim' }, 'device ', c4idEl(d.device, { tail: 4, label: 'device ID' }), ' · record ', c4idEl(d.record, { tail: 4, label: 'device record' })) : null),
+    signing ? h('button', { class: 'btn small', 'data-device': d.device, title: mine ? 'Remove this browser’s key. It stops signing your acts at once, and this browser makes a new key.' : 'Remove it. Its key stops signing your acts at once and never comes back.' }, 'Remove') : null);
+}
+
+// devicesSection: this browser's key, and your devices in force; nothing
+// on a farm that runs no people's issuer
+function devicesSection(ctx, user) {
+  const s = enrol.status;
+  if (s.state === 'off' || s.state === 'starting') return null;
+  loadDevices(ctx, user);
+  const signing = s.state === 'signing';
+  const list = dv.list || [];
+  return h('div', { class: 'vsec', 'data-key': 'devices' },
+    h('header', null, h('h2', null, 'Your devices')),
+    h('p', { class: 'gintro' }, 'Each act you take in C4 is signed by a key of the device you take it on, so the farm’s record names the device as well as you. A device you remove stops signing at once.'),
+    thisBrowser(),
+    dv.err ? h('p', { class: 'warn red' }, dv.err) : null,
+    dv.list == null ? h('p', { class: 'dim' }, 'Reading…')
+      : list.length ? list.map((d) => deviceRow(ctx, d, signing)) : h('p', { class: 'dim' }, 'No device signs your acts yet.'),
+    signing && ctx.level >= 2 && list.length > 1 ? h('button', { class: 'btn small', 'data-device': 'all', title: 'Remove every device of yours at once, this browser too. Each signs again only once enrolled anew.' }, 'Remove all your devices') : null);
 }
 
 // who: the people who have let a tracker submit for them (level 2)
@@ -193,6 +284,7 @@ export default {
         h('header', null, h('h2', null, 'Trackers in your projects')),
         st.terr && st.trackers == null ? h('p', { class: 'warn red' }, st.terr)
           : st.trackers == null ? h('p', { class: 'dim' }, 'Reading…')
-          : st.trackers.length ? h('div', { class: 'ggrid' }, st.trackers.map((t) => trackerCard(ctx, t))) : h('p', { class: 'dim' }, 'Your projects have no trackers connected.')));
+          : st.trackers.length ? h('div', { class: 'ggrid' }, st.trackers.map((t) => trackerCard(ctx, t))) : h('p', { class: 'dim' }, 'Your projects have no trackers connected.')),
+      devicesSection(ctx, v.user));
   },
 };

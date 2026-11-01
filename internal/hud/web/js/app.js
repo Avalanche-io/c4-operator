@@ -30,6 +30,7 @@ import yourPage from './views/me.js';
 import needsYou from './views/needs.js';
 import sessions from './views/sessions.js';
 import { learnJobs } from './act.js';
+import { start as startSigning } from './enrol.js';
 
 const VIEWS = { queue, job, pools, workers: pools, map, tiers, graph, cost, wall, widget, mine, catalog, me: yourPage, needs: needsYou, sessions };
 // each view and the mode it arrives at (docs/intro/ladder.md)
@@ -583,8 +584,10 @@ subscribe((snap) => {
   f.setClock(snap.now);
   const was = me();
   setSnap(snap);
-  // the viewer is known now: their preferences apply
+  // the viewer is known now: their preferences apply, and this browser's
+  // key is enrolled or renewed for them (enrol.js)
   if (me() !== was) applyPrefs();
+  if (!staticMode && snap.viewer) startSigning(snap.viewer.user);
   render();
 }, (st, msg, code) => {
   state.status = staticMode ? 'static' : st;

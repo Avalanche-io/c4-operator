@@ -1,0 +1,349 @@
+// Enrolment (PEOPLE-KEYS-2 3, slice K3): this browser's key certified by
+// the farm's people's issuer (K2), and kept certified. The HUD serves the
+// issuer at its own origin under /issuer/v1/people/, so the key enrols
+// without leaving the page's origin; the HUD adds nothing to what it is
+// sent and is trusted for nothing.
+//
+// Once the page knows who is viewing, it:
+//   - reads the issuer's config; a farm that runs none (404) leaves every
+//     act unsigned, as before, and the page says nothing of it
+//   - makes the device key the first time (act.js deviceKey)
+//   - enrols it, on evidence the issuer can check without the HUD's word:
+//       a one-person farm: the one-time code `c4 farm open` puts in the
+//         page's link (#/<route>?browser=<code>), read once and taken out
+//         of the address bar at once; it works for a minute, on loopback
+//       a studio farm: an ID token from the farm's sign-in provider, whose
+//         nonce is the device ID, fetched on a silent round trip
+//         (prompt=none, an authorization code with PKCE); a provider that
+//         wants the person to sign in first leaves a Sign in button on
+//         their page, never a loop of redirects
+//   - signs every act with it (act.js useSigner)
+//   - renews it before its leaf ends: on its own proof on a one-person
+//     farm; on a studio farm by the same round trip, taken when the page
+//     is out of sight so nothing the person is typing is lost
+//   - forgets a key the issuer says was removed or has lapsed, and makes a
+//     new one: a removed key never comes back
+
+import { b64url, unb64, canonical, signRaw, deviceKey, saveCertified, forgetKey, useSigner, signAct } from './act.js';
+
+export const ISSUER = '/issuer/v1/people';
+// renew this long before the leaf ends
+export const RENEW_BEFORE = 60 * 60 * 1000;
+const enc = new TextEncoder();
+const RETURN = 'c4-hud-sign-in';
+
+// What the person's page shows of this browser's key:
+//   state: off (the farm runs no issuer) | starting | signing | enrolling
+//     | sign-in (the provider wants the person to sign in) | open (a
+//     one-person farm, opened without a code) | refused (the issuer's words
+//     in message)
+export const status = { state: 'starting', device: null, expires: null, person: null, message: null };
+
+// deps: what the flow touches outside itself, so a test can stand in for
+// each (the issuer, the provider, the key store, the address bar, the
+// clock). Writes go through api.js, which marks the farm's; it is loaded
+// when first used, so a test that stands in for it never loads it.
+const api = () => import('./api.js');
+const real = {
+  issuer: (path, body) => api().then((m) => m.issuer(path, body)),
+  token: (url, form) => api().then((m) => m.providerToken(url, form)),
+  fetch: (...a) => globalThis.fetch(...a),
+  deviceKey, saveCertified, forgetKey,
+  location: () => globalThis.location,
+  // the address bar as the person left it; the router reads a new route
+  replaceURL: (u) => {
+    const was = location.hash;
+    history.replaceState(null, '', u);
+    if (location.hash !== was) window.dispatchEvent(new HashChangeEvent('hashchange'));
+  },
+  go: (u) => location.assign(u),
+  session: () => globalThis.sessionStorage,
+  now: () => Date.now(),
+  hidden: () => document.hidden,
+  changed: () => document.dispatchEvent(new CustomEvent('hud:refresh')),
+};
+let deps = real;
+export function stubs(d) { deps = d ? { ...real, ...d } : real; }
+
+function set(s) {
+  Object.assign(status, s);
+  deps.changed();
+}
+
+// ------------------------------------------------------------ the request
+
+// request: an enrolment request, the issuer's Request, for a key
+export function request(farm, person, spki, now = new Date(deps.now())) {
+  return { farm, person, key: b64url(spki), nonce: b64url(globalThis.crypto.getRandomValues(new Uint8Array(16))), requestedAt: now.toISOString().replace(/\.\d+Z$/, 'Z') };
+}
+
+// enrolment: the request with the key's proof over its canonical JSON
+// (schema.DevicePredicate.ProofMessage), and what the device is
+export async function enrolment(key, req, evidence) {
+  const proof = b64url(await signRaw(key, enc.encode(canonical(req))));
+  return { request: req, proof, protection: 'software-browser', kind: 'browser', label: browserLabel(), ...evidence };
+}
+
+// browserLabel: what the person's device list calls this browser
+export function browserLabel(ua = globalThis.navigator ? navigator.userAgent : '') {
+  const b = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'A browser';
+  const os = /Mac OS X/.test(ua) ? 'macOS' : /Windows/.test(ua) ? 'Windows' : /Linux/.test(ua) ? 'Linux' : '';
+  return os ? `${b} on ${os}` : b;
+}
+
+// call: the issuer's answer to a read, or with a body a write
+async function call(path, body) {
+  const r = await deps.issuer(path, body === undefined || typeof body === 'string' || body instanceof Uint8Array ? body : JSON.stringify(body));
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const e = new Error(out.error || `${r.status}`);
+    e.status = r.status;
+    throw e;
+  }
+  return out;
+}
+
+// ------------------------------------------------------------ the round trip
+
+// codeIn: the one-time code a link carries in its route's query
+// (#/<route>?browser=<code>), and the hash without it
+export function codeIn(hash) {
+  const [path, query] = hash.split('?');
+  const q = new URLSearchParams(query || '');
+  const code = q.get('browser');
+  if (!code) return { code: null, hash };
+  q.delete('browser');
+  const rest = q.toString();
+  return { code, hash: rest ? `${path}?${rest}` : path };
+}
+
+// authorizeURL: the provider's authorization request for a device: its
+// nonce the device ID, an authorization code with PKCE, silent unless the
+// person asked to sign in
+export function authorizeURL(endpoint, { clientID, redirect, device, state, challenge, silent }) {
+  const q = new URLSearchParams({ response_type: 'code', client_id: clientID, redirect_uri: redirect, scope: 'openid', nonce: device, state, code_challenge: challenge, code_challenge_method: 'S256' });
+  if (silent) q.set('prompt', 'none');
+  return `${endpoint}${endpoint.includes('?') ? '&' : '?'}${q}`;
+}
+
+async function discover(issuer) {
+  const r = await deps.fetch(issuer.replace(/\/$/, '') + '/.well-known/openid-configuration', { headers: { Accept: 'application/json' } });
+  if (!r.ok) throw new Error(`the sign-in provider ${issuer} did not say where to sign in (${r.status})`);
+  return r.json();
+}
+
+const redirectOf = (loc) => loc.origin + loc.pathname;
+
+// signIn: send the person to the provider for a token naming this device;
+// the page comes back to finish() with the route it left from
+export async function signIn(cfg, device, { silent = true, renew = false } = {}) {
+  const loc = deps.location();
+  const meta = await discover(cfg.provider.issuer);
+  const verifier = b64url(globalThis.crypto.getRandomValues(new Uint8Array(32)));
+  const challenge = b64url(new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', enc.encode(verifier))));
+  const state = b64url(globalThis.crypto.getRandomValues(new Uint8Array(16)));
+  deps.session().setItem(RETURN, JSON.stringify({ state, verifier, farm: cfg.farm, back: loc.hash, renew, silent, token: meta.token_endpoint }));
+  deps.go(authorizeURL(meta.authorization_endpoint, { clientID: cfg.provider.clientID, redirect: redirectOf(loc), device, state, challenge, silent }));
+}
+
+// returned: the provider's answer, when this load is the round trip's end:
+// { idToken } or { error }, or null; the address bar is put back as the
+// person left it either way
+async function returned(cfg) {
+  const loc = deps.location();
+  const q = new URLSearchParams(loc.search);
+  if (!q.has('state')) return null;
+  const saved = JSON.parse(deps.session().getItem(RETURN) || 'null');
+  if (!saved || saved.state !== q.get('state') || saved.farm !== cfg.farm) return null;
+  deps.session().removeItem(RETURN);
+  // read before the address bar is put back: it is the same location
+  const code = q.get('code'), err = q.get('error'), redirect = redirectOf(loc);
+  for (const k of ['code', 'state', 'error', 'error_description', 'session_state', 'iss']) q.delete(k);
+  const rest = q.toString();
+  deps.replaceURL(loc.pathname + (rest ? '?' + rest : '') + saved.back);
+  if (err) return { error: err, silent: saved.silent, renew: saved.renew };
+  const r = await deps.token(saved.token, new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirect, client_id: cfg.provider.clientID, code_verifier: saved.verifier }).toString());
+  const t = await r.json().catch(() => ({}));
+  if (!r.ok || !t.id_token) return { error: t.error || `the sign-in provider answered ${r.status}`, renew: saved.renew };
+  return { idToken: t.id_token, renew: saved.renew };
+}
+
+// the provider's answers to a silent request that mean "ask the person"
+const ASK = new Set(['login_required', 'interaction_required', 'consent_required', 'account_selection_required']);
+
+// ------------------------------------------------------------ the flow
+
+let cfg = null, rec = null, person = null, timer = null;
+
+// use: sign with a certified key from now on, and renew it in time; a key
+// just certified waits a minute at least, so a browser clock hours off the
+// issuer's never renews back to back
+function use(r, fresh) {
+  const c = r.certified;
+  useSigner({ key: r.key, chain: c.chain.map(unb64), farm: c.farm, user: c.person, identity: c.identity, device: c.device });
+  set({ state: 'signing', device: c.device, expires: c.expires, person: c.person, message: null });
+  clearTimeout(timer);
+  const left = Date.parse(c.expires) - deps.now();
+  timer = setTimeout(renewNow, Math.max(fresh ? 60 * 1000 : 0, left - RENEW_BEFORE));
+}
+
+// certified: keep what the issuer answered beside the key, and sign with it
+async function certified(c, renews) {
+  rec = await deps.saveCertified(cfg.farm, { ...c, person, renews });
+  use(rec, true);
+}
+
+// gone: the issuer will not renew this key (removed, lapsed or unknown):
+// forget it and enrol a new one
+async function gone(e) {
+  useSigner(null);
+  await deps.forgetKey(cfg.farm);
+  rec = await deps.deviceKey(cfg.farm);
+  set({ state: 'enrolling', device: rec.device, expires: null, message: e.message });
+  return enrol();
+}
+
+function refused(e) {
+  set({ state: 'refused', message: e.message });
+}
+
+// renewNow: renew before the leaf ends; on a studio farm the round trip
+// leaves the page, so it waits for the page to be out of sight
+async function renewNow() {
+  if (!rec || !rec.certified) return;
+  // a farm with a sign-in provider renews every device on a fresh ID
+  // token, however it enrolled; only a one-person farm's on its own proof
+  if (!cfg.provider) {
+    try {
+      await certified(await call('/renew', await enrolment(rec.key, request(cfg.farm, person, rec.spki), {})), 'proof');
+    } catch (e) {
+      if (e.status === 403 || e.status === 404) return gone(e);
+      refused(e);
+    }
+    return;
+  }
+  if (deps.hidden()) return signIn(cfg, rec.device, { renew: true });
+  document.addEventListener('visibilitychange', function away() {
+    if (!deps.hidden()) return;
+    document.removeEventListener('visibilitychange', away);
+    signIn(cfg, rec.device, { renew: true });
+  });
+  // past the leaf's end the page signs nothing until it renews
+  setTimeout(() => { useSigner(null); set({ state: 'enrolling', message: 'This browser’s key renews when you next leave or reload the page.' }); },
+    Math.max(0, Date.parse(rec.certified.expires) - deps.now()));
+}
+
+// enrol: certify the key on whatever evidence this load has
+async function enrol(code) {
+  try {
+    if (code) return await certified(await call('/browser', await enrolment(rec.key, request(cfg.farm, person, rec.spki), { code })), 'proof');
+    if (!cfg.provider) return set({ state: 'open', device: rec.device });
+    // try the silent round trip once a session: a provider that wants the
+    // person to sign in leaves the Sign in button, not a loop
+    if (deps.session().getItem(RETURN + ':tried:' + cfg.farm)) return set({ state: 'sign-in', device: rec.device });
+    deps.session().setItem(RETURN + ':tried:' + cfg.farm, '1');
+    set({ state: 'enrolling', device: rec.device });
+    return await signIn(cfg, rec.device);
+  } catch (e) {
+    if (e.status === 409) return gone(e);
+    refused(e);
+  }
+}
+
+// start: enrol or renew this browser's key for the person viewing, once
+// per page
+let started = null;
+export function start(user) {
+  if (!user || started) return started;
+  started = run(user).catch((e) => refused(e));
+  return started;
+}
+
+async function run(user) {
+  person = user;
+  if (!globalThis.indexedDB || !globalThis.crypto || !globalThis.crypto.subtle) return set({ state: 'off' });
+  try {
+    cfg = await call('/config');
+  } catch (e) {
+    // a farm that runs no issuer: acts go unsigned, as before
+    if (e.status === 404) return set({ state: 'off' });
+    throw e;
+  }
+  rec = await deps.deviceKey(cfg.farm);
+  set({ device: rec.device });
+  const loc = deps.location();
+  const { code, hash } = codeIn(loc.hash);
+  // the code is a secret for a minute: out of the address bar at once
+  if (code) deps.replaceURL(loc.pathname + loc.search + hash);
+
+  const back = cfg.provider ? await returned(cfg) : null;
+  if (back && back.idToken) {
+    try {
+      if (back.renew && rec.certified) return await certified(await call('/renew', await enrolment(rec.key, request(cfg.farm, person, rec.spki), { idToken: back.idToken })), 'token');
+      return await certified(await call('/enroll', await enrolment(rec.key, request(cfg.farm, person, rec.spki), { idToken: back.idToken })), 'token');
+    } catch (e) {
+      if (e.status === 403 && back.renew) return gone(e);
+      if (e.status === 409) return gone(e);
+      return refused(e);
+    }
+  }
+  if (back && back.error) {
+    if (rec.certified && Date.parse(rec.certified.expires) > deps.now()) use(rec);
+    return set(ASK.has(back.error) ? { state: 'sign-in' } : { state: 'refused', message: `The sign-in provider answered ${back.error}.` });
+  }
+
+  const c = rec.certified;
+  // a key certified for someone else (another person signed in here) is
+  // not theirs to sign with: this person enrols their own
+  if (c && c.person !== person) return gone(new Error(`This browser’s key was ${c.person}’s.`));
+  // in force: sign with it; use() renews it in time, at once if due
+  if (c && Date.parse(c.expires) > deps.now()) return use(rec);
+  // ended: the page has only just loaded, so a round trip loses nothing
+  if (c && cfg.provider) return signIn(cfg, rec.device, { renew: true });
+  if (c) return renewNow();
+  return enrol(code);
+}
+
+// renew: renew this browser's key now, as its timer does before the leaf
+// ends (the farm's embedded test calls it; nothing on the page does yet)
+export const renew = () => renewNow();
+
+// signInNow: the person asked to sign in (their page's button)
+export function signInNow() {
+  if (cfg && cfg.provider && rec) return signIn(cfg, rec.device, { silent: false });
+}
+
+// ------------------------------------------------------------ devices
+
+// devices: the person's devices in force, from the issuer
+export function devices(who) {
+  return call('/devices?person=' + encodeURIComponent(who));
+}
+
+// remove: a signed act removing one device (its ID), or every device of
+// the person's (all: true); removing this browser's own key forgets it
+export async function remove({ device, all }) {
+  if (!rec || !rec.certified) throw new Error('This browser’s key is not certified yet, so it cannot sign a removal.');
+  const c = rec.certified;
+  const signer = { key: rec.key, chain: c.chain.map(unb64), farm: c.farm, user: c.person, identity: c.identity, device: c.device };
+  const act = all
+    ? { subject: { name: `farm:${c.farm}`, digest: { c4: c.farm } }, act: 'remove-device', params: { person: c.person } }
+    : { subject: { name: `device:${device}`, digest: { c4: device } }, act: 'remove-device', params: {} };
+  const out = await call('/acts', await signAct(signer, act));
+  if (all || device === c.device) {
+    clearTimeout(timer);
+    useSigner(null);
+    await deps.forgetKey(cfg.farm);
+    rec = await deps.deviceKey(cfg.farm);
+    set({ state: cfg.provider ? 'sign-in' : 'open', device: rec.device, expires: null });
+  }
+  return out;
+}
+
+// reset: forget this page's flow (tests)
+export function reset() {
+  clearTimeout(timer);
+  started = cfg = rec = person = null;
+  Object.assign(status, { state: 'starting', device: null, expires: null, person: null, message: null });
+  useSigner(null);
+}

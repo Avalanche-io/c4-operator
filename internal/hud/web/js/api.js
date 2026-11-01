@@ -51,6 +51,23 @@ export async function del(path) {
   return r.json().catch(() => ({}));
 }
 
+// issuer: a call to the farm's people's issuer, which the HUD serves at its
+// own origin (enrol.js): a read, or with a body a write, marked as the
+// HUD's own like every write
+export function issuer(path, body) {
+  const url = '/issuer/v1/people' + path;
+  if (body === undefined) return fetch(url, { headers: { Accept: 'application/json' } });
+  return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...WRITE }, body });
+}
+
+// providerToken: the sign-in provider's token exchange (enrol.js), the one
+// write the HUD sends to another origin. It is not the farm's, so it
+// carries no write header: a header of the HUD's own would fail the
+// provider's CORS.
+export function providerToken(url, form) {
+  return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }, body: form });
+}
+
 export function objectURL(url) {
   return withViewer(url);
 }

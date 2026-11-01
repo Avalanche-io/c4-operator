@@ -14,7 +14,10 @@ import (
 // without it, so a HUD synced from before the header (c4-hud eec7d6e)
 // would fail every control in a browser opened with c4 farm open, while
 // every read still worked. Writes go through web/js/api.js alone, and
-// each one there carries the header.
+// each one there carries the header, but the sign-in provider's token
+// exchange (providerToken, PEOPLE-KEYS-2 K3): a write to another origin,
+// not the farm's, where a header of the HUD's own would fail the
+// provider's CORS.
 func TestEmbeddedHUDMarksItsWrites(t *testing.T) {
 	write := regexp.MustCompile(`method:\s*'(POST|PUT|PATCH|DELETE)'`)
 	api, err := fs.ReadFile(hud.Web, "web/js/api.js")
@@ -28,6 +31,9 @@ func TestEmbeddedHUDMarksItsWrites(t *testing.T) {
 	// each write's fetch spreads the header in
 	for _, m := range write.FindAllStringIndex(src, -1) {
 		end := min(len(src), m[1]+200)
+		if fn := strings.LastIndex(src[:m[0]], "export function "); fn >= 0 && strings.HasPrefix(src[fn:], "export function providerToken(") {
+			continue
+		}
 		if !strings.Contains(src[m[0]:end], "...WRITE") {
 			t.Errorf("web/js/api.js: a %s without the write header: %q", src[m[0]:m[1]], src[m[0]:end])
 		}
