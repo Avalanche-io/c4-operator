@@ -258,6 +258,46 @@ func TestLeaverKeepsNoApprovedDevice(t *testing.T) {
 	}
 }
 
+// On a farm with a sign-in provider, a touch key enrolled by approval
+// renews only on a fresh ID token for its person: never on its own proof,
+// and never on another person's token.
+func TestApprovedTouchKeyRenewsOnlyOnItsPersonsToken(t *testing.T) {
+	r := studio(t)
+	laptop, laptopTouch, desk := newDev(t), newDev(t), newDev(t)
+	k := r.key(laptop, r.signIn(laptop, "dana", danaSub))
+	r.signIn(desk, "dana", danaSub)
+	e := r.enrolment(laptopTouch, "dana", laptop.id, "mac")
+	e.IDToken = r.sso.Token(r.now, danaSub, laptopTouch.id, map[string]any{"auth_time": r.now.Unix(), "amr": []string{"hwk", "pin"}})
+	var tc people.Certified
+	if code, body := r.call("POST", "/v1/people/enroll", "", e, &tc); code != http.StatusOK {
+		t.Fatalf("touch: %d %s", code, body)
+	}
+	k.Touch = r.key(laptopTouch, &tc)
+	deskTouch := newDev(t)
+	code, body, b := r.book(r.act(k, "dana", "approve-machine", deviceSubject(deskTouch.id), map[string]string{}, true), "")
+	if code != http.StatusOK {
+		t.Fatalf("approve: %d %s", code, body)
+	}
+	ed := r.enrolment(deskTouch, "dana", desk.id, "mac")
+	ed.Approval = b.Record
+	if code, body := r.call("POST", "/v1/people/enroll", "", ed, nil); code != http.StatusOK {
+		t.Fatalf("an approved touch key: %d %s", code, body)
+	}
+	r.now = r.now.Add(6 * time.Hour)
+	if code, body := r.call("POST", "/v1/people/renew", "", r.enrolment(deskTouch, "dana", desk.id, "mac"), nil); code != http.StatusForbidden || !strings.Contains(body, "fresh ID token") {
+		t.Errorf("an approved touch key renewed on its own proof: %d %s", code, body)
+	}
+	en := r.enrolment(deskTouch, "dana", desk.id, "mac")
+	en.IDToken = r.sso.Token(r.now, noorSub, deskTouch.id, nil)
+	if code, body := r.call("POST", "/v1/people/renew", "", en, nil); code != http.StatusForbidden {
+		t.Errorf("dana's approved touch key renewed on noor's token: %d %s", code, body)
+	}
+	en.IDToken = r.sso.Token(r.now, danaSub, deskTouch.id, nil)
+	if code, body := r.call("POST", "/v1/people/renew", "", en, nil); code != http.StatusOK {
+		t.Errorf("dana's approved touch key on her fresh token: %d %s", code, body)
+	}
+}
+
 // An act the index books is refused a second time at another replica,
 // whose seen-set in memory has never held it, or after a restart (review
 // probe P7): the index is shared and lasting, and keeps each act's
