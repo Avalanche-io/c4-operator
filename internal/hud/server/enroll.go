@@ -170,6 +170,12 @@ func (s *Server) handleNodeEnroll(w http.ResponseWriter, r *http.Request) {
 		failBody(w, err)
 		return
 	}
+	// checked before the offer is spent, so a refused act leaves it standing
+	act, err := s.citeAct(r.Context(), r, v, enrollSubject(node, body.Code), "enroll")
+	if err != nil {
+		fail(w, controlStatus(err), "%v", err)
+		return
+	}
 	s.offerMu.Lock()
 	offer, ok := s.offers[node]
 	valid := ok && time.Now().Before(offer.expires) &&
@@ -228,7 +234,8 @@ func (s *Server) handleNodeEnroll(w http.ResponseWriter, r *http.Request) {
 	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r),
 		Authorization: "the code " + node + " showed, from its offer " + offer.record,
 		Action:        "enroll", Target: "node:" + node, Change: map[string]any{"for": who, "owners": owners, "holder": offer.holder, "offer": offer.record}}
-	rec, err := s.signControl(ctx, v.Projects, provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": sha256JSON(owners)}}, pred)
+	subject := onAct(act, provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": sha256JSON(owners)}}, &pred)
+	rec, err := s.signControl(ctx, v.Projects, subject, pred)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, "the enrollment's record: %v", err)
 		return

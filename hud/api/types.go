@@ -359,6 +359,10 @@ type Window struct {
 }
 
 type Farm struct {
+	// ActOn is the farm itself as an act names it (farm:<farm ID>): the
+	// binding, and a host enrolment's farm, are acts on it.
+	ActOn *ActOn `json:"actOn,omitempty"`
+
 	SlotsUsed          int     `json:"slotsUsed"`
 	SlotsTotal         int     `json:"slotsTotal"`
 	QueuedUnits        int     `json:"queuedUnits"`
@@ -385,6 +389,10 @@ type Pool struct {
 }
 
 type PoolBurst struct {
+	// Approve is the capacity request waiting for approval, as an act on
+	// it names it, when one waits (POST /pools/{pool}/approve).
+	Approve *ActOn `json:"approve,omitempty"`
+
 	MaxSlots            int     `json:"maxSlots"`
 	ProvisioningSeconds float64 `json:"provisioningSeconds"`
 	CostPerSlotHour     float64 `json:"costPerSlotHour"`
@@ -401,6 +409,9 @@ type Class struct {
 
 type Project struct {
 	Name string `json:"name"`
+	// ActOn is the project as an act that makes something in it names it:
+	// a grant, a submission.
+	ActOn *ActOn `json:"actOn,omitempty"`
 	// Root is where the project's trees mount in its units (Project
 	// spec.root, /show by default).
 	Root              string           `json:"root"`
@@ -1273,4 +1284,13 @@ type UnitQuestion struct {
 	// For is whose question it is: lead:<session> (its lead answers it)
 	// or person:<name>.
 	For string `json:"for,omitempty"`
+}
+
+// ActOn is what a client signs an act on (PEOPLE-KEYS-2 2.1): the object
+// by UID and the digest the HUD checks, or the project or the farm for an
+// act that makes something. A client signs exactly this subject, and the
+// HUD refuses an act on any other (X-C4-Act, internal/hud/API.md).
+type ActOn struct {
+	Name   string            `json:"name"`
+	Digest map[string]string `json:"digest"`
 }

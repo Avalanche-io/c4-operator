@@ -36,6 +36,8 @@ type Grant struct {
 	// Active says whether it serves now; Why says why not.
 	Active bool   `json:"active"`
 	Why    string `json:"why,omitempty"`
+	// ActOn is the grant as an act revoking it names it, while it stands.
+	ActOn *ActOn `json:"actOn,omitempty"`
 }
 
 // GrantRevoked is who took a grant back, and when.

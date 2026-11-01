@@ -35,7 +35,7 @@ const (
 func heldView(m *model, l *c4v1.TrackerLink, field string, w c4v1.TrackerWritten, kind string, v *api.Viewer) api.HeldWrite {
 	h := api.HeldWrite{Namespace: l.Namespace, Project: m.nsProject[l.Namespace], Link: l.Name, Field: field,
 		Tracker: l.Spec.Tracker, Kind: kind, Entity: api.HeldEntity{Type: l.Spec.Ref.Type, ID: l.Spec.Ref.ID, URL: l.Spec.Ref.URL},
-		Since: w.At.UTC()}
+		Since: w.At.UTC(), ActOn: actOn(heldSubject(l, field, w))}
 	h.State, _, _ = strings.Cut(w.Value, "#")
 	if j := l.Spec.Target.WorkJob; j != "" {
 		h.Job = l.Namespace + "/" + j
@@ -166,7 +166,13 @@ func (s *Server) handleConfirm(w http.ResponseWriter, r *http.Request) {
 	target := "trackerlink:" + ns + "/" + name + "#" + field
 	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r), Authorization: authz,
 		Action: action, Target: target, Change: map[string]any{"field": field, "write": wr.Value, "happened": *body.Happened, "note": body.Note}}
-	id, err := s.signControl(ctx, []string{project}, provenance.Subject{Name: target, Digest: map[string]string{"sha256": sha256JSON(wr)}}, pred)
+	act, err := s.citeAct(ctx, r, v, heldSubject(l, field, wr), action)
+	if err != nil {
+		fail(w, controlStatus(err), "%v", err)
+		return
+	}
+	subject := onAct(act, provenance.Subject{Name: target, Digest: map[string]string{"sha256": sha256JSON(wr)}}, &pred)
+	id, err := s.signControl(ctx, []string{project}, subject, pred)
 	if err != nil {
 		fail(w, controlStatus(err), "control record: %v", err)
 		return

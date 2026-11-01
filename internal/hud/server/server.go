@@ -165,6 +165,11 @@ type Server struct {
 	// nil serves none. It trusts the HUD for nothing: it certifies on an
 	// ID token, or a one-person farm's installer token or code.
 	People http.Handler
+	// PeopleIndex is the people's index, on a farm that keeps one
+	// (--people-store): a person's act is taken only from a device in
+	// force at its current position, a confirmed one's touch key that
+	// device's (PEOPLE-KEYS-2 10.4 item 21).
+	PeopleIndex ActIndex
 
 	mu      sync.RWMutex
 	m       *model

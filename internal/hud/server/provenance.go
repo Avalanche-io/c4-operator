@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/http"
@@ -31,6 +32,8 @@ const KeysConfigMap = "c4-provenance"
 type trustSet struct {
 	roots  *x509.CertPool
 	legacy map[string]ed25519.PublicKey
+	// farm is the farm's ID, the C4 ID of its CA certificate (ca.crt).
+	farm string
 }
 
 // trust reads the farm's trust bundle (cached for a minute).
@@ -48,6 +51,11 @@ func (s *Server) trust(ctx context.Context) trustSet {
 			for id, text := range cm.Data {
 				if id == "ca.crt" {
 					t.roots.AppendCertsFromPEM([]byte(text))
+					if b, _ := pem.Decode([]byte(text)); b != nil {
+						if ca, err := x509.ParseCertificate(b.Bytes); err == nil {
+							t.farm = provenance.FarmID(ca)
+						}
+					}
 					continue
 				}
 				if pub, err := provenance.ParsePublic(text); err == nil && provenance.KeyID(pub) == id {

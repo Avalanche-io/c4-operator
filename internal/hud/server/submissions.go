@@ -43,6 +43,8 @@ func (s *Server) handleSubmission(w http.ResponseWriter, r *http.Request) {
 		failBody(w, err)
 		return
 	}
+	// kept for the act's params, which must be this body (citeAct)
+	r.Body = io.NopCloser(bytes.NewReader(raw))
 	var body api.SubmissionRequest
 	if err := class.Strict(raw, &body); err != nil {
 		fail(w, http.StatusBadRequest, "body: %v", err)
@@ -157,9 +159,20 @@ func (s *Server) handleSubmission(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// A submission is made in its project: its act is on it, checked and
+	// taken once, before any attempt, and cited by the submission's record.
+	var act *citedAct
+	if !body.DryRun && !body.Explain {
+		var err error
+		if act, err = s.citeOnProject(r.Context(), r, v, m, plan.Project, "submit"); err != nil {
+			refuse(controlStatus(err), api.FieldError{Path: "submission", Message: err.Error(),
+				Fix: "sign the act on the project as the snapshot names it (actOn), with this request's body as its params"})
+			return
+		}
+	}
 	var taken, leftover []string
 	for attempt := 0; ; attempt++ {
-		jobs, code, ferr := s.makeSubmission(r, v, m, plan, &body, &out)
+		jobs, code, ferr := s.makeSubmission(r, v, m, plan, &body, &out, act)
 		if ferr == nil {
 			out.Jobs, out.OK = jobs, true
 			break
@@ -297,7 +310,7 @@ type jobFailure struct {
 // makeSubmission checks every job of a plan as POST /jobs would, then
 // plans them together (a dry run) or creates them in order. A create that
 // fails deletes the jobs this attempt made before it returns.
-func (s *Server) makeSubmission(r *http.Request, v *api.Viewer, m *model, plan *authoring.Plan, body *api.SubmissionRequest, out *api.SubmissionResponse) ([]api.SubmissionJob, int, *jobFailure) {
+func (s *Server) makeSubmission(r *http.Request, v *api.Viewer, m *model, plan *authoring.Plan, body *api.SubmissionRequest, out *api.SubmissionResponse, act *citedAct) ([]api.SubmissionJob, int, *jobFailure) {
 	ctx := r.Context()
 	opts := func(j authoring.PlannedJob, record string) createOpts {
 		// The request is authoring.Lower's, made here: its spec.tool is
@@ -366,7 +379,7 @@ func (s *Server) makeSubmission(r *http.Request, v *api.Viewer, m *model, plan *
 	}
 	// Made held, signed for once, released together; rolled back if
 	// any of it fails, whatever the client does (submission_commit.go).
-	return s.commitSubmission(r, v, m, plan, body, out, opts, job)
+	return s.commitSubmission(r, v, m, plan, body, out, act, opts, job)
 }
 
 // planTogether plans a submission's drafts together (DryRunAll), else

@@ -474,6 +474,9 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		// remote address is the machine's own, and the owner's routes need
 		// it.
 		iss.LocalOnly = loopbackOnly(addr)
+		if iss.Index != nil {
+			srv.PeopleIndex = iss.Index
+		}
 	}
 	if sandbox != "" {
 		if srv.DevViewers == nil {

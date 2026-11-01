@@ -735,6 +735,11 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 			projects = append(projects, jr.project)
 		}
 	}
+	act, err := s.citeAct(ctx, r, v, capacitySubject(cr), "approve-capacity")
+	if err != nil {
+		fail(w, controlStatus(err), "%v", err)
+		return
+	}
 	patch := client.MergeFrom(cr.DeepCopy())
 	before := sha256JSON(cr.Spec)
 	cr.Spec.Approved = true
@@ -742,7 +747,8 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 		Authorization: s.authorization(v, "patch", "capacityrequests", "", cr.Name), Action: "approve-capacity",
 		Target: "capacityrequest:" + cr.Name,
 		Change: map[string]any{"pool": pool, "slots": cr.Spec.Slots, "jobs": cr.Spec.Jobs, "estimatedCost": cr.Spec.EstimatedCost, "projects": projects}}
-	id, err := s.signControl(ctx, projects, provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": before}}, pred)
+	subject := onAct(act, provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": before}}, &pred)
+	id, err := s.signControl(ctx, projects, subject, pred)
 	if err != nil {
 		fail(w, controlStatus(err), "control record: %v", err)
 		return

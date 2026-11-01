@@ -27,6 +27,11 @@ type PeopleEntry struct {
 	Yours bool `json:"yours"`
 	// Lets says, in words, what confirming the login lets it do.
 	Lets string `json:"lets"`
+	// ConfirmOn is the Tracker's offer as an act confirming it names it;
+	// RevokeOn is the confirmation as an act revoking it names it, while it
+	// stands.
+	ConfirmOn *ActOn `json:"confirmOn,omitempty"`
+	RevokeOn  *ActOn `json:"revokeOn,omitempty"`
 }
 
 // PeopleAct is who did something to an entry, when, and its record.

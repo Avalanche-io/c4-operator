@@ -9,6 +9,7 @@ package server
 // leaves the cluster.
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -32,6 +33,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
@@ -541,12 +543,27 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		failBody(w, err)
 		return
 	}
+	// kept for the act's params, which must be this body (citeAct)
+	r.Body = io.NopCloser(bytes.NewReader(raw))
 	var body api.SubmitRequest
 	if err := class.Strict(raw, &body); err != nil {
 		fail(w, http.StatusBadRequest, "body: %v", err)
 		return
 	}
 	var o createOpts
+	if !body.DryRun {
+		// a submit is made in the project: its act is on it, checked and
+		// taken once, whichever attempt makes the job
+		if project, _, perr := s.project(m, v, body.Project, body.Namespace); perr == nil {
+			if o.Act, err = s.citeOnProject(r.Context(), r, v, m, project, "submit"); err != nil {
+				fail(w, controlStatus(err), "%v", err)
+				return
+			}
+		} else if r.Header.Get(ActHeader) != "" {
+			fail(w, http.StatusNotFound, "%v", perr)
+			return
+		}
+	}
 	out, code, err := s.createJob(r, v, m, body, o)
 	// a name the farm chose, taken meanwhile by a job the model has not
 	// read yet (another client's submit a moment before): numbered past
@@ -617,6 +634,10 @@ type createOpts struct {
 	// Taken are names found taken meanwhile: a job the farm names is
 	// numbered past them.
 	Taken []string
+	// Act is the submit's signed act, checked and taken by POST /jobs: its
+	// record is signed once the job is made, so an attempt numbered again
+	// never cites it twice.
+	Act *citedAct
 }
 
 // identityError is a unit's submission refused for who the unit is: its
@@ -1016,7 +1037,7 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 	}
 
 	replaceRecord := ""
-	if replaced != nil {
+	if replaced != nil && o.Act == nil {
 		// Signed first: the replacement deletes the forecast.
 		pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r),
 			Authorization: s.authorization(v, "create", "workjobs", ns, "") + "; " + replaceWhy, Action: "replace",
@@ -1041,6 +1062,34 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 	}
 	if o.Made != nil {
 		*o.Made = *job.DeepCopy()
+	}
+	if o.Act != nil {
+		// The submit's record, citing its act: made now the name is the
+		// job's, and the replacement's when it replaces a forecast.
+		change := map[string]any{"job": name}
+		authz := s.authorization(v, "create", "workjobs", ns, "")
+		if replaced != nil {
+			change["replaces"], change["forecast"] = replaced.Name, replaced.Spec.Forecast
+			authz += "; " + replaceWhy
+		}
+		pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r),
+			Authorization: authz, Action: "submit", Target: "workjob:" + ns + "/" + name, Change: change}
+		subject := onAct(o.Act, provenance.Subject{}, &pred)
+		id, err := s.signControl(ctx, []string{project}, subject, pred)
+		if err != nil {
+			return api.SubmitResponse{}, http.StatusServiceUnavailable, fmt.Errorf("control record: %v", err)
+		}
+		if id != "" {
+			patch := client.MergeFrom(job.DeepCopy())
+			if job.Annotations == nil {
+				job.Annotations = map[string]string{}
+			}
+			job.Annotations[c4v1.AnnotationControlRecords] = appendRecord(job.Annotations[c4v1.AnnotationControlRecords], id)
+			if err := s.Client.Patch(ctx, job, patch); err != nil {
+				s.Log.Error(err, "name the submit's record on its job", "job", ns+"/"+name, "record", id)
+			}
+		}
+		out.Record, replaceRecord = id, id
 	}
 	msg := fmt.Sprintf("%s: submitted, %s, %d input view%s", name, spec.Class, len(mats), plural(len(mats)))
 	if body.LeadSession != "" {

@@ -337,7 +337,8 @@ func (s *Server) makeLeadJob(r *http.Request, v *api.Viewer, m *model, pl *autho
 	j.Request.Spec = sb
 	body := api.SubmissionRequest{Key: req.Key}
 	var out api.SubmissionResponse
-	jobs, code, ferr := s.makeSubmission(r, v, m, pl, &body, &out)
+	// a lead's workers are the lead's: its act is K5's
+	jobs, code, ferr := s.makeSubmission(r, v, m, pl, &body, &out, nil)
 	if ferr != nil {
 		var te takenError
 		if errors.As(ferr.err, &te) || apierrors.IsAlreadyExists(ferr.err) {

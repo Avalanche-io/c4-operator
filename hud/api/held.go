@@ -14,6 +14,8 @@ type HeldWrite struct {
 	// status, ...). Together they name it for POST /held.
 	Link  string `json:"link"`
 	Field string `json:"field"`
+	// ActOn is the held write as an act confirming or denying it names it.
+	ActOn *ActOn `json:"actOn,omitempty"`
 	// Tracker is the Tracker's name; Kind its kind (github, flow, ...).
 	Tracker string `json:"tracker"`
 	Kind    string `json:"kind"`

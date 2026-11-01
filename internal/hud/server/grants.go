@@ -69,6 +69,8 @@ func grantView(g *c4v1.SubmitGrant, project string, now time.Time) api.Grant {
 		Pools: g.Spec.Pools, Classes: g.Spec.Classes, Until: g.Spec.Until.UTC(), Record: g.Spec.Record}
 	if r := g.Spec.Revoked; r != nil {
 		out.Revoked = &api.GrantRevoked{By: r.By, At: r.At.UTC(), Record: r.Record}
+	} else {
+		out.ActOn = actOn(grantSubject(g))
 	}
 	out.Why = g.Lapsed(now)
 	out.Active = out.Why == ""
@@ -169,7 +171,14 @@ func (s *Server) handleGrant(w http.ResponseWriter, r *http.Request) {
 		Authorization: s.authorization(v, "create", "workjobs", ns, ""), Action: "grant",
 		Target: "submitgrant:" + ns + "/" + g.Name,
 		Change: map[string]any{"person": v.User, "tracker": tr.Name, "pools": body.Pools, "classes": body.Classes, "until": g.Spec.Until.Time}}
-	id, err := s.signControl(ctx, []string{project}, provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": sha256JSON(g.Spec)}}, pred)
+	// a grant is made in the project: the act is on it
+	act, err := s.citeOnProject(ctx, r, v, m, project, "grant")
+	if err != nil {
+		fail(w, controlStatus(err), "%v", err)
+		return
+	}
+	subject := onAct(act, provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": sha256JSON(g.Spec)}}, &pred)
+	id, err := s.signControl(ctx, []string{project}, subject, pred)
 	if err != nil {
 		fail(w, controlStatus(err), "control record: %v", err)
 		return
@@ -309,7 +318,13 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r), Authorization: authz,
 		Action: "revoke", Target: "submitgrant:" + ns + "/" + name,
 		Change: map[string]any{"person": g.Spec.Person, "tracker": g.Spec.Tracker, "grant": g.Spec.Record}}
-	id, err := s.signControl(ctx, []string{project}, provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": before}}, pred)
+	act, err := s.citeAct(ctx, r, v, grantSubject(g), "revoke")
+	if err != nil {
+		fail(w, controlStatus(err), "%v", err)
+		return
+	}
+	subject := onAct(act, provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": before}}, &pred)
+	id, err := s.signControl(ctx, []string{project}, subject, pred)
 	if err != nil {
 		fail(w, controlStatus(err), "control record: %v", err)
 		return

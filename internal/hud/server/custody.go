@@ -215,7 +215,6 @@ func (s *Server) controlJob(ctx context.Context, r *http.Request, v *api.Viewer,
 	for _, o := range opts {
 		o(&pred)
 	}
-	subject := provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": before}}
 	// A request that carries its signed act: the record is on the act's
 	// subject, the job by UID and its spec before the change, and cites
 	// it (acts.go).
@@ -224,9 +223,7 @@ func (s *Server) controlJob(ctx context.Context, r *http.Request, v *api.Viewer,
 	if err != nil {
 		return "", err
 	}
-	if act != nil {
-		subject, pred.Act, pred.Params, pred.Custody = on, act.cite, act.params, act.grade
-	}
+	subject := onAct(act, provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": before}}, &pred)
 	id, err := s.signControl(ctx, []string{rec.project}, subject, pred)
 	if err != nil || id == "" {
 		return id, err

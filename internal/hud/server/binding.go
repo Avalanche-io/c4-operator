@@ -230,7 +230,19 @@ func (s *Server) handleBind(w http.ResponseWriter, r *http.Request) {
 		Authorization: s.authorization(v, "create", "deploymentbindings", "", c4v1.FarmBindingName), Action: "bind",
 		Target: "deploymentbinding:" + c4v1.FarmBindingName, Custody: custody,
 		Change: map[string]any{"owner": b.Spec.Owner, "to": b.Spec.To, "runFor": b.Spec.RunFor, "onePerson": b.Spec.OnePerson, "right": "sign", "for": b.Spec.For, "start": b.Spec.Start.Time}}
-	id, rec, err := s.signRecord(ctx, provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": sha256JSON(b.Spec)}}, pred)
+	// the binding is an act on the farm itself
+	var act *citedAct
+	if on, ok := s.farmSubject(ctx); ok {
+		act, err = s.citeAct(ctx, r, v, on, "bind")
+	} else if r.Header.Get(ActHeader) != "" {
+		err = fmt.Errorf("%w: this HUD has no farm CA to name the farm by", errAct)
+	}
+	if err != nil {
+		fail(w, controlStatus(err), "%v", err)
+		return
+	}
+	subject := onAct(act, provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": sha256JSON(b.Spec)}}, &pred)
+	id, rec, err := s.signRecord(ctx, subject, pred)
 	if err != nil {
 		fail(w, controlStatus(err), "control record: %v", err)
 		return

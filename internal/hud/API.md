@@ -1006,15 +1006,43 @@ the updated JobSummary; `node` the updated node. Errors are `4xx` with
 `{ error }`. Every job control, `/ack` and `/decide` included, answers
 `{ ok: true, message, job }`.
 
-**Signed acts** (PEOPLE-KEYS-2, `act/v1`). A job control may carry its act,
-signed by the actor's own key, as the base64 of its bundle in `X-C4-Act`.
-- **The act must match the request:** it is on the job as its summary names
-  it (`workjob:<namespace>/<name>@<uid>`, with `specDigest` as its
-  `sha256`), its `act` is the control's action (`decide`, `steer`,
-  `requeue`, and `nudge` for `/nudge`), and its `params` are the request's
-  body, compared in canonical form (RFC 8785).
+**Signed acts** (PEOPLE-KEYS-2, `act/v1`). Every request that is a person's
+act may carry it, signed by the actor's own key, as the base64 of its bundle
+in `X-C4-Act`: each job control, and the endpoints below.
+- **The act must match the request:** it is on the subject the HUD serves
+  with what it acts on, its `act` is the endpoint's action, and its
+  `params` are the request's body (`{}` for none), compared in canonical
+  form (RFC 8785).
+  - **A job control:** on the job as its summary names it
+    (`workjob:<namespace>/<name>@<uid>`, with `specDigest` as its `sha256`);
+    `decide`, `steer`, `requeue`, and `nudge` for `/nudge`.
+  - **What a person makes in a project,** a grant (`grant`) or a submit
+    (`submit`, `POST /jobs` and `POST /submissions`): on the project, as the
+    snapshot's `projects[].actOn` names it (`project:<name>@<uid>`).
+  - **Revoking a grant** (`revoke`): on the grant, its `actOn`.
+  - **A people-map login** (`people-confirm`): on the Tracker's offers, the
+    entry's `confirmOn`; revoking it (`people-revoke`) on the
+    confirmation, its `revokeOn`.
+  - **A held tracker write** (`confirm-write`, `deny-write`): on the write,
+    its `actOn` (`trackerlink:<namespace>/<link>#<field>@<uid>`).
+  - **Approving a burst** (`approve-capacity`): on the pool's
+    `burst.approve`, the capacity request that waits.
+  - **The farm binding** (`bind`): on the farm, the snapshot's
+    `farm.actOn` (`farm:<farm ID>`, the farm ID its `c4` digest).
+  - **Enrolling a host runner** (`enroll`): on `node:<name>`, with the C4
+    ID of the code it shows in its one form (`ABCD-EFGH`: upper case,
+    letters and digits, one dash) as its `c4` digest.
 - **A person's act is the viewer's own,** taken once, and signed within five
-  minutes of the HUD's clock.
+  minutes of the HUD's clock. On a farm with a people's index
+  (`--people-store`) its device is in force there now, and a confirmed
+  act's touch key that device's: a removed device's act is refused, though
+  its certificate lives on.
+- **Touch-list acts are confirmed:** `grant`, `bind`, `people-confirm`,
+  `enroll` and `approve-capacity` are signed with the person's touch key
+  too (PEOPLE-KEYS-2 4.3).
+- **A submit's record is signed once its job is made,** so an attempt
+  numbered past a name taken meanwhile never cites the act twice; it
+  answers in `record`. A plan (`dryRun`, `explain`) takes no act.
 - **The control record cites it** (`act`: its payload hash and record), is on
   its subject, and carries its `params` and grade (`custody: signed` or
   `confirmed`).

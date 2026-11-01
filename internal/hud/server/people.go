@@ -50,6 +50,8 @@ func peopleEntry(tp *c4v1.TrackerPerson, project string, v *api.Viewer) api.Peop
 		Revoked: peopleAct(tp.Spec.Revoked), Yours: speaksAs(v, tp.Spec.Person), Lets: lets(tp.Spec.Tracker, tp.Spec.Login, tp.Spec.Person)}
 	if tp.Spec.Revoked != nil {
 		e.State = "revoked"
+	} else {
+		e.RevokeOn = actOn(confirmationSubject(tp))
 	}
 	return e
 }
@@ -114,6 +116,17 @@ func (s *Server) handlePeople(w http.ResponseWriter, r *http.Request) {
 			}
 			keep(api.PeopleEntry{Namespace: t.Namespace, Project: project, Tracker: t.Name, Login: login, Person: person,
 				State: "offered", Yours: speaksAs(v, person), Lets: lets(t.Name, login, person)})
+		}
+	}
+	// each entry not revoked is confirmed (again) on its Tracker's offers
+	offers := map[string]*api.ActOn{}
+	for i := range trs.Items {
+		t := &trs.Items[i]
+		offers[t.Namespace+"/"+t.Name] = actOn(offerSubject(t))
+	}
+	for i := range out.Entries {
+		if e := &out.Entries[i]; e.State != "revoked" {
+			e.ConfirmOn = offers[e.Namespace+"/"+e.Tracker]
 		}
 	}
 	slices.SortFunc(out.Entries, func(a, b api.PeopleEntry) int {
@@ -186,8 +199,13 @@ func (s *Server) handlePeopleConfirm(w http.ResponseWriter, r *http.Request) {
 	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r),
 		Authorization: "the person the login is offered as (" + person + ")", Action: "people-confirm", Target: target,
 		Change: map[string]any{"tracker": tr.Name, "login": body.Login, "person": person, "offer": offer}}
-	id, err := s.signControl(ctx, []string{project}, provenance.Subject{Name: target,
-		Digest: map[string]string{"sha256": sha256JSON(pred.Change)}}, pred)
+	act, err := s.citeAct(ctx, r, v, offerSubject(&tr), "people-confirm")
+	if err != nil {
+		fail(w, controlStatus(err), "%v", err)
+		return
+	}
+	subject := onAct(act, provenance.Subject{Name: target, Digest: map[string]string{"sha256": sha256JSON(pred.Change)}}, &pred)
+	id, err := s.signControl(ctx, []string{project}, subject, pred)
 	if err != nil {
 		fail(w, controlStatus(err), "control record: %v", err)
 		return
@@ -287,8 +305,13 @@ func (s *Server) handlePeopleRevoke(w http.ResponseWriter, r *http.Request) {
 	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r), Authorization: authz,
 		Action: "people-revoke", Target: target,
 		Change: map[string]any{"tracker": tp.Spec.Tracker, "login": tp.Spec.Login, "person": tp.Spec.Person, "confirmation": tp.Spec.Accepted.Record}}
-	id, err := s.signControl(ctx, []string{project}, provenance.Subject{Name: target,
-		Digest: map[string]string{"sha256": sha256JSON(tp.Spec)}}, pred)
+	act, err := s.citeAct(ctx, r, v, confirmationSubject(tp), "people-revoke")
+	if err != nil {
+		fail(w, controlStatus(err), "%v", err)
+		return
+	}
+	subject := onAct(act, provenance.Subject{Name: target, Digest: map[string]string{"sha256": sha256JSON(tp.Spec)}}, &pred)
+	id, err := s.signControl(ctx, []string{project}, subject, pred)
 	if err != nil {
 		fail(w, controlStatus(err), "control record: %v", err)
 		return

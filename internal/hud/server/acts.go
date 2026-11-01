@@ -10,10 +10,12 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Avalanche-io/c4"
 
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/schema"
@@ -27,6 +29,13 @@ import (
 
 // ActHeader carries a request's signed act: its bundle (act/v1), base64.
 const ActHeader = "X-C4-Act"
+
+// ActIndex is the people's index as the HUD checks a person's act against
+// it (people.Index).
+type ActIndex interface {
+	Position(ctx context.Context) (int64, error)
+	CheckAct(ctx context.Context, v *provenance.Verified, pos int64) error
+}
 
 // errAct marks a request whose act the HUD refuses.
 var errAct = errors.New("the request's signed act")
@@ -50,6 +59,8 @@ type citedAct struct {
 	cite   *schema.ActCitation
 	params json.RawMessage
 	grade  string
+	// on is the act's subject, the control record's.
+	on provenance.Subject
 }
 
 // citeAct verifies the act a request carries, if it carries one, against
@@ -108,11 +119,24 @@ func (s *Server) citeAct(ctx context.Context, r *http.Request, v *api.Viewer, su
 		// role's sign-in acts for (ownerFor): noor signs as artist.
 		return nil, fmt.Errorf("%w is %s's, and %s sent it", errAct, p.Chain.By.Person, v.User)
 	}
+	if s.PeopleIndex != nil {
+		// The device in force at the index's position, now, and a
+		// confirmed act's touch key that device's: a removed device's
+		// certificate lives on up to 12 hours, and the index ends it at
+		// once. Checked before the act is taken, so a refusal spends none.
+		pos, err := s.PeopleIndex.Position(ctx)
+		if err == nil {
+			err = s.PeopleIndex.CheckAct(ctx, vr, pos)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", errAct, err)
+		}
+	}
 	if _, _, err := provenance.VerifyAct(data, s.trust(ctx).roots, time.Now(), s.actsSeen()); err != nil {
 		return nil, fmt.Errorf("%w: %v", errAct, err)
 	}
 	return &citedAct{cite: &schema.ActCitation{Payload: provenance.PayloadHash(vr.Payload), Record: c4.Identify(bytes.NewReader(data)).String()},
-		params: p.Params, grade: p.Chain.By.Grade}, nil
+		params: p.Params, grade: p.Chain.By.Grade, on: subject}, nil
 }
 
 // requestBody is the request's body as its client sent it, {} for none.
@@ -139,4 +163,89 @@ func controlStatus(err error) int {
 		return http.StatusForbidden
 	}
 	return http.StatusServiceUnavailable
+}
+
+// onAct puts a control record on the act it carries out: the act's
+// subject, citing it, with its params and grade. With no act the record
+// is as before, on subject.
+func onAct(act *citedAct, subject provenance.Subject, pred *controlPredicate) provenance.Subject {
+	if act == nil {
+		return subject
+	}
+	pred.Act, pred.Params, pred.Custody = act.cite, act.params, act.grade
+	return act.on
+}
+
+// citeOnProject cites the act of a request that makes something in a
+// project: on the project.
+func (s *Server) citeOnProject(ctx context.Context, r *http.Request, v *api.Viewer, m *model, project, action string) (*citedAct, error) {
+	p := projectObject(m, project)
+	if p == nil {
+		if r.Header.Get(ActHeader) != "" {
+			return nil, fmt.Errorf("%w: the HUD has not read project %s yet", errAct, project)
+		}
+		return nil, nil
+	}
+	return s.citeAct(ctx, r, v, projectSubject(p), action)
+}
+
+// The subjects acts are on (PEOPLE-KEYS-2 2.1), served with what a client
+// can act on (api.ActOn) so it signs exactly what the HUD checks: an
+// object by ActSubject, with the digest the HUD computes of it; an act
+// that makes something, on the project it is made in, or on the farm.
+
+// projectSubject is an act made in a project: on the project by UID, at
+// its spec's digest.
+func projectSubject(p *c4v1.Project) provenance.Subject {
+	return provenance.Subject{Name: "project:" + p.Name + "@" + string(p.UID), Digest: map[string]string{"sha256": sha256JSON(p.Spec)}}
+}
+
+// farmSubject is an act on the farm itself, by its ID, as the people's
+// issuer names it; ok is false while the HUD has no farm CA to name it by.
+func (s *Server) farmSubject(ctx context.Context) (provenance.Subject, bool) {
+	id := s.trust(ctx).farm
+	return provenance.Subject{Name: "farm:" + id, Digest: map[string]string{"c4": id}}, id != ""
+}
+
+// grantSubject is a submit grant as an act on it names it.
+func grantSubject(g *c4v1.SubmitGrant) provenance.Subject {
+	return provenance.ActSubject("submitgrant", g.Namespace, g.Name, string(g.UID), sha256JSON(g.Spec))
+}
+
+// offerSubject is a Tracker's people map as an act confirming one of its
+// offers names it: the Tracker by UID, at its offers' digest, so a change
+// to the Tracker that offers nothing new leaves the act standing.
+func offerSubject(tr *c4v1.Tracker) provenance.Subject {
+	return provenance.ActSubject("tracker", tr.Namespace, tr.Name, string(tr.UID), sha256JSON(tr.Spec.People))
+}
+
+// confirmationSubject is a people-map confirmation as an act revoking it
+// names it.
+func confirmationSubject(tp *c4v1.TrackerPerson) provenance.Subject {
+	return provenance.ActSubject("trackerperson", tp.Namespace, tp.Name, string(tp.UID), sha256JSON(tp.Spec))
+}
+
+// heldSubject is a held tracker write as an act confirming or denying it
+// names it: the link's write by its field, the link by UID
+// (trackerlink:<ns>/<link>#<field>@<uid>), at the write's digest.
+func heldSubject(l *c4v1.TrackerLink, field string, wr c4v1.TrackerWritten) provenance.Subject {
+	return provenance.ActSubject("trackerlink", l.Namespace, l.Name+"#"+field, string(l.UID), sha256JSON(wr))
+}
+
+// capacitySubject is a capacity request as an act approving it names it.
+func capacitySubject(cr *c4v1.CapacityRequest) provenance.Subject {
+	return provenance.ActSubject("capacityrequest", "", cr.Name, string(cr.UID), sha256JSON(cr.Spec))
+}
+
+// enrollSubject is a host runner's offer as an act enrolling it names it:
+// the machine, by the C4 ID of the code it shows, which only that offer
+// has. A client knows the machine and the code, not the node's UID; the
+// code makes the act this offer's.
+func enrollSubject(node, code string) provenance.Subject {
+	return provenance.Subject{Name: "node:" + node, Digest: map[string]string{"c4": c4.Identify(strings.NewReader(normalCode(code))).String()}}
+}
+
+// actOn is a subject as the API serves it.
+func actOn(sub provenance.Subject) *api.ActOn {
+	return &api.ActOn{Name: sub.Name, Digest: sub.Digest}
 }

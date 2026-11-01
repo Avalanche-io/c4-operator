@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"math"
 	"sort"
 	"strconv"
@@ -39,6 +40,13 @@ func (s *Server) snapshot(m *model, v *api.Viewer) *api.Snapshot {
 			per := int(max(1, p.Spec.SlotsPerNode))
 			ap.Burst = &api.PoolBurst{MaxSlots: int(b.MaxNodes) * per, ProvisioningSeconds: float64(b.ProvisioningSeconds),
 				CostPerSlotHour: num(b.CostPerSlotHour), Requested: int(p.Status.Requested), Provisioned: int(p.Status.Slots)}
+			for i := range m.crs {
+				// the request POST /pools/{pool}/approve approves
+				if c := &m.crs[i]; c.Spec.Pool == p.Name && !c.Spec.Approved && strings.Contains(c.Name, "-approve-") {
+					ap.Burst.Approve = actOn(capacitySubject(c))
+					break
+				}
+			}
 			burstCost[p.Name] = num(b.CostPerSlotHour)
 			snap.Farm.BurstSlots += int(p.Status.Slots)
 			snap.Farm.BurstCostPerHour += float64(p.Status.Slots) * num(b.CostPerSlotHour)
@@ -51,6 +59,9 @@ func (s *Server) snapshot(m *model, v *api.Viewer) *api.Snapshot {
 		snap.Farm.QueuedUnits += int(j.job.Status.Units.Queued + j.job.Status.Units.Backoff)
 	}
 	snap.Farm.UnitsPerHour, snap.Farm.FailuresLastHour = m.unitsHour, m.failsHour
+	if on, ok := s.farmSubject(context.Background()); ok {
+		snap.Farm.ActOn = actOn(on)
+	}
 	mat, fetched := m.metrics.bytes("")
 	snap.Farm.BytesMaterialized, snap.Farm.BytesFetchedStore = mat, fetched
 	snap.Farm.BytesAvoided = math.Max(0, mat-fetched)
@@ -85,7 +96,7 @@ func (s *Server) snapshot(m *model, v *api.Viewer) *api.Snapshot {
 		if !visible[p.Name] {
 			continue
 		}
-		ap := api.Project{Name: p.Name, Root: p.Spec.TreeRoot(), Quotas: []map[string]any{}, WorkerHours: []map[string]any{}}
+		ap := api.Project{Name: p.Name, Root: p.Spec.TreeRoot(), Quotas: []map[string]any{}, WorkerHours: []map[string]any{}, ActOn: actOn(projectSubject(&p))}
 		if w := p.Spec.Work; w != nil {
 			for _, q := range w.Quotas {
 				bl := any(nil)

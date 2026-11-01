@@ -147,7 +147,7 @@ func pendingJob(j *c4v1.WorkJob) bool {
 // commitSubmission makes a checked plan's jobs, as the comment above
 // says. opts gives a job's create options; line its answer.
 func (s *Server) commitSubmission(r *http.Request, v *api.Viewer, m *model, plan *authoring.Plan, body *api.SubmissionRequest,
-	out *api.SubmissionResponse, opts func(authoring.PlannedJob, string) createOpts,
+	out *api.SubmissionResponse, act *citedAct, opts func(authoring.PlannedJob, string) createOpts,
 	line func(authoring.PlannedJob, api.SubmitResponse) api.SubmissionJob) ([]api.SubmissionJob, int, *jobFailure) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), submissionWindow)
 	defer cancel()
@@ -230,8 +230,9 @@ func (s *Server) commitSubmission(r *http.Request, v *api.Viewer, m *model, plan
 		// a one-person farm's person, as a role: who the jobs were made for
 		pred.By = &actedBy{Person: first[c4v1.AnnotationOwner], Role: first[c4v1.AnnotationSubmittedAs]}
 	}
-	record, err := s.signControl(ctx, []string{plan.Project}, provenance.Subject{Name: "submission:" + out.Submission,
-		Digest: map[string]string{"sha256": hex.EncodeToString(sum[:])}}, pred)
+	subject := onAct(act, provenance.Subject{Name: "submission:" + out.Submission,
+		Digest: map[string]string{"sha256": hex.EncodeToString(sum[:])}}, &pred)
+	record, err := s.signControl(ctx, []string{plan.Project}, subject, pred)
 	if err != nil {
 		s.Log.Error(err, "sign a submission", "submission", out.Submission)
 		return fail(plan.Jobs[0].Key, names[0], http.StatusServiceUnavailable, errTransient, "")
