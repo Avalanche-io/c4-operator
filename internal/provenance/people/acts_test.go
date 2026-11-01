@@ -255,3 +255,34 @@ func TestLeaverKeepsNoApprovedDevice(t *testing.T) {
 		}
 	}
 }
+
+// An act the index books is refused a second time at another replica,
+// whose seen-set in memory has never held it, or after a restart (review
+// probe P7): the index is shared and lasting, and keeps each act's
+// payload hash.
+func TestActReplayedAtAnotherReplica(t *testing.T) {
+	r := studio(t)
+	laptop, touch, desk := newDev(t), newDev(t), newDev(t)
+	k := r.key(laptop, r.signIn(laptop, "dana", danaSub))
+	r.signIn(desk, "dana", danaSub)
+	e := r.enrolment(touch, "dana", laptop.id, "mac")
+	e.IDToken = r.sso.token(r.now, danaSub, touch.id, map[string]any{"auth_time": r.now.Unix(), "amr": []string{"pwd", "otp"}})
+	var tc people.Certified
+	if code, body := r.call("POST", "/v1/people/enroll", "", e, &tc); code != http.StatusOK {
+		t.Fatalf("touch: %d %s", code, body)
+	}
+	k.Touch = r.key(touch, &tc)
+	act := r.act(k, "dana", "approve-machine", deviceSubject(newDev(t).id), map[string]string{}, true)
+	if code, body, _ := r.book(act, ""); code != http.StatusOK {
+		t.Fatalf("approve: %d %s", code, body)
+	}
+	r.iss = &people.Issuer{CA: r.iss.CA, Index: &people.Index{Farm: r.farm.ID, Roots: r.farm.Roots, Store: r.store, Head: r.head},
+		Now: r.iss.Now, Admin: r.iss.Admin, Provider: r.iss.Provider, SignIns: r.iss.SignIns, HTTPClient: r.iss.HTTPClient}
+	r.now = r.now.Add(time.Minute)
+	if code, body, _ := r.book(act, ""); code != http.StatusConflict || !strings.Contains(body, "booked already") {
+		t.Errorf("the act replayed at another replica: %d %s", code, body)
+	}
+	if n := len(r.entries(people.KindApproval)); n != 1 {
+		t.Errorf("%d approvals booked", n)
+	}
+}

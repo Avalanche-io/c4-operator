@@ -142,7 +142,14 @@ func (i *Issuer) takeAct(r *http.Request, data []byte) (*Booked, error) {
 	if err := i.acts().Take(provenance.PayloadHash(v.Payload), until); err != nil {
 		return nil, fmt.Errorf("the act was taken once already: %w", err)
 	}
+	hash := provenance.PayloadHash(v.Payload)
 	es, err := x.append(ctx, now, func() ([]pending, error) {
+		// The index is shared and lasting, so an act it books is refused a
+		// second time at any replica, after any restart, by its payload
+		// hash (PEOPLE-KEYS-2 2.1, replay).
+		if x.acts[hash] {
+			return nil, refuse(http.StatusConflict, "the act is booked already (payload %.16s)", hash)
+		}
 		e, err := build()
 		if err != nil {
 			return nil, err

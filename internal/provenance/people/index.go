@@ -225,6 +225,9 @@ type Index struct {
 	devices map[string]*schema.Device
 	// raw are the device records' bundles, by record ID.
 	raw map[string][]byte
+	// acts are the payload hashes of the acts the index books: an act is
+	// booked once, whichever replica it reaches and however long after.
+	acts map[string]bool
 }
 
 // ErrIndex means the index doesn't hold together: an entry that doesn't
@@ -359,6 +362,10 @@ func (x *Index) load(ctx context.Context, e *Entry) error {
 		if v.PredicateType != provenance.PredicateAct {
 			return fmt.Errorf("a %s entry books a %s record, not an act", e.Kind, v.PredicateType)
 		}
+		if x.acts == nil {
+			x.acts = map[string]bool{}
+		}
+		x.acts[provenance.PayloadHash(v.Payload)] = true
 	}
 	return nil
 }
