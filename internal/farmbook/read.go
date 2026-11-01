@@ -1,0 +1,532 @@
+package farmbook
+
+import (
+	"bytes"
+	"context"
+	"crypto/x509"
+	"fmt"
+	"strconv"
+	"sync"
+	"time"
+
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
+	"github.com/Avalanche-io/c4-operator/schema"
+)
+
+// Segment is one sealed segment as a reader checked it.
+type Segment struct {
+	// ID is the C4 ID of the segment as signed (its bundle).
+	ID       string
+	Signed   []byte
+	SignedAt time.Time
+	schema.BookSegmentPredicate
+}
+
+// Sealed is one entry as a reader has it: sealed at its position by the
+// segment numbered Segment, at SealedAt; or, in a View, pending, its
+// position provisional and its time the reader's now.
+type Sealed struct {
+	ID       string
+	Raw      []byte
+	Entry    *Entry
+	Segment  int64
+	SealedAt time.Time
+	Pending  bool
+}
+
+// LastHead is the last head a reader accepted. A client keeps it between
+// reads (K4's CLI on disk) and gives it back (Reader.Keep), so a head that
+// goes back to an older segment the queue signed, or forks from it, is
+// refused (ErrRollback): signing alone shows a rewrite, not a rollback.
+type LastHead struct {
+	Number   int64  `json:"number"`
+	Segment  string `json:"segment,omitempty"`
+	Position int64  `json:"position"`
+}
+
+// After checks that h may follow the last head: not an older segment, and
+// the same segment where the number is the same.
+func (l LastHead) After(h Head) error {
+	switch {
+	case h.Number < l.Number:
+		return fmt.Errorf("%w: segment %d, where segment %d was seen", ErrRollback, h.Number, l.Number)
+	case h.Number == l.Number && h.Segment != l.Segment:
+		return fmt.Errorf("%w: segment %d is %.16s, where %.16s was seen: the book was rewritten", ErrRollback, h.Number, h.Segment, l.Segment)
+	}
+	return nil
+}
+
+// checkSegment checks one signed segment against the one before it (nil
+// for the first) and the book's last entry before it: it verifies against
+// the farm's roots, is the queue's (CheckSigner), is this farm's, follows
+// prev by number, ID and position, and its subject is the book's last
+// entry as it leaves it.
+func checkSegment(farm string, roots *x509.CertPool, id string, signed []byte, prev *Segment, lastEntry string) (*Segment, error) {
+	if got := c4id(signed); got != id {
+		return nil, fmt.Errorf("%w: segment %.16s hashes to %.16s", ErrBook, id, got)
+	}
+	v, err := provenance.VerifyBundle(signed, roots)
+	if err != nil {
+		return nil, fmt.Errorf("%w: segment %.16s: %v", ErrBook, id, err)
+	}
+	if v.PredicateType != provenance.PredicateBook {
+		return nil, fmt.Errorf("%w: segment %.16s is a %s record", ErrBook, id, v.PredicateType)
+	}
+	if err := provenance.CheckSigner(v); err != nil {
+		return nil, fmt.Errorf("%w: segment %.16s: %v", ErrBook, id, err)
+	}
+	st, errs := schema.ParseBookSegment(v.Payload)
+	if errs != nil {
+		return nil, fmt.Errorf("%w: segment %.16s: %s: %s", ErrBook, id, errs[0].Path, errs[0].Message)
+	}
+	p := st.Predicate
+	s := &Segment{ID: id, Signed: signed, SignedAt: v.SignedAt, BookSegmentPredicate: p}
+	wantNumber, wantPrev, wantFirst := int64(1), "", int64(1)
+	if prev != nil {
+		wantNumber, wantPrev, wantFirst = prev.Number+1, prev.ID, prev.Last+1
+	}
+	switch {
+	case v.Farm != farm || p.Farm != farm:
+		return nil, fmt.Errorf("%w: segment %.16s is farm %.16s's, signed under %.16s", ErrBook, id, p.Farm, v.Farm)
+	case p.Number != wantNumber:
+		return nil, fmt.Errorf("%w: segment %.16s is numbered %d, after segment %d", ErrBook, id, p.Number, wantNumber-1)
+	case p.Number > 1 && p.Prev == "":
+		return nil, fmt.Errorf("%w: segment %d names no segment before it", ErrBook, p.Number)
+	case p.Prev != wantPrev:
+		return nil, fmt.Errorf("%w: segment %d names %.16s before it, not %.16s: the book was rewritten", ErrBook, p.Number, p.Prev, wantPrev)
+	case p.First != wantFirst || p.Last-p.First+1 != int64(len(p.Entries)):
+		return nil, fmt.Errorf("%w: segment %d seals %d to %d with %d entries, after position %d", ErrBook, p.Number, p.First, p.Last, len(p.Entries), wantFirst-1)
+	case p.Adopted != nil && p.Number != 1:
+		return nil, fmt.Errorf("%w: segment %d adopts an index; only the first may", ErrBook, p.Number)
+	}
+	subject := st.Subject[0]
+	if n := len(p.Entries); n > 0 {
+		if subject.Name != "book:"+farm+"@"+strconv.FormatInt(p.Last, 10) || subject.Digest["c4"] != p.Entries[n-1] {
+			return nil, fmt.Errorf("%w: segment %d's subject is %s, not its last entry", ErrBook, p.Number, subject.Name)
+		}
+	} else if prev != nil && prev.Last > 0 {
+		if subject.Name != "book:"+farm+"@"+strconv.FormatInt(prev.Last, 10) || subject.Digest["c4"] != lastEntry {
+			return nil, fmt.Errorf("%w: segment %d's subject is %s, not the book's last entry", ErrBook, p.Number, subject.Name)
+		}
+	}
+	return s, nil
+}
+
+// Book is the sealed book as a reader checked it, from its first segment.
+type Book struct {
+	Farm     string
+	segments []*Segment
+	entries  []*Sealed
+	first    map[string]int64
+}
+
+// Head is the book's sealed head.
+func (b *Book) Head() Head {
+	if len(b.segments) == 0 {
+		return Head{}
+	}
+	s := b.segments[len(b.segments)-1]
+	h := Head{Segment: s.ID, Number: s.Number, Position: s.Last}
+	if n := len(b.entries); n > 0 {
+		h.Entry = b.entries[n-1].ID
+	}
+	return h
+}
+
+// Last is the book's head as a LastHead, for a reader to keep.
+func (b *Book) Last() LastHead {
+	h := b.Head()
+	return LastHead{Number: h.Number, Segment: h.Segment, Position: h.Position}
+}
+
+// Segments are the segments sealing positions after since, and always the
+// head segment, oldest first.
+func (b *Book) Segments(since int64) []*Segment {
+	var out []*Segment
+	for k, s := range b.segments {
+		if s.Last > since || k == len(b.segments)-1 {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// Entries are the sealed entries after position since.
+func (b *Book) Entries(since int64) []*Sealed {
+	since = max(0, min(since, int64(len(b.entries))))
+	return append([]*Sealed(nil), b.entries[since:]...)
+}
+
+// PositionOf is the first sealed position of an entry booking record: the
+// position the record counts from (DESIGN 5.4).
+func (b *Book) PositionOf(record string) (int64, bool) {
+	p, ok := b.first[record]
+	return p, ok
+}
+
+// SealedAt is when the entry at pos was sealed: the time its position is
+// judged at.
+func (b *Book) SealedAt(pos int64) (time.Time, error) {
+	if pos < 1 || pos > int64(len(b.entries)) {
+		return time.Time{}, fmt.Errorf("%w: position %d, the book is sealed to %d", ErrNotSealed, pos, len(b.entries))
+	}
+	return b.entries[pos-1].SealedAt, nil
+}
+
+// Flags are the sealed entries whose record's signedAt fell outside the
+// window their position allows (DESIGN 5.4): flagged, not refused. The
+// violations list reads them (slice 2's S2c).
+func (b *Book) Flags() []schema.BookFlag {
+	var out []schema.BookFlag
+	for _, s := range b.segments {
+		out = append(out, s.Flags...)
+	}
+	return out
+}
+
+// Refusals are the entries the queue refused at the seal, never sealed.
+func (b *Book) Refusals() []schema.BookRefusal {
+	var out []schema.BookRefusal
+	for _, s := range b.segments {
+		out = append(out, s.Refused...)
+	}
+	return out
+}
+
+// add checks a segment after the book's last and the entries it seals,
+// and adds them. Each entry is in the store under the ID the segment
+// lists, canonical, this farm's, at its position, naming the entry before
+// it, in the book's order (or the issuer's, in an adopted segment).
+func (b *Book) add(ctx context.Context, st Store, roots *x509.CertPool, id string, signed []byte) error {
+	var prev *Segment
+	if n := len(b.segments); n > 0 {
+		prev = b.segments[n-1]
+	}
+	last := ""
+	if n := len(b.entries); n > 0 {
+		last = b.entries[n-1].ID
+	}
+	s, err := checkSegment(b.Farm, roots, id, signed, prev, last)
+	if err != nil {
+		return err
+	}
+	var news []*Sealed
+	for k, eid := range s.Entries {
+		raw, err := st.Get(ctx, eid)
+		if err != nil {
+			return fmt.Errorf("%w: entry %.16s: %v", ErrBook, eid, err)
+		}
+		e, err := checkEntry(b.Farm, eid, raw, s.First+int64(k), last, s.Adopted != nil)
+		if err != nil {
+			return err
+		}
+		news = append(news, &Sealed{ID: eid, Raw: raw, Entry: e, Segment: s.Number, SealedAt: s.SignedAt})
+		last = eid
+	}
+	b.segments = append(b.segments, s)
+	if b.first == nil {
+		b.first = map[string]int64{}
+	}
+	for _, n := range news {
+		b.entries = append(b.entries, n)
+		if r := n.Entry.Record; r != "" {
+			if _, ok := b.first[r]; !ok {
+				b.first[r] = n.Entry.Position
+			}
+		}
+	}
+	return nil
+}
+
+// checkEntry checks one sealed entry is what its segment says.
+func checkEntry(farm, id string, raw []byte, pos int64, prev string, adopted bool) (*Entry, error) {
+	if got := c4id(raw); got != id {
+		return nil, fmt.Errorf("%w: entry %.16s hashes to %.16s", ErrBook, id, got)
+	}
+	if canon, err := schema.Canonical(raw); err != nil || !bytes.Equal(canon, raw) {
+		return nil, fmt.Errorf("%w: entry %.16s is not canonical JSON", ErrBook, id)
+	}
+	e, err := ParseEntry(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%w: entry %.16s: %v", ErrBook, id, err)
+	}
+	order := OrderBook
+	if adopted {
+		order = OrderIssuer
+	}
+	switch {
+	case e.Farm != farm:
+		return nil, fmt.Errorf("%w: entry %.16s is farm %.16s's", ErrBook, id, e.Farm)
+	case e.Position != pos || e.Prev != prev:
+		return nil, fmt.Errorf("%w: entry %.16s is at %d after %.16s, where its segment seals %d after %.16s", ErrBook, id, e.Position, e.Prev, pos, prev)
+	case e.Order != order:
+		return nil, fmt.Errorf("%w: entry %.16s is in order %q, not %q", ErrBook, id, e.Order, order)
+	}
+	return e, nil
+}
+
+// ReadBook reads and checks the whole sealed book, from its first segment
+// to head.
+func ReadBook(ctx context.Context, farm string, roots *x509.CertPool, st Store, head Head) (*Book, error) {
+	b := &Book{Farm: farm}
+	return b, b.extend(ctx, st, roots, head)
+}
+
+// extend reads the segments from the book's last to head, walking back by
+// prev, then checks and adds them oldest first.
+func (b *Book) extend(ctx context.Context, st Store, roots *x509.CertPool, head Head) error {
+	have := b.Head()
+	if head.Number == have.Number {
+		if head.Segment != have.Segment {
+			return fmt.Errorf("%w: segment %d is %.16s, where %.16s was read: the book was rewritten", ErrBook, head.Number, head.Segment, have.Segment)
+		}
+		return nil
+	}
+	if head.Number < have.Number {
+		return fmt.Errorf("%w: segment %d, where %d was read", ErrRollback, head.Number, have.Number)
+	}
+	var ids []string
+	var raws [][]byte
+	for id, n := head.Segment, head.Number; n > have.Number; n-- {
+		if id == "" {
+			return fmt.Errorf("%w: segment %d is not named by the one after it", ErrBook, n)
+		}
+		raw, err := st.Get(ctx, id)
+		if err != nil {
+			return fmt.Errorf("%w: segment %.16s: %v", ErrBook, id, err)
+		}
+		ids, raws = append(ids, id), append(raws, raw)
+		v, err := provenance.VerifyBundle(raw, roots)
+		if err != nil {
+			return fmt.Errorf("%w: segment %.16s: %v", ErrBook, id, err)
+		}
+		sg, errs := schema.ParseBookSegment(v.Payload)
+		if errs != nil {
+			return fmt.Errorf("%w: segment %.16s: %s: %s", ErrBook, id, errs[0].Path, errs[0].Message)
+		}
+		if sg.Predicate.Number != n {
+			return fmt.Errorf("%w: segment %.16s is numbered %d, where segment %d was linked: the book was rewritten", ErrBook, id, sg.Predicate.Number, n)
+		}
+		id = sg.Predicate.Prev
+	}
+	for k := len(ids) - 1; k >= 0; k-- {
+		if err := b.add(ctx, st, roots, ids[k], raws[k]); err != nil {
+			return err
+		}
+	}
+	if got := b.Head(); got.Position != head.Position || got.Entry != head.Entry {
+		return fmt.Errorf("%w: the head says position %d, entry %.16s; its segment seals %d, entry %.16s", ErrBook, head.Position, head.Entry, got.Position, got.Entry)
+	}
+	return nil
+}
+
+// Reader reads the sealed book from the system store and keeps the last
+// head it accepted, refusing one that goes back (LastHead).
+type Reader struct {
+	Farm    string
+	Roots   *x509.CertPool
+	Store   Store
+	Pointer Pointer
+
+	mu   sync.Mutex
+	book *Book
+	last LastHead
+}
+
+// Keep gives the reader a head kept from before, as a client that kept
+// it gives it back: the next Sync refuses a head older than it.
+func (r *Reader) Keep(last LastHead) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.last = last
+}
+
+// Last is the last head the reader accepted.
+func (r *Reader) Last() LastHead {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.last
+}
+
+// Sync reads the State and the segments sealed since the reader last
+// read, checking each, and returns the sealed book and the State. A head
+// before the last one accepted, or another segment in its place, is
+// ErrRollback, and the reader keeps its last head.
+func (r *Reader) Sync(ctx context.Context) (*Book, State, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	st, err := r.Pointer.Read(ctx)
+	if err != nil {
+		return nil, State{}, err
+	}
+	if err := r.last.After(st.Head); err != nil {
+		return nil, State{}, err
+	}
+	b := r.book
+	if b == nil || st.Head.Number < b.Head().Number {
+		b = &Book{Farm: r.Farm}
+	}
+	nb := &Book{Farm: b.Farm, segments: b.segments, entries: b.entries, first: b.first}
+	if err := nb.extend(ctx, r.Store, r.Roots, st.Head); err != nil {
+		return nil, State{}, err
+	}
+	// A head kept from before must be the segment of that number here.
+	if l := r.last; l.Number > 0 && (int64(len(nb.segments)) < l.Number || nb.segments[l.Number-1].ID != l.Segment) {
+		return nil, State{}, fmt.Errorf("%w: segment %d is not %.16s, the one last seen", ErrRollback, l.Number, l.Segment)
+	}
+	r.book, r.last = nb, nb.Last()
+	return nb, st, nil
+}
+
+// View reads the sealed book and the entries pending its seal: what the
+// HUD and the people's issuer judge a request against before an entry is
+// sealed. Pending entries get provisional positions after the sealed head,
+// in the order written; one the store lacks, or that isn't an entry, is
+// left out.
+func (r *Reader) View(ctx context.Context, now time.Time) (*View, error) {
+	b, st, err := r.Sync(ctx)
+	if err != nil {
+		return nil, err
+	}
+	v := &View{Book: b, State: st, Now: now}
+	pos := b.Head().Position
+	for _, id := range st.Pending {
+		raw, err := r.Store.Get(ctx, id)
+		if err != nil || c4id(raw) != id {
+			continue
+		}
+		e, err := ParseEntry(raw)
+		if err != nil || e.Order != OrderPending {
+			continue
+		}
+		pos++
+		e.Position = pos
+		v.pending = append(v.pending, &Sealed{ID: id, Raw: raw, Entry: e, SealedAt: now, Pending: true})
+	}
+	return v, nil
+}
+
+// View is the sealed book and the entries pending its seal, as of Now.
+type View struct {
+	*Book
+	State   State
+	Now     time.Time
+	pending []*Sealed
+}
+
+// Pending are the entries waiting for the seal, at provisional positions.
+func (v *View) Pending() []*Sealed { return append([]*Sealed(nil), v.pending...) }
+
+// Position is the last position the view holds, pending entries counted.
+func (v *View) Position() int64 {
+	if n := len(v.pending); n > 0 {
+		return v.pending[n-1].Entry.Position
+	}
+	return v.Book.Head().Position
+}
+
+// What "in force" is asked of (DESIGN 5.4).
+const (
+	// ForceGrant is a person's submit grant to a tracker: opened by a grant
+	// control record, closed by its revoke, and ending at its until.
+	ForceGrant = "grant"
+	// ForceBinding is a deployment binding: opened by a bind control
+	// record. A binding's end comes with slice 2's bindings (S2b).
+	ForceBinding = "binding"
+	// ForceMembership is a tracker login confirmed as a person, the people
+	// map: opened by people-confirm, closed by people-revoke. An
+	// organization's members join with Parties (ORGANIZATION O1).
+	ForceMembership = "membership"
+	// ForceDevice is a person's device key, by its device ID: opened by
+	// its device record, closed by a removal of it or of all its person's
+	// devices enrolled before, and lapsing DeviceLapse after its last
+	// renewal was sealed. A touch key's rules beside its device key are
+	// the people's issuer's (people.Index.DevicesAt).
+	ForceDevice = "device"
+)
+
+// DeviceLapse is how long a device may go without renewing before it
+// lapses (PEOPLE-KEYS-2 7).
+const DeviceLapse = 90 * 24 * time.Hour
+
+// opens and closes are the control acts that open and close each kind.
+var (
+	opens  = map[string]string{ForceGrant: "grant", ForceBinding: "bind", ForceMembership: "people-confirm"}
+	closes = map[string]string{ForceGrant: "revoke", ForceMembership: "people-revoke"}
+)
+
+// InForce is the entry that put key in force at sealed position pos, or
+// nil if it wasn't in force there: what a verifier judges a record by,
+// at the position the record counts from. The time at a position is when
+// it was sealed, never the record's own signedAt. A position past the
+// sealed head is ErrNotSealed.
+func (b *Book) InForce(kind, key string, pos int64) (*Sealed, error) {
+	at, err := b.SealedAt(pos)
+	if err != nil {
+		return nil, err
+	}
+	return inForce(b.entries[:pos], kind, key, at)
+}
+
+// InForce is the entry that put key in force at pos, pending entries
+// counted, as of the view's Now for a pending position: what the HUD and
+// the people's issuer judge a request by before its entry is sealed.
+func (v *View) InForce(kind, key string, pos int64) (*Sealed, error) {
+	sealed := v.Book.Head().Position
+	if pos <= sealed {
+		return v.Book.InForce(kind, key, pos)
+	}
+	es := append(append([]*Sealed(nil), v.Book.entries...), v.pending...)
+	return inForce(es[:min(pos, int64(len(es)))], kind, key, v.Now)
+}
+
+func inForce(es []*Sealed, kind, key string, at time.Time) (*Sealed, error) {
+	if kind == ForceDevice {
+		return deviceInForce(es, key, at), nil
+	}
+	open, ok := opens[kind]
+	if !ok {
+		return nil, fmt.Errorf("in force is asked of %s, %s, %s or %s, not %q", ForceGrant, ForceBinding, ForceMembership, ForceDevice, kind)
+	}
+	var on *Sealed
+	for _, s := range es {
+		e := s.Entry
+		if e.Kind != KindControl || e.Subject != key {
+			continue
+		}
+		switch e.Act {
+		case open:
+			on = s
+		case closes[kind]:
+			on = nil
+		}
+	}
+	if on != nil && on.Entry.Expires != "" && at.After(on.Entry.expires()) {
+		return nil, nil
+	}
+	return on, nil
+}
+
+// deviceInForce is the device's latest record in force: enrolled, not
+// removed, renewed within DeviceLapse.
+func deviceInForce(es []*Sealed, device string, at time.Time) *Sealed {
+	var on *Sealed
+	removed := false
+	for _, s := range es {
+		e := s.Entry
+		switch e.Kind {
+		case "device":
+			if e.Device == device && !removed {
+				on = s
+			}
+		case "removal":
+			if on != nil && (e.Device == device || e.Device == "" && e.Person == on.Entry.Person) {
+				removed = true
+			}
+		}
+	}
+	if removed || on == nil || at.Sub(on.SealedAt) > DeviceLapse {
+		return nil
+	}
+	return on
+}
