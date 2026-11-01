@@ -188,3 +188,57 @@ func TestNewDevicesAreToldFromTheIndex(t *testing.T) {
 		t.Errorf("a head that goes back: %v", err)
 	}
 }
+
+// A key renews before its certificate ends: on a studio farm on a fresh
+// silent sign-in (prompt=none), as its person; on a one-person farm on its
+// own proof. Each new certificate is kept, and a key not enrolled is told
+// to enrol.
+func TestKeysRenewBeforeTheyEnd(t *testing.T) {
+	f := peopletest.Studio(t)
+	c, cfg, st := loginAs(t, f)
+	ctx := context.Background()
+	before, _ := LoadCert(st, keystore.Device)
+	if NeedsRenewal(before, time.Now()) || !NeedsRenewal(before, before.Expires.Add(-time.Hour)) {
+		t.Errorf("needs renewal: %v", before.Expires)
+	}
+	auth := &fakeAuth{sso: f.SSO, codes: map[string]url.Values{}, sub: peopletest.DanaSub}
+	provider := httptest.NewServer(auth)
+	defer provider.Close()
+	var prompt string
+	a := LoginArgs{Store: st, Farm: cfg, Provider: provider.Client(),
+		Endpoints: OIDCEndpoints{Authorization: provider.URL + "/authorize", Token: provider.URL + "/token"},
+		Open: func(u string) error {
+			p, _ := url.Parse(u)
+			prompt = p.Query().Get("prompt")
+			resp, err := provider.Client().Get(u)
+			if err == nil {
+				resp.Body.Close()
+			}
+			return err
+		}, Wait: 10 * time.Second}
+	cert, err := Renew(ctx, c, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prompt != "none" || cert.Device != before.Device || cert.Record == before.Record {
+		t.Errorf("renewed %+v (prompt %q)", cert, prompt)
+	}
+	if kept, _ := LoadCert(st, keystore.Device); kept.Record != cert.Record {
+		t.Error("the renewed certificate was not kept")
+	}
+
+	o := newOwnerIssuer(t)
+	ost := keystore.Store{Dir: filepath.Join(t.TempDir(), "owner"), FileOnly: true}
+	if _, err := Renew(ctx, o.client, LoginArgs{Store: ost, Farm: &people.Config{Farm: o.scratch.ID}}); err == nil {
+		t.Error("a key not enrolled renewed")
+	}
+	first, err := EnrolOwner(ctx, o.client, ost, "noor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ocfg, _ := PeopleConfig(ctx, o.client)
+	again, err := Renew(ctx, o.client, LoginArgs{Store: ost, Farm: ocfg})
+	if err != nil || again.Device != first.Owner.Device || again.Record == first.Owner.Record {
+		t.Errorf("the owner's key on its own proof: %v %+v", err, again)
+	}
+}

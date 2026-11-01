@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/internal/keystore"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
 )
 
@@ -76,6 +77,9 @@ type LoginArgs struct {
 	Wait time.Duration
 	// Say tells the person what to do.
 	Say func(format string, a ...any)
+	// Prompt is the provider's prompt: "none" for a renewal's silent round
+	// trip, once a sign-in session is open in the browser.
+	Prompt string
 }
 
 // Login signs the person in at the farm's provider and enrols this
@@ -130,6 +134,9 @@ func signIn(ctx context.Context, a LoginArgs, nonce string) (string, error) {
 	q := url.Values{"response_type": {"code"}, "client_id": {a.Farm.Provider.ClientID}, "redirect_uri": {redirect},
 		"scope": {"openid"}, "state": {state}, "nonce": {nonce},
 		"code_challenge": {base64.RawURLEncoding.EncodeToString(sum[:])}, "code_challenge_method": {"S256"}}
+	if a.Prompt != "" {
+		q.Set("prompt", a.Prompt)
+	}
 	auth := a.Endpoints.Authorization + "?" + q.Encode()
 
 	got := make(chan url.Values, 1)
@@ -210,4 +217,69 @@ func randomURL(n int) string {
 	b := make([]byte, n)
 	rand.Read(b)
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// RenewWithin is how long before its certificate ends the CLI renews a
+// key: a certificate lives at most 12 hours.
+const RenewWithin = 2 * time.Hour
+
+// NeedsRenewal reports whether a key's certificate ends within RenewWithin.
+func NeedsRenewal(cert *people.Certified, now time.Time) bool {
+	return cert != nil && cert.Expires.Sub(now) < RenewWithin
+}
+
+// Renew renews this machine's keys before their certificates end, keeping
+// the new ones beside them. On a farm with no sign-in provider a key
+// renews on its own proof, the touch key with it. On a farm with one,
+// every device renews on a fresh ID token for its person, from the
+// provider's silent round trip, so a leaver's last certificate ends: the
+// device key here; a touch key there takes a step-up sign-in (K9).
+func Renew(ctx context.Context, c *Client, a LoginArgs) (*people.Certified, error) {
+	mine, err := LoadCert(a.Store, keystore.Device)
+	if err != nil {
+		return nil, err
+	}
+	if mine == nil {
+		return nil, errors.New("this machine's key is not enrolled: c4 farm login enrols it")
+	}
+	person := strings.TrimPrefix(mine.Identity, provenance.IdentityBase+"user/")
+	key, err := a.Store.Key(keystore.Device)
+	if err != nil {
+		return nil, err
+	}
+	e, err := enrolment(key, a.Farm.Farm, person, "")
+	if err != nil {
+		return nil, err
+	}
+	if a.Farm.Provider != nil {
+		a.Prompt = "none"
+		if e.IDToken, err = signIn(ctx, a, deviceID(key)); err != nil {
+			return nil, fmt.Errorf("renewing on a fresh sign-in: %w", err)
+		}
+	}
+	var cert people.Certified
+	if err := c.Issuer(ctx, http.MethodPost, "/v1/people/renew", e, &cert); err != nil {
+		return nil, fmt.Errorf("renewing this machine's key: %w", err)
+	}
+	if err := saveCert(a.Store, keystore.Device, &cert); err != nil {
+		return nil, err
+	}
+	if a.Farm.Provider == nil && a.Store.Has(keystore.Touch) {
+		touch, err := a.Store.Key(keystore.Touch)
+		if err != nil {
+			return nil, err
+		}
+		te, err := enrolment(touch, a.Farm.Farm, person, deviceID(key))
+		if err != nil {
+			return nil, err
+		}
+		var tc people.Certified
+		if err := c.Issuer(ctx, http.MethodPost, "/v1/people/renew", te, &tc); err != nil {
+			return nil, fmt.Errorf("renewing this machine's touch key: %w", err)
+		}
+		if err := saveCert(a.Store, keystore.Touch, &tc); err != nil {
+			return nil, err
+		}
+	}
+	return &cert, nil
 }
