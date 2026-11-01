@@ -70,7 +70,7 @@ func TestProbeLeaverKeepsApprovedDevice(t *testing.T) {
 	laptop, laptopTouch := newDev(t), newDev(t)
 	k := r.key(laptop, r.signIn(laptop, "dana", danaSub))
 	e := r.enrolment(laptopTouch, "dana", laptop.id, "mac")
-	e.IDToken = r.sso.token(r.now, danaSub, laptopTouch.id, map[string]any{"auth_time": r.now.Unix(), "amr": []string{"hwk", "pin"}})
+	e.IDToken = r.sso.Token(r.now, danaSub, laptopTouch.id, map[string]any{"auth_time": r.now.Unix(), "amr": []string{"hwk", "pin"}})
 	var tc people.Certified
 	if code, body := r.call("POST", "/v1/people/enroll", "", e, &tc); code != http.StatusOK {
 		t.Fatalf("touch: %d %s", code, body)
@@ -177,7 +177,7 @@ func TestProbeVerifyBookedTokenIgnoresSubject(t *testing.T) {
 	if err := people.CheckBookedToken(&p, jwk, set, ins); err == nil {
 		t.Error("VULNERABLE: dana's token passed on a record naming noor")
 	}
-	p.IDToken = r.sso.token(r.now, noorSub, d.id, map[string]any{"aud": "some-other-app", "iss": "https://evil.example"})
+	p.IDToken = r.sso.Token(r.now, noorSub, d.id, map[string]any{"aud": "some-other-app", "iss": "https://evil.example"})
 	if err := people.CheckBookedToken(&p, jwk, set, ins); err == nil {
 		t.Error("VULNERABLE: a token for another audience and issuer passed")
 	}

@@ -6,24 +6,18 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"math/big"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/coreos/go-oidc/v3/oidc/oidctest"
-
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
+	"github.com/Avalanche-io/c4-operator/internal/provenance/people/peopletest"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/provtest"
 	"github.com/Avalanche-io/c4-operator/schema"
 )
@@ -34,72 +28,11 @@ import (
 // real provider or a real credential.
 
 const (
-	ssoIssuer = "https://sso.studio.example"
-	clientID  = "c4-farm-studio"
-	danaSub   = "00u-dana-7f3a"
-	noorSub   = "00u-noor-2c9e"
+	ssoIssuer = peopletest.Issuer
+	clientID  = peopletest.ClientID
+	danaSub   = peopletest.DanaSub
+	noorSub   = peopletest.NoorSub
 )
-
-// sso is the fake sign-in provider.
-type sso struct {
-	issuer string
-	key    *ecdsa.PrivateKey
-	kid    string
-	client *http.Client
-}
-
-func newSSO(t *testing.T, issuer string) *sso {
-	t.Helper()
-	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	s := &oidctest.Server{PublicKeys: []oidctest.PublicKey{{PublicKey: key.Public(), KeyID: "sso-key-1", Algorithm: "ES256"}}, Algorithms: []string{"ES256"}}
-	s.SetIssuer(issuer)
-	host := strings.TrimPrefix(issuer, "https://")
-	cert, leaf := tlsCert(t, host)
-	ts := httptest.NewUnstartedServer(s)
-	ts.TLS = &tls.Config{Certificates: []tls.Certificate{cert}}
-	ts.StartTLS()
-	t.Cleanup(ts.Close)
-	pool := x509.NewCertPool()
-	pool.AddCert(leaf)
-	addr := ts.Listener.Addr().String()
-	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool},
-		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, network, addr)
-		}}}
-	return &sso{issuer: issuer, key: key, kid: "sso-key-1", client: client}
-}
-
-// tlsCert is a self-signed serving certificate for host.
-func tlsCert(t *testing.T, host string) (tls.Certificate, *x509.Certificate) {
-	t.Helper()
-	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: host}, DNSNames: []string{host},
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour), IsCA: true, BasicConstraintsValid: true,
-		KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	leaf, _ := x509.ParseCertificate(der)
-	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}, leaf
-}
-
-// token signs an ID token: the provider's issuer, the farm's client ID,
-// subject sub, issued at now and good for an hour, nonce nonce, with
-// claims laid over (nil deletes one).
-func (s *sso) token(now time.Time, sub, nonce string, over map[string]any) string {
-	c := map[string]any{"iss": s.issuer, "aud": clientID, "sub": sub, "nonce": nonce,
-		"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(), "email": "dana@studio.example"}
-	for k, v := range over {
-		if v == nil {
-			delete(c, k)
-			continue
-		}
-		c[k] = v
-	}
-	b, _ := json.Marshal(c)
-	return oidctest.SignIDToken(s.key, s.kid, "ES256", string(b))
-}
 
 // rig is a farm with a people's issuer: a scratch CA, an index in memory,
 // the fake provider, and a clock the test moves.
@@ -110,7 +43,7 @@ type rig struct {
 	index *people.Index
 	store *people.MemoryStore
 	head  *people.MemoryHead
-	sso   *sso
+	sso   *peopletest.SSO
 	now   time.Time
 	// addr is the address requests come from.
 	addr string
@@ -131,9 +64,9 @@ func newRig(t *testing.T) *rig {
 	t.Helper()
 	now := time.Now().UTC().Truncate(time.Second)
 	r := &rig{t: t, farm: provtest.NewFarm(t, now), store: &people.MemoryStore{}, head: &people.MemoryHead{}, now: now, addr: "192.0.2.10"}
-	r.sso = newSSO(t, ssoIssuer)
+	r.sso = peopletest.NewSSO(t, ssoIssuer)
 	r.index = &people.Index{Farm: r.farm.ID, Roots: r.farm.Roots, Store: r.store, Head: r.head}
-	r.iss = &people.Issuer{CA: r.farm.CA, Index: r.index, HTTPClient: r.sso.client, Now: func() time.Time { return r.now },
+	r.iss = &people.Issuer{CA: r.farm.CA, Index: r.index, HTTPClient: r.sso.Client, Now: func() time.Time { return r.now },
 		SignIns: people.StaticSignIns{"dana": {{Issuer: ssoIssuer, Subject: danaSub}}, "noor": {{Issuer: ssoIssuer, Subject: noorSub}}},
 		Admin:   func(_ context.Context, p string) bool { return p == "dana" },
 		ClientAddr: func(*http.Request) string {
@@ -232,7 +165,7 @@ const local = "127.0.0.1:52144"
 func (r *rig) signIn(d *dev, person, sub string) *people.Certified {
 	r.t.Helper()
 	e := r.enrolment(d, person, "", "browser")
-	e.IDToken = r.sso.token(r.now, sub, d.id, nil)
+	e.IDToken = r.sso.Token(r.now, sub, d.id, nil)
 	var c people.Certified
 	if code, body := r.call("POST", "/v1/people/enroll", "", e, &c); code != http.StatusOK {
 		r.t.Fatalf("enrol %s: %d %s", person, code, body)

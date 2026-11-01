@@ -67,7 +67,7 @@ func TestRemovedDeviceOutOfForce(t *testing.T) {
 		t.Errorf("a removed device renewed: %d %s", code, body)
 	}
 	e := r.enrolment(d, "noor", "", "browser")
-	e.IDToken = r.sso.token(r.now, noorSub, d.id, nil)
+	e.IDToken = r.sso.Token(r.now, noorSub, d.id, nil)
 	if code, _ := r.call("POST", "/v1/people/enroll", "", e, nil); code != http.StatusConflict {
 		t.Errorf("a removed key enrolled again: %d", code)
 	}
@@ -132,7 +132,7 @@ func TestProviderSettingOnlyByInstall(t *testing.T) {
 	}
 	d := newDev(t)
 	e := r.enrolment(d, "dana", "", "browser")
-	e.IDToken = r.sso.token(r.now, danaSub, d.id, nil)
+	e.IDToken = r.sso.Token(r.now, danaSub, d.id, nil)
 	if code, _ := r.call("POST", "/v1/people/enroll", "", e, nil); code != http.StatusForbidden {
 		t.Errorf("a token for the old client certified a key: %d", code)
 	}
@@ -149,7 +149,7 @@ func TestTouchKeyByApproval(t *testing.T) {
 	laptop, laptopTouch := newDev(t), newDev(t)
 	k := r.key(laptop, r.signIn(laptop, "dana", danaSub))
 	e := r.enrolment(laptopTouch, "dana", laptop.id, "mac")
-	e.IDToken = r.sso.token(r.now, danaSub, laptopTouch.id, map[string]any{"auth_time": r.now.Unix(), "amr": []string{"hwk", "pin"}})
+	e.IDToken = r.sso.Token(r.now, danaSub, laptopTouch.id, map[string]any{"auth_time": r.now.Unix(), "amr": []string{"hwk", "pin"}})
 	var tc people.Certified
 	if code, body := r.call("POST", "/v1/people/enroll", "", e, &tc); code != http.StatusOK {
 		t.Fatalf("the first touch key: %d %s", code, body)
@@ -215,7 +215,7 @@ func TestLeaverKeepsNoApprovedDevice(t *testing.T) {
 	k := r.key(laptop, r.signIn(laptop, "dana", danaSub))
 	r.signIn(desk, "dana", danaSub)
 	e := r.enrolment(laptopTouch, "dana", laptop.id, "mac")
-	e.IDToken = r.sso.token(r.now, danaSub, laptopTouch.id, map[string]any{"auth_time": r.now.Unix(), "amr": []string{"hwk", "pin"}})
+	e.IDToken = r.sso.Token(r.now, danaSub, laptopTouch.id, map[string]any{"auth_time": r.now.Unix(), "amr": []string{"hwk", "pin"}})
 	var tc people.Certified
 	if code, body := r.call("POST", "/v1/people/enroll", "", e, &tc); code != http.StatusOK {
 		t.Fatalf("touch: %d %s", code, body)
@@ -251,7 +251,7 @@ func TestLeaverKeepsNoApprovedDevice(t *testing.T) {
 		touchFor string
 	}{{laptop, ""}, {deskTouch, desk.id}, {laptopTouch, laptop.id}} {
 		en := r.enrolment(d.dev, "dana", d.touchFor, "mac")
-		en.IDToken = r.sso.token(r.now, danaSub, d.dev.id, nil)
+		en.IDToken = r.sso.Token(r.now, danaSub, d.dev.id, nil)
 		if code, body := r.call("POST", "/v1/people/renew", "", en, nil); code != http.StatusForbidden {
 			t.Errorf("a leaver's device renewed: %d %s", code, body)
 		}
@@ -268,7 +268,7 @@ func TestActReplayedAtAnotherReplica(t *testing.T) {
 	k := r.key(laptop, r.signIn(laptop, "dana", danaSub))
 	r.signIn(desk, "dana", danaSub)
 	e := r.enrolment(touch, "dana", laptop.id, "mac")
-	e.IDToken = r.sso.token(r.now, danaSub, touch.id, map[string]any{"auth_time": r.now.Unix(), "amr": []string{"pwd", "otp"}})
+	e.IDToken = r.sso.Token(r.now, danaSub, touch.id, map[string]any{"auth_time": r.now.Unix(), "amr": []string{"pwd", "otp"}})
 	var tc people.Certified
 	if code, body := r.call("POST", "/v1/people/enroll", "", e, &tc); code != http.StatusOK {
 		t.Fatalf("touch: %d %s", code, body)
@@ -315,7 +315,7 @@ func TestActCheckedWhenBooked(t *testing.T) {
 	k := r.key(laptop, r.signIn(laptop, "dana", danaSub))
 	kdesk := r.key(desk, r.signIn(desk, "dana", danaSub))
 	e := r.enrolment(touch, "dana", laptop.id, "mac")
-	e.IDToken = r.sso.token(r.now, danaSub, touch.id, map[string]any{"auth_time": r.now.Unix(), "amr": []string{"pwd", "otp"}})
+	e.IDToken = r.sso.Token(r.now, danaSub, touch.id, map[string]any{"auth_time": r.now.Unix(), "amr": []string{"pwd", "otp"}})
 	var tc people.Certified
 	if code, body := r.call("POST", "/v1/people/enroll", "", e, &tc); code != http.StatusOK {
 		t.Fatalf("touch: %d %s", code, body)

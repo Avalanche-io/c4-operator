@@ -73,7 +73,7 @@ func TestEnrolOnASignIn(t *testing.T) {
 func refused(t *testing.T, r *rig, d *dev, sub, nonce string, over map[string]any, want string) {
 	t.Helper()
 	e := r.enrolment(d, "dana", "", "browser")
-	e.IDToken = r.sso.token(r.now, sub, nonce, over)
+	e.IDToken = r.sso.Token(r.now, sub, nonce, over)
 	code, body := r.call("POST", "/v1/people/enroll", "", e, nil)
 	if code != http.StatusForbidden || !strings.Contains(body, want) {
 		t.Errorf("%v: %d %s, want 403 with %q", over, code, body, want)
@@ -110,7 +110,7 @@ func TestUnconfiguredIssuerRefused(t *testing.T) {
 
 	r = newRig(t)
 	e := r.enrolment(d, "dana", "", "browser")
-	e.IDToken = r.sso.token(r.now, danaSub, d.id, nil)
+	e.IDToken = r.sso.Token(r.now, danaSub, d.id, nil)
 	if code, body := r.call("POST", "/v1/people/enroll", "", e, nil); code != http.StatusForbidden || !strings.Contains(body, "no sign-in provider") {
 		t.Errorf("no provider: %d %s", code, body)
 	}
@@ -143,7 +143,7 @@ func TestProofIsTheKeys(t *testing.T) {
 	d := newDev(t)
 	e := r.enrolment(d, "dana", "", "browser")
 	e.Proof = r.enrolment(newDev(t), "dana", "", "browser").Proof
-	e.IDToken = r.sso.token(r.now, danaSub, d.id, nil)
+	e.IDToken = r.sso.Token(r.now, danaSub, d.id, nil)
 	if code, body := r.call("POST", "/v1/people/enroll", "", e, nil); code != http.StatusForbidden || !strings.Contains(body, "proof") {
 		t.Errorf("another key's proof: %d %s", code, body)
 	}
@@ -152,7 +152,7 @@ func TestProofIsTheKeys(t *testing.T) {
 // renew renews d for person on a fresh token.
 func (r *rig) renew(d *dev, person, sub string) (int, string, *people.Certified) {
 	e := r.enrolment(d, person, "", "browser")
-	e.IDToken = r.sso.token(r.now, sub, d.id, nil)
+	e.IDToken = r.sso.Token(r.now, sub, d.id, nil)
 	var c people.Certified
 	code, body := r.call("POST", "/v1/people/renew", "", e, &c)
 	return code, body, &c
@@ -269,7 +269,7 @@ func TestTouchKeyNeedsStepUp(t *testing.T) {
 	try := func(over map[string]any) (int, string) {
 		touch := newDev(t)
 		e := r.enrolment(touch, "dana", d.id, "mac")
-		e.IDToken = r.sso.token(r.now, danaSub, touch.id, over)
+		e.IDToken = r.sso.Token(r.now, danaSub, touch.id, over)
 		return r.call("POST", "/v1/people/enroll", "", e, nil)
 	}
 	for _, c := range []struct {
@@ -305,12 +305,12 @@ func TestTouchForNamesAPlainDeviceInForce(t *testing.T) {
 	enrol := func(touchFor string) (int, string) {
 		touch := newDev(t)
 		e := r.enrolment(touch, "dana", touchFor, "mac")
-		e.IDToken = r.sso.token(r.now, danaSub, touch.id, stepUp)
+		e.IDToken = r.sso.Token(r.now, danaSub, touch.id, stepUp)
 		return r.call("POST", "/v1/people/enroll", "", e, nil)
 	}
 	first := newDev(t)
 	e := r.enrolment(first, "dana", d.id, "mac")
-	e.IDToken = r.sso.token(r.now, danaSub, first.id, stepUp)
+	e.IDToken = r.sso.Token(r.now, danaSub, first.id, stepUp)
 	if code, body := r.call("POST", "/v1/people/enroll", "", e, nil); code != http.StatusOK {
 		t.Fatalf("dana's touch key: %d %s", code, body)
 	}
@@ -382,7 +382,7 @@ func TestBookedTokenCheckedAtItsPosition(t *testing.T) {
 		"noor's subject":   {"sub": noorSub},
 	} {
 		p := dr.Predicate
-		p.IDToken = r.sso.token(r.now, danaSub, d.id, over)
+		p.IDToken = r.sso.Token(r.now, danaSub, d.id, over)
 		if err := people.CheckBookedToken(&p, jwk, set, ins); err == nil {
 			t.Errorf("%s passed", name)
 		}

@@ -173,7 +173,7 @@ func TestEntriesAgreeWithTheirRecords(t *testing.T) {
 		k := r.key(laptop, r.signIn(laptop, "dana", danaSub))
 		r.signIn(junk, "dana", danaSub)
 		e := r.enrolment(touch, "dana", laptop.id, "mac")
-		e.IDToken = r.sso.token(r.now, danaSub, touch.id, map[string]any{"auth_time": r.now.Unix(), "amr": []string{"pwd", "otp"}})
+		e.IDToken = r.sso.Token(r.now, danaSub, touch.id, map[string]any{"auth_time": r.now.Unix(), "amr": []string{"pwd", "otp"}})
 		var tc people.Certified
 		if code, body := r.call("POST", "/v1/people/enroll", "", e, &tc); code != http.StatusOK {
 			t.Fatalf("touch: %d %s", code, body)
