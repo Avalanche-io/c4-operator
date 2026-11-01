@@ -160,6 +160,11 @@ type Server struct {
 	// Telemetry is the farm's telemetry ring, for diagnostic bundles
 	// (GET /diagnose, diagnose.go); nil answers 503.
 	Telemetry *ring.Ring
+	// People is the people's issuer (internal/provenance/people), served
+	// at /issuer/v1/people/ so the web app reaches it at its own origin;
+	// nil serves none. It trusts the HUD for nothing: it certifies on an
+	// ID token, or a one-person farm's installer token or code.
+	People http.Handler
 
 	mu      sync.RWMutex
 	m       *model
@@ -300,6 +305,11 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc(m+" /api/", func(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusNotFound, "no API call %s %s", r.Method, r.URL.Path)
 		})
+	}
+	if s.People != nil {
+		p := http.StripPrefix("/issuer", s.People)
+		mux.Handle("GET /issuer/v1/people/", p)
+		mux.Handle("POST /issuer/v1/people/", p)
 	}
 	if s.Sandbox != nil && s.DevViewers != nil {
 		p := s.sandboxProxy()
