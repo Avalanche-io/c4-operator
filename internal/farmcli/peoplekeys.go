@@ -1,6 +1,7 @@
 package farmcli
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -261,15 +262,32 @@ func BookBrowserCode(ctx context.Context, c *Client, st keystore.Store, farm, ow
 	return code, nil
 }
 
-// BrowserURL is the HUD's address with the browser's code where only the
-// web app reads it: in the fragment, which no request or log carries.
-// installer is the installer code that signs the browser in, if any.
-func BrowserURL(hud, installer, code string) string {
-	base := strings.TrimSuffix(hud, "/")
-	if installer == "" {
-		return base + "/#/?browser=" + url.QueryEscape(code)
+// BrowserURL is page, an address of the HUD at base, with the browser's
+// code where only the web app reads it: in the fragment's query
+// (#/<route>?browser=<code>), which no request or log carries. installer
+// is the installer code that signs the browser in, if any: /installer
+// sends the browser on to the page's path, and a redirect with no fragment
+// keeps the one the browser has, so the route and the code go in the
+// fragment of the /installer address itself.
+func BrowserURL(base, installer, page, code string) string {
+	base = strings.TrimSuffix(base, "/")
+	path, frag, _ := strings.Cut(page, "#")
+	if frag == "" {
+		frag = "/"
 	}
-	return base + "/installer?code=" + url.QueryEscape(installer) + "&next=%2F#/?browser=" + url.QueryEscape(code)
+	sep := "?"
+	if strings.Contains(frag, "?") {
+		sep = "&"
+	}
+	frag += sep + "browser=" + url.QueryEscape(code)
+	if installer == "" {
+		return path + "#" + frag
+	}
+	next := strings.TrimPrefix(path, base)
+	if next == "" {
+		next = "/"
+	}
+	return base + "/installer?" + url.Values{"code": {installer}, "next": {next}}.Encode() + "#" + frag
 }
 
 // WatchCode reads the code's state until the browser has enrolled with it,
@@ -379,4 +397,122 @@ func approveWith(ctx context.Context, c *Client, farm, device string, dev proven
 func KeysFor(farm string) keystore.Store {
 	home, _ := os.UserHomeDir()
 	return keystore.Store{Dir: filepath.Join(home, ".c4", farm, "keys"), FileOnly: os.Getenv("C4_KEYS") == "file"}
+}
+
+// OpenArgs are c4 farm open's (and up's) when it opens the HUD.
+type OpenArgs struct {
+	// Store is the farm's keys on this machine.
+	Store keystore.Store
+	// Page is the HUD page to open.
+	Page string
+	// Open opens the person's browser at an address.
+	Open func(string) error
+	// Wait bounds the wait for the browser to enrol: a code lives a
+	// minute. Poll is how often the code is read.
+	Wait, Poll time.Duration
+	// Say tells the person what happened.
+	Say func(format string, a ...any)
+}
+
+// OpenBrowser opens a page of the HUD in the person's browser, signed in.
+// On a one-person farm whose owner key is on this machine, and whose HUD
+// enrols browsers, the address carries a one-time code the owner's key
+// booked: the web app enrols its key with it, and the CLI reads back the
+// key the code enrolled, countersigns it, and prints it, so the person can
+// see it is the one the HUD shows (PEOPLE-KEYS-2 3.3). A browser whose key
+// is certified already ignores the code; the wait is short when the owner
+// has a browser countersigned. Anywhere else the page opens as before.
+func OpenBrowser(ctx context.Context, c *Client, a OpenArgs) error {
+	say := a.Say
+	if say == nil {
+		say = func(string, ...any) {}
+	}
+	cfg := browserEnrols(ctx, c, a.Store)
+	if cfg == nil {
+		u, err := SignedIn(ctx, c, a.Page)
+		if err != nil {
+			return err
+		}
+		return a.Open(u)
+	}
+	code, err := BookBrowserCode(ctx, c, a.Store, cfg.Farm, cfg.Owner)
+	if err != nil {
+		return err
+	}
+	inst, err := InstallerCode(ctx, c)
+	if err != nil {
+		return err
+	}
+	if err := a.Open(BrowserURL(c.Base, inst, a.Page, code)); err != nil {
+		return err
+	}
+	wait, poll := cmp.Or(a.Wait, time.Minute), cmp.Or(a.Poll, 500*time.Millisecond)
+	had := hasBrowser(ctx, c, cfg.Owner)
+	if had {
+		wait = min(wait, enrolledWait)
+	}
+	s, err := WatchCode(ctx, c, code, wait, poll)
+	if err != nil {
+		return fmt.Errorf("the HUD is open, but whether the browser enrolled its key: %w", err)
+	}
+	if s.State != "enrolled" {
+		if !had {
+			say("browser   the HUD is open, but the browser did not enrol its key, so it reads and does not act yet: c4 farm open again enrols it\n")
+		}
+		return nil
+	}
+	if err := Countersign(ctx, c, a.Store, cfg.Farm, cfg.Owner, s); err != nil {
+		return err
+	}
+	say("browser   its key is %s, countersigned; the HUD's device page shows the same\n", ShortDevice(s.Device))
+	return nil
+}
+
+// enrolledWait is how long open waits on a code when the person has a
+// browser enrolled already, which most likely ignores it: a fresh one
+// enrols in a second or two.
+var enrolledWait = 8 * time.Second
+
+// browserEnrols is the farm's people's config when open enrols the
+// browser: a one-person farm, this machine's owner key enrolled there, and
+// a HUD whose web app enrols browsers.
+func browserEnrols(ctx context.Context, c *Client, st keystore.Store) *people.Config {
+	if cert, err := LoadCert(st, keystore.Device); err != nil || cert == nil {
+		return nil
+	}
+	cfg, err := PeopleConfig(ctx, c)
+	if err != nil || cfg.Owner == "" || !cfg.OwnerEnrolled {
+		return nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, c.Base+"/js/enrol.js", nil)
+	if err != nil {
+		return nil
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	return cfg
+}
+
+// hasBrowser reports whether the person has a browser in force that the
+// owner's CLI countersigned. It only sets how long open waits, so the
+// farm's word is enough.
+func hasBrowser(ctx context.Context, c *Client, person string) bool {
+	var out struct {
+		Devices []people.DeviceView `json:"devices"`
+	}
+	if err := c.Issuer(ctx, http.MethodGet, "/v1/people/devices?person="+url.QueryEscape(person), nil, &out); err != nil {
+		return false
+	}
+	for _, d := range out.Devices {
+		if d.Kind == "browser" && d.Countersigned {
+			return true
+		}
+	}
+	return false
 }

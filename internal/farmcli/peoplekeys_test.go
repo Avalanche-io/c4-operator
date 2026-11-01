@@ -6,10 +6,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,6 +30,7 @@ type ownerIssuer struct {
 	scratch *provtest.Farm
 	index   *people.Index
 	client  *Client
+	mux     *http.ServeMux
 }
 
 const testInstaller = "6f1c3a9e0b7d4e2a8c5f1b3d7e9a0c2f4b6d8e0a2c4e6f8a0b2d4f6a8c0e2a4b"
@@ -48,7 +52,7 @@ func newOwnerIssuer(t *testing.T) *ownerIssuer {
 		t.Fatal(err)
 	}
 	c.Installer = testInstaller
-	return &ownerIssuer{scratch: sf, index: idx, client: c}
+	return &ownerIssuer{scratch: sf, index: idx, client: c, mux: mux}
 }
 
 // up enrols the owner's key on the installer token, once, and keeps its
@@ -117,8 +121,14 @@ func TestOpenEnrolsAndCountersignsTheBrowser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if u := BrowserURL("http://127.0.0.1:30080", "inst", code); u != "http://127.0.0.1:30080/installer?code=inst&next=%2F#/?browser="+code {
-		t.Errorf("the URL: %s", u)
+	for _, c := range []struct{ inst, page, want string }{
+		{"inst", "http://127.0.0.1:30080/", "http://127.0.0.1:30080/installer?code=inst&next=%2F#/?browser=" + code},
+		{"inst", "http://127.0.0.1:30080/?as=artist#/needs", "http://127.0.0.1:30080/installer?code=inst&next=%2F%3Fas%3Dartist#/needs?browser=" + code},
+		{"", "http://127.0.0.1:30080/#/jobs/x?tab=log", "http://127.0.0.1:30080/#/jobs/x?tab=log&browser=" + code},
+	} {
+		if u := BrowserURL("http://127.0.0.1:30080", c.inst, c.page, code); u != c.want {
+			t.Errorf("the URL for %s: %s", c.page, u)
+		}
 	}
 	if s, err := WatchCode(ctx, o.client, code, 0, time.Millisecond); err != nil || s.State != "waiting" {
 		t.Fatalf("before the browser: %v %+v", err, s)
@@ -211,5 +221,80 @@ func TestUpKeysPinsTheOwnersKey(t *testing.T) {
 	}
 	if _, err := UpKeys(ctx, c, st, "noor", "", true); !errors.Is(err, ErrNoIssuer) {
 		t.Errorf("a farm with no people's issuer: %v", err)
+	}
+}
+
+// c4 farm open on a one-person farm: the browser's code rides in the
+// address's fragment; the web app enrols its key with it; the CLI
+// countersigns the key the code enrolled and prints it. A browser already
+// enrolled ignores the code, and open doesn't wait long for it. A HUD whose
+// web app enrols no browser opens as before.
+func TestOpenBrowserCountersignsWhatEnrolled(t *testing.T) {
+	o := newOwnerIssuer(t)
+	o.mux.HandleFunc("/js/enrol.js", func(w http.ResponseWriter, r *http.Request) {})
+	ctx := context.Background()
+	st := keystore.Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
+	if _, err := EnrolOwner(ctx, o.client, st, "noor"); err != nil {
+		t.Fatal(err)
+	}
+	browser, err := keystore.Store{Dir: filepath.Join(t.TempDir(), "browser"), FileOnly: true}.Key(keystore.Device)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enrolled := false
+	// the web app (K3): the code out of the fragment's query, its key
+	// enrolled with it, once
+	web := func(u string) error {
+		_, frag, _ := strings.Cut(u, "#")
+		_, q, _ := strings.Cut(frag, "?")
+		v, _ := url.ParseQuery(q)
+		if enrolled || v.Get("browser") == "" {
+			return nil
+		}
+		e, err := enrolment(browser, o.scratch.ID, "noor", "")
+		if err != nil {
+			return err
+		}
+		e.Kind, e.Protection, e.Code = "browser", schema.ProtectionBrowser, v.Get("browser")
+		enrolled = true
+		return o.client.Issuer(ctx, http.MethodPost, "/v1/people/browser", e, nil)
+	}
+	var said strings.Builder
+	a := OpenArgs{Store: st, Page: o.client.Base + "/#/needs", Open: web, Wait: 2 * time.Second, Poll: time.Millisecond,
+		Say: func(f string, v ...any) { fmt.Fprintf(&said, f, v...) }}
+	if err := OpenBrowser(ctx, o.client, a); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(said.String(), "its key is "+ShortDevice(deviceID(browser))+", countersigned") {
+		t.Errorf("said: %s", said.String())
+	}
+	if !hasBrowser(ctx, o.client, "noor") {
+		t.Error("no countersigned browser in the device list")
+	}
+	said.Reset()
+	defer func(w time.Duration) { enrolledWait = w }(enrolledWait)
+	enrolledWait = 50 * time.Millisecond
+	start := time.Now()
+	a.Wait = time.Minute
+	if err := OpenBrowser(ctx, o.client, a); err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) > 10*time.Second || said.Len() != 0 {
+		t.Errorf("an enrolled browser: waited %v, said %q", time.Since(start), said.String())
+	}
+
+	// a HUD with no browser enrolment opens the page as it is
+	plain := newOwnerIssuer(t)
+	pst := keystore.Store{Dir: filepath.Join(t.TempDir(), "plain"), FileOnly: true}
+	if _, err := EnrolOwner(ctx, plain.client, pst, "noor"); err != nil {
+		t.Fatal(err)
+	}
+	var opened string
+	plain.client.Installer = ""
+	if err := OpenBrowser(ctx, plain.client, OpenArgs{Store: pst, Page: plain.client.Base + "/#/needs", Open: func(u string) error { opened = u; return nil }}); err != nil {
+		t.Fatal(err)
+	}
+	if opened != plain.client.Base+"/#/needs" {
+		t.Errorf("opened %s", opened)
 	}
 }

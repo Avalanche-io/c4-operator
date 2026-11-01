@@ -504,7 +504,11 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 				return err
 			}
 		}
-		if err := openSignedIn(ctx, f, u); err != nil {
+		name, _, err := cfg.Resolve(cm.farm)
+		if err != nil {
+			return err
+		}
+		if err := openSignedIn(ctx, name, f, u, o.W); err != nil {
 			return err
 		}
 		// the link is the page, and signs no other browser in
@@ -782,7 +786,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if *noOpen {
 			return nil
 		}
-		return openSignedIn(ctx, cfg.Farms[localfarm.Name], localfarm.NeedsLink(o.HUD(), v))
+		return openSignedIn(ctx, localfarm.Name, cfg.Farms[localfarm.Name], localfarm.NeedsLink(o.HUD(), v), stdout)
 
 	case "down":
 		localName := fs.String("name", "", "the local farm to delete (default the current farm, when it is local)")
@@ -1408,22 +1412,21 @@ func signInBlocks(e localfarm.Enrolled, stdin io.Reader, stdout io.Writer) error
 	return nil
 }
 
-// openURL opens a link in the default browser.
 // openSignedIn opens u, a page of farm f's HUD, in the browser. On a local
 // farm it goes by a one-time code the installer token gets, which the HUD
 // trades for its cookie, so the token is never in an address or the
-// browser's history.
-func openSignedIn(ctx context.Context, f farmcli.Farm, u string) error {
+// browser's history; and where the owner's key is on this machine, the
+// browser enrols its key and the CLI countersigns it (OpenBrowser).
+func openSignedIn(ctx context.Context, name string, f farmcli.Farm, u string, w io.Writer) error {
 	c, err := farmcli.NewClient(f)
 	if err != nil {
 		return err
 	}
-	if u, err = farmcli.SignedIn(ctx, c, u); err != nil {
-		return err
-	}
-	return openURL(u)
+	return farmcli.OpenBrowser(ctx, c, farmcli.OpenArgs{Store: farmcli.KeysFor(name), Page: u, Open: openURL,
+		Say: func(format string, a ...any) { fmt.Fprintf(w, format, a...) }})
 }
 
+// openURL opens a link in the default browser.
 func openURL(u string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
