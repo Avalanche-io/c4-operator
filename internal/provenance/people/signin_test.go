@@ -375,15 +375,23 @@ func TestBookedTokenCheckedAtItsPosition(t *testing.T) {
 	if err := people.CheckBookedToken(&p, jwk, set, ins); err == nil {
 		t.Error("dana's token passed on a record naming noor")
 	}
+	p = dr.Predicate
+	p.IDToken = r.sso.Token(r.now, noorSub, d.id, nil)
+	if err := people.CheckBookedToken(&p, jwk, set, ins); err == nil {
+		t.Error("noor's token passed on dana's record")
+	}
+	// dana signs in at another issuer too, under the same subject, so the
+	// issuer is refused for being another than the setting in force, not
+	// for a subject no one has.
+	both := people.StaticSignIns{"dana": {{Issuer: ssoIssuer, Subject: danaSub}, {Issuer: "https://sso.other.example", Subject: danaSub}}}
 	for name, over := range map[string]map[string]any{
 		"another issuer":   {"iss": "https://sso.other.example"},
 		"another audience": {"aud": "some-other-app"},
 		"another azp":      {"aud": []string{clientID, "some-other-app"}, "azp": "some-other-app"},
-		"noor's subject":   {"sub": noorSub},
 	} {
 		p := dr.Predicate
 		p.IDToken = r.sso.Token(r.now, danaSub, d.id, over)
-		if err := people.CheckBookedToken(&p, jwk, set, ins); err == nil {
+		if err := people.CheckBookedToken(&p, jwk, set, both); err == nil {
 			t.Errorf("%s passed", name)
 		}
 	}

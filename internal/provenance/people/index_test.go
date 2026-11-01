@@ -86,8 +86,9 @@ func TestIndexLinksChecked(t *testing.T) {
 		t.Errorf("a rewritten entry: %v", err)
 	}
 	r.store.Put(context.Background(), ids[1], orig)
-	// Fork the index: a new head after the second entry, past the third.
-	r.forge(&people.Entry{Kind: people.KindFlag, Flag: people.FlagTwoPlaces, Device: es[2].Device}, nil, ids[1], 4)
+	// Fork the index: a new head after the second entry, past the last.
+	last := len(es) - 1
+	r.forge(&people.Entry{Kind: people.KindFlag, Flag: people.FlagTwoPlaces, Device: es[last].Device}, nil, ids[1], int64(len(es))+1)
 	if err := r.index.Sync(context.Background()); !errors.Is(err, people.ErrIndex) || !strings.Contains(err.Error(), "rewritten") {
 		t.Errorf("a forked head: %v", err)
 	}
