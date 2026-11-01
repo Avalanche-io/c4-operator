@@ -85,6 +85,7 @@ Agents
   agent power              offer this machine's agent slots by its battery: stop below 25%, resume at 90% (--once to read it now)
   agents                   the Claude Code sessions on this machine, read-only: each one's state, and what needs you (--all, --open for the HUD)
   enroll NODE CODE         make a machine yours with the code c4-agent enroll-offer prints on it: your host work runs there (--for PERSON adds them, on your sign-in)
+  device approve DEVICE    let another machine act as you on a one-person farm: the device ID it shows, approved with your touch
   agents add [NAME]        make a Claude Code session an agent the farm can run, with c4-agent's hooks in its folder (asked first; no NAME lists the sessions to pick from)
   agents rm NAME           take out what agents add put in
   agents ls                your agents: busy, idle or stopped, and the last turn saved
@@ -402,6 +403,13 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 
 	case "tool":
 		return toolCommand(ctx, fs, rest, stdout, isTerminal(stdin), connect)
+
+	case "device":
+		name, _, err := cfg.Resolve(cm.farm)
+		if err != nil {
+			return err
+		}
+		return deviceCommand(ctx, fs, rest, stdout, isTerminal(stdin), farmcli.KeysFor(name), connect)
 
 	case "ls":
 		var a farmcli.LsArgs

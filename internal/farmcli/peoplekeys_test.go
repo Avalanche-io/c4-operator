@@ -2,6 +2,7 @@ package farmcli
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/keystore"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
+	"github.com/Avalanche-io/c4-operator/internal/provenance/people/peopletest"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/provtest"
 	"github.com/Avalanche-io/c4-operator/schema"
 )
@@ -141,5 +143,41 @@ func TestOpenEnrolsAndCountersignsTheBrowser(t *testing.T) {
 	}
 	if err := Countersign(ctx, o.client, st, o.scratch.ID, "noor", s); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// p256 signs as a peopletest device does.
+type p256 struct{ key *ecdsa.PrivateKey }
+
+func (k p256) Sign(msg []byte) ([]byte, error) { return provenance.SignP256(k.key, msg) }
+
+// The person approves a second machine's key from this one, confirmed with
+// the touch key; the second machine enrols on the booked approval. The
+// device ID is what the person compares: its short form, two groups of
+// four.
+func TestApproveAMachineWithATouch(t *testing.T) {
+	o := peopletest.OnePerson(t)
+	c, err := NewClient(Farm{HUD: o.Server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	other := peopletest.NewDevice(t)
+	if got := ShortDevice(other.ID); len(got) != 9 || got[4] != ' ' || got[:4] != other.ID[2:6] {
+		t.Errorf("short form %q of %s", got, other.ID)
+	}
+	booked, err := approveWith(ctx, c, o.ID(), other.ID, p256{o.Owner.P256}, o.Owner.Cert, p256{o.Touch.P256}, o.Touch.Cert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := o.Enrolment(t, other, "noor", "", "linux")
+	e.Approval = booked.Record
+	var cert people.Certified
+	if err := c.Issuer(ctx, http.MethodPost, "/v1/people/enroll", e, &cert); err != nil || cert.Device != other.ID {
+		t.Errorf("enrolling on the approval: %v %+v", err, cert)
+	}
+	st := keystore.Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
+	if _, err := ApproveDevice(ctx, c, st, o.ID(), "laptop"); err == nil {
+		t.Error("an approval of something that is no device ID")
 	}
 }

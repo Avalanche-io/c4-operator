@@ -262,3 +262,78 @@ func Countersign(ctx context.Context, c *Client, st keystore.Store, farm, owner 
 	}
 	return nil
 }
+
+// Approving a machine with a touch (7, K4 item 5): a one-person farm
+// reached from a second machine has no sign-in provider to vouch for it,
+// so the person approves its key from this machine, with their touch. The
+// device ID binds the approval: the other screen shows it, the person
+// compares its short form here, and the new machine enrols on the booked
+// approval within 10 minutes. What it is (its kind, its label) arrives in
+// the new-device notice once it enrols, never from the new machine's word
+// beforehand.
+
+// ShortDevice is a device ID as a person compares it on two screens: the
+// first eight characters after "c4", in two groups of four.
+func ShortDevice(id string) string {
+	s := strings.TrimPrefix(id, "c4")
+	if len(s) < 8 {
+		return s
+	}
+	return s[:4] + " " + s[4:8]
+}
+
+// ApproveDevice books the person's approval of a machine's key to enrol as
+// them: approve-machine on device:<ID>, confirmed, signed with this
+// machine's touch key, which asks for their touch.
+func ApproveDevice(ctx context.Context, c *Client, st keystore.Store, farm, device string) (*people.Booked, error) {
+	if !strings.HasPrefix(device, "c4") {
+		return nil, fmt.Errorf("%q is not a device ID: copy the one the other machine shows (c4…)", device)
+	}
+	dev, err := st.Key(keystore.Device)
+	if err != nil {
+		return nil, err
+	}
+	devCert, err := LoadCert(st, keystore.Device)
+	if err != nil || devCert == nil {
+		return nil, fmt.Errorf("this machine's key is not enrolled: %v", err)
+	}
+	if !st.Has(keystore.Touch) {
+		return nil, errors.New("this machine has no touch key: approve it from a machine that has one (c4 farm up makes one on a Mac)")
+	}
+	touch, err := st.Key(keystore.Touch)
+	if err != nil {
+		return nil, err
+	}
+	touchCert, err := LoadCert(st, keystore.Touch)
+	if err != nil || touchCert == nil {
+		return nil, fmt.Errorf("this machine's touch key is not enrolled: %v", err)
+	}
+	return approveWith(ctx, c, farm, device, dev, devCert, touch, touchCert)
+}
+
+// approveWith is ApproveDevice with its keys given.
+func approveWith(ctx context.Context, c *Client, farm, device string, dev provenance.P256Signer, devCert *people.Certified,
+	touch provenance.P256Signer, touchCert *people.Certified) (*people.Booked, error) {
+	person := strings.TrimPrefix(devCert.Identity, provenance.IdentityBase+"user/")
+	tc := deviceCert(touchCert)
+	b, err := provenance.SignPersonAct(provenance.PersonAct{Farm: farm, Act: "approve-machine", Person: person, Confirmed: true,
+		Subject: provenance.Subject{Name: "device:" + device, Digest: map[string]string{"c4": device}}, Params: json.RawMessage("{}")},
+		dev, deviceCert(devCert), touch, &tc)
+	if err != nil {
+		return nil, err
+	}
+	var booked people.Booked
+	if err := c.Issuer(ctx, http.MethodPost, "/v1/people/acts", json.RawMessage(b), &booked); err != nil {
+		return nil, fmt.Errorf("approving the machine: %w", err)
+	}
+	return &booked, nil
+}
+
+// KeysFor is a farm's keys on this machine: ~/.c4/<farm>/keys, which an
+// integrated agent's sandbox denies (K5). C4_KEYS=file keeps key files and
+// makes no touch key, for a test or a scratch walk, which must never ask
+// for a touch.
+func KeysFor(farm string) keystore.Store {
+	home, _ := os.UserHomeDir()
+	return keystore.Store{Dir: filepath.Join(home, ".c4", farm, "keys"), FileOnly: os.Getenv("C4_KEYS") == "file"}
+}
