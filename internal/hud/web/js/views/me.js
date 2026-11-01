@@ -28,6 +28,12 @@
 //   2 how each was enrolled and when renewed, a countersignature, Remove
 //     all your devices
 //   3 each device's ID and its record (C4 IDs)
+//
+// Your touch key (touch.js, PEOPLE-KEYS-2 K9): this browser's passkey,
+// which confirms the acts that give authority away, let work leave the
+// farm or change who is accountable. Made here, at the person's press:
+// the passkey, then one full sign-in, then the passkey signs its own
+// enrolment.
 
 import { h } from '../dom.js';
 import * as f from '../fmt.js';
@@ -35,6 +41,7 @@ import { get } from '../api.js';
 import { c4idEl } from '../../design/components/c4id.js';
 import { heldSection } from './held.js';
 import * as enrol from '../enrol.js';
+import * as touch from '../touch.js';
 
 const st = { trackers: null, grants: null, people: null, who: new Map(), logins: new Map(), err: null, terr: null, busy: false, at: null, notMe: new Set() };
 document.addEventListener('hud:changed', () => { st.at = null; st.who.clear(); st.logins.clear(); });
@@ -81,7 +88,9 @@ document.addEventListener('click', async (e) => {
   if (b.dataset.device === 'sign-in') return enrol.signInNow();
   b.disabled = true;
   try {
-    await enrol.remove(b.dataset.device === 'all' ? { all: true } : { device: b.dataset.device });
+    if (b.dataset.device === 'touch-begin') await touch.begin({ others: await touch.others(dv.list || []) });
+    else if (b.dataset.device === 'touch-finish') await touch.finish();
+    else await enrol.remove(b.dataset.device === 'all' ? { all: true } : { device: b.dataset.device });
     dv.at = null;
     dv.err = null;
   } catch (err) {
@@ -123,6 +132,24 @@ function deviceRow(ctx, d, signing) {
     signing ? h('button', { class: 'btn small', 'data-device': d.device, title: mine ? 'Remove this browser’s key. It stops signing your acts at once, and this browser makes a new key.' : 'Remove it. Its key stops signing your acts at once and never comes back.' }, 'Remove') : null);
 }
 
+// touchLine: this browser's touch key, or how to make one
+const TOUCH_LIST = 'Acts that give authority away, let work leave the farm, or change who is accountable ask for it';
+function touchLine() {
+  const s = enrol.status;
+  if (s.state !== 'signing') return null;
+  const w = touch.where();
+  const pk = touch.passkey();
+  if (touch.ready()) return h('p', null, `Your touch key is this browser’s passkey. ${TOUCH_LIST}, with your fingerprint, face or PIN.`);
+  if (w.why === 'one-person') return h('p', { class: 'dim' }, 'Your touch key is the one c4 farm up made at the terminal. Approving a passkey for this browser from it comes with the c4 command line; until then, acts that need a touch are taken without one here.');
+  if (w.why === 'no-origin') return h('p', { class: 'dim' }, 'This farm doesn’t take passkeys yet: its admin sets the HUD’s address (--hud-origin) first. Until then, acts that need a touch are taken without one.');
+  if (w.why === 'other-origin') return h('p', { class: 'dim' }, `A passkey works only at the address it was made for: open the HUD at ${w.origin} to make your touch key.`);
+  if (s.touch === 'finish' && pk) return h('p', null, 'You signed in again. Now confirm with your passkey to finish your touch key. ',
+    h('button', { class: 'btn small primary', 'data-device': 'touch-finish' }, 'Finish your touch key'));
+  return h('p', null, s.touch === 'refused' ? h('span', { class: 't-fail' }, `${s.touchMessage} `) : null,
+    `This browser has no touch key yet. ${TOUCH_LIST}. Making one takes a passkey and one full sign-in, once. `,
+    h('button', { class: 'btn small', 'data-device': 'touch-begin' }, s.touch === 'refused' ? 'Try again' : 'Make a touch key'));
+}
+
 // devicesSection: this browser's key, and your devices in force; nothing
 // on a farm that runs no people's issuer
 function devicesSection(ctx, user) {
@@ -135,6 +162,7 @@ function devicesSection(ctx, user) {
     h('header', null, h('h2', null, 'Your devices')),
     h('p', { class: 'gintro' }, 'Each act you take in C4 is signed by a key of the device you take it on, so the farm’s record names the device as well as you. A device you remove stops signing at once.'),
     thisBrowser(),
+    touchLine(),
     dv.err ? h('p', { class: 'warn red' }, dv.err) : null,
     dv.list == null ? h('p', { class: 'dim' }, 'Reading…')
       : list.length ? list.map((d) => deviceRow(ctx, d, signing)) : h('p', { class: 'dim' }, 'No device signs your acts yet.'),

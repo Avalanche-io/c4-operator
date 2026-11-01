@@ -85,7 +85,7 @@ export function canonical(v) {
 export async function signRaw(key, bytes) {
   return lowS(new Uint8Array(await subtle().sign({ name: 'ECDSA', hash: 'SHA-256' }, key, bytes)));
 }
-const hex = (bytes) => [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+export const hex = (bytes) => [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
 
 // c4id: the C4 ID of bytes (SMPTE ST 2114): "c4" and the SHA-512 in
 // base58, padded with "1" to 90 characters
@@ -149,9 +149,11 @@ export function statement({ farm, subject, act, params, user, identity, device, 
 // ID, the person, the identity its leaf names, the device ID, and on a
 // one-person farm the role the person acts in.
 //
-// touch is the place K9's passkey takes: given the bytes signed, it
-// answers a second signature { keyid, sig }, and the act is confirmed
-// rather than signed. Nothing passes one yet.
+// touch confirms the act (K9, touch.js): given the bytes signed, it
+// answers the touch key's signature { keyid, sig, chain, webauthn? }: its
+// key ID, the signature (base64), the touch key's chain (DER, leaf first)
+// and, for a passkey, the authenticator data and client data it signed
+// (bytes). The act is then confirmed rather than signed.
 export async function signAct(signer, { subject, act, params, as }, now = new Date(), { touch } = {}) {
   const nonce = globalThis.crypto.getRandomValues(new Uint8Array(16));
   const st = statement({ farm: signer.farm, subject, act, params: params === undefined ? {} : params, user: signer.user, identity: signer.identity,
@@ -161,11 +163,17 @@ export async function signAct(signer, { subject, act, params, as }, now = new Da
   const sig = await signRaw(signer.key, signed);
   const keyid = hex(new Uint8Array(await subtle().digest('SHA-256', signer.chain[0])));
   const signatures = [{ keyid, sig: b64(sig) }];
-  if (touch) signatures.push(await touch(signed));
+  const material = { x509CertificateChain: { certificates: signer.chain.map((c) => ({ rawBytes: b64(c) })) } };
+  if (touch) {
+    const t = await touch(signed);
+    signatures.push({ keyid: t.keyid, sig: t.sig });
+    if (t.chain) material.touchCertificateChain = { certificates: t.chain.map((c) => ({ rawBytes: b64(c) })) };
+    if (t.webauthn) material.touchWebAuthn = { authenticatorData: b64(t.webauthn.authenticatorData), clientDataJSON: b64(t.webauthn.clientDataJSON) };
+  }
   const bundle = {
     mediaType: BUNDLE_TYPE,
     dsseEnvelope: { payloadType: PAYLOAD_TYPE, payload: b64(payload), signatures },
-    verificationMaterial: { x509CertificateChain: { certificates: signer.chain.map((c) => ({ rawBytes: b64(c) })) } },
+    verificationMaterial: material,
   };
   return enc.encode(JSON.stringify(bundle));
 }
@@ -216,6 +224,17 @@ export async function saveCertified(farm, certified) {
   return rec;
 }
 
+// savePasskey: keep this browser's passkey for a farm (touch.js) beside
+// the device key it confirms for: its credential, its public key and
+// device ID, and once the issuer has certified it, its chain
+export async function savePasskey(farm, passkey) {
+  const rec = await idbDo('readonly', (s) => s.get(farm));
+  if (!rec) throw new Error('no device key for this farm');
+  rec.passkey = passkey;
+  await idbDo('readwrite', (s) => s.put(rec, farm));
+  return rec;
+}
+
 // forgetKey: drop this browser's key for a farm, once removed or lapsed:
 // the next load makes a new one
 export async function forgetKey(farm) { await idbDo('readwrite', (s) => s.delete(farm)); }
@@ -224,6 +243,31 @@ export async function forgetKey(farm) { await idbDo('readwrite', (s) => s.delete
 // (K2), and the jobs it can name by UID and spec digest.
 let signer = null;
 const jobs = new Map();
+
+// The touch (K9, touch.js). The farm says which acts need one (GET
+// /api/v1/acts/needs, shared piece S); the HUD keeps no list of its own,
+// which would drift from the farm's and from a project's minGrade.
+// toucher answers signAct's touch for this browser, or null while it has
+// no certified passkey. An act that needs a touch this browser can't give
+// goes with no act at all, as before personal keys: a signed act the farm
+// would refuse for want of a touch must never break what works today.
+const needs = new Set();
+let toucher = () => null;
+export function useToucher(fn) { toucher = fn || (() => null); }
+
+// learnNeeds: the acts the farm says need a touch, in any of the forms it
+// may serve them: a list of names, a list of { act, needs }, or an object
+// of act to grade, alone or under acts or needs
+export function learnNeeds(x) {
+  needs.clear();
+  const v = x && !Array.isArray(x) && typeof x === 'object' ? (x.acts || x.needs || x) : x;
+  if (Array.isArray(v)) for (const e of v) {
+    if (typeof e === 'string') needs.add(e);
+    else if (e && e.act && (e.needs || e.minGrade || 'confirmed') === 'confirmed') needs.add(e.act);
+  }
+  else if (v && typeof v === 'object') for (const [k, g] of Object.entries(v)) if (g === 'confirmed') needs.add(k);
+}
+export const needsTouch = (act) => needs.has(act);
 
 // useSigner: sign every act from now on as signer, or stop (null)
 export function useSigner(s) { signer = s; }
@@ -237,12 +281,19 @@ export function learnJobs(list) {
 
 // actHeaders: the headers a write carries for its act, {} when this page
 // cannot sign it (no certified key yet, a write that takes no act, or a
-// job whose uid and specDigest it has not been told)
-export async function actHeaders(path, body) {
+// job whose uid and specDigest it has not been told), or when the act
+// needs a touch this browser can't give. confirm: the farm said this act
+// needs a touch (a 403's needs: confirmed), whatever the list said.
+export async function actHeaders(path, body, { confirm = false } = {}) {
   if (!signer) return {};
   const a = actOf(path, body);
   const j = a && jobs.get(`${a.ns}/${a.name}`);
   if (!j) return {};
-  const bundle = await signAct(signer, { subject: subjectOf(a.ns, a.name, j.uid, j.specDigest), act: a.act, params: body === undefined ? {} : body });
+  let touch = null;
+  if (confirm || needsTouch(a.act)) {
+    touch = toucher();
+    if (!touch) return {};
+  }
+  const bundle = await signAct(signer, { subject: subjectOf(a.ns, a.name, j.uid, j.specDigest), act: a.act, params: body === undefined ? {} : body }, new Date(), { touch });
   return { [ACT_HEADER]: b64(bundle) };
 }

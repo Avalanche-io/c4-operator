@@ -16,11 +16,13 @@ function withViewer(path) {
   return path + (path.includes('?') ? '&' : '?') + 'as=' + encodeURIComponent(as);
 }
 
-// failed: the server's words for a refusal, and its status
+// failed: the server's words for a refusal, its status, and what more the
+// act needed (needs: confirmed, a touch)
 async function failed(r) {
   const body = await r.json().catch(() => ({}));
   const e = new Error(body.error || `${r.status} ${r.statusText}`);
   e.status = r.status;
+  e.needs = body.needs;
   return e;
 }
 
@@ -33,14 +35,22 @@ export async function get(path) {
 const WRITE = { 'X-C4-HUD': '1' };
 
 // post: a write; a job control carries its act, signed by this browser's
-// key, when the page can sign it (act.js)
+// key, when the page can sign it (act.js). Refused for want of a touch
+// (403, needs: confirmed), it is sent once more with a fresh act: confirmed
+// when this browser can touch, otherwise with none, as before personal
+// keys. A refused act was never taken, so nothing is spent.
 export async function post(path, body) {
   const sent = body || {};
-  const r = await fetch(withViewer('/api/v1' + path), {
+  const send = async (acts) => fetch(withViewer('/api/v1' + path), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...WRITE, ...(await actHeaders(path, sent)) },
+    headers: { 'Content-Type': 'application/json', ...WRITE, ...acts },
     body: JSON.stringify(sent),
   });
+  let r = await send(await actHeaders(path, sent));
+  if (r.status === 403) {
+    const e = await failed(r.clone());
+    if (e.needs === 'confirmed') r = await send(await actHeaders(path, sent, { confirm: true }));
+  }
   if (!r.ok) throw await failed(r);
   return r.json().catch(() => ({}));
 }

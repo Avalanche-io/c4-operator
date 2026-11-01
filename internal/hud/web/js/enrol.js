@@ -43,7 +43,10 @@ const RETURN = 'c4-hud-sign-in';
 //     | sign-in (the provider wants the person to sign in) | open (a
 //     one-person farm, opened without a code) | refused (the issuer's words
 //     in message)
-export const status = { state: 'starting', device: null, expires: null, person: null, message: null, notices: null };
+//   touch: null, or the step-up's answer for this browser's passkey
+//     (touch.js): finish (signed in again: the passkey signs its
+//     enrolment at the person's press) | refused (touchMessage says why)
+export const status = { state: 'starting', device: null, expires: null, person: null, message: null, notices: null, touch: null, touchMessage: null };
 
 // deps: what the flow touches outside itself, so a test can stand in for
 // each (the issuer, the provider, the key store, the address bar, the
@@ -168,9 +171,10 @@ export function codeIn(hash) {
 // authorizeURL: the provider's authorization request for a device: its
 // nonce the device ID, an authorization code with PKCE answered in the
 // fragment, silent unless the person asked to sign in
-export function authorizeURL(endpoint, { clientID, redirect, device, state, challenge, silent }) {
+export function authorizeURL(endpoint, { clientID, redirect, device, state, challenge, silent, extra }) {
   const q = new URLSearchParams({ response_type: 'code', response_mode: 'fragment', client_id: clientID, redirect_uri: redirect, scope: 'openid', nonce: device, state, code_challenge: challenge, code_challenge_method: 'S256' });
   if (silent) q.set('prompt', 'none');
+  for (const [k, v] of Object.entries(extra || {})) q.set(k, v);
   return `${endpoint}${endpoint.includes('?') ? '&' : '?'}${q}`;
 }
 
@@ -182,16 +186,31 @@ async function discover(issuer) {
 
 const redirectOf = (loc) => loc.origin + loc.pathname;
 
-// signIn: send the person to the provider for a token naming this device;
-// the page comes back to finish() with the route it left from
-export async function signIn(cfg, device, { silent = true, renew = false } = {}) {
+// stepUpParams: what a touch key's sign-in asks of the provider, from the
+// issuer's step-up rule (config.stepUp): a fresh sign-in (max_age, in
+// seconds) with multi-factor (acr_values)
+export function stepUpParams(stepUp) {
+  const out = {};
+  const m = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?$/.exec((stepUp && stepUp.maxAge) || '');
+  if (m && m[0]) out.max_age = String(Math.floor((+m[1] || 0) * 3600 + (+m[2] || 0) * 60 + (+m[3] || 0)));
+  if (stepUp && (stepUp.acr || []).length) out.acr_values = stepUp.acr.join(' ');
+  return out;
+}
+
+// signIn: send the person to the provider for a token naming a device;
+// the page comes back with the route it left from. touch: the sign-in is
+// the step-up for this browser's passkey (device is its device ID), never
+// silent.
+export async function signIn(cfg, device, { silent = true, renew = false, touch = false } = {}) {
+  if (touch) silent = false;
   const loc = deps.location();
   const meta = await discover(cfg.provider.issuer);
   const verifier = b64url(globalThis.crypto.getRandomValues(new Uint8Array(32)));
   const challenge = b64url(new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', enc.encode(verifier))));
   const state = b64url(globalThis.crypto.getRandomValues(new Uint8Array(16)));
-  deps.session().setItem(RETURN, JSON.stringify({ state, verifier, farm: cfg.farm, back: loc.hash, renew, silent, token: meta.token_endpoint }));
-  deps.go(authorizeURL(meta.authorization_endpoint, { clientID: cfg.provider.clientID, redirect: redirectOf(loc), device, state, challenge, silent }));
+  deps.session().setItem(RETURN, JSON.stringify({ state, verifier, farm: cfg.farm, back: loc.hash, renew, silent, touch, token: meta.token_endpoint }));
+  deps.go(authorizeURL(meta.authorization_endpoint, { clientID: cfg.provider.clientID, redirect: redirectOf(loc), device, state, challenge, silent,
+    extra: touch ? stepUpParams(cfg.stepUp) : null }));
 }
 
 // returned: the provider's answer, when this load is the round trip's end
@@ -207,11 +226,11 @@ async function returned(cfg) {
   const loc = deps.location();
   const code = a.code, err = a.error, redirect = redirectOf(loc);
   deps.replaceURL(loc.pathname + loc.search + saved.back);
-  if (err) return { error: err, silent: saved.silent, renew: saved.renew };
+  if (err) return { error: err, silent: saved.silent, renew: saved.renew, touch: saved.touch };
   const r = await deps.token(saved.token, new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirect, client_id: cfg.provider.clientID, code_verifier: saved.verifier }).toString());
   const t = await r.json().catch(() => ({}));
-  if (!r.ok || !t.id_token) return { error: t.error || `the sign-in provider answered ${r.status}`, renew: saved.renew };
-  return { idToken: t.id_token, renew: saved.renew };
+  if (!r.ok || !t.id_token) return { error: t.error || `the sign-in provider answered ${r.status}`, renew: saved.renew, touch: saved.touch };
+  return { idToken: t.id_token, renew: saved.renew, touch: saved.touch };
 }
 
 // the provider's answers to a silent request that mean "ask the person"
@@ -219,7 +238,22 @@ const ASK = new Set(['login_required', 'interaction_required', 'consent_required
 
 // ------------------------------------------------------------ the flow
 
-let cfg = null, rec = null, person = null, as = null, timer = null, lapse = null;
+let cfg = null, rec = null, person = null, as = null, timer = null, lapse = null, stepUp = null;
+
+// current: what touch.js builds on: the issuer's config, this browser's
+// key record, the person, and the step-up's ID token while it is fresh
+export const current = () => ({ cfg, rec, person, stepUp });
+
+// stepUpFor: send the person to the provider's step-up for a passkey
+export const stepUpFor = (device) => signIn(cfg, device, { touch: true });
+
+// post: a write to the issuer, its answer or its refusal (touch.js); read:
+// a read of it
+export const post = (path, body) => call(path, body);
+export const read = (path) => call(path);
+
+// refreshed: the key record changed under us (touch.js saved a passkey)
+export function refreshed(r) { rec = r; deps.changed(); }
 
 // use: sign with a certified key from now on, and renew it in time; a key
 // just certified waits a minute at least, so a browser clock hours off the
@@ -363,7 +397,17 @@ async function run(viewer) {
   set({ device: rec.device });
   const code = capture().browser;
 
-  const back = cfg.provider ? await returned(cfg) : null;
+  let back = cfg.provider ? await returned(cfg) : null;
+  // the step-up for this browser's passkey: hold its token for the
+  // passkey's own enrolment, which needs the person's press (touch.js),
+  // and go on with the device key as on any load
+  if (back && back.touch) {
+    if (back.idToken) {
+      stepUp = { idToken: back.idToken, at: deps.now() };
+      set({ touch: 'finish', touchMessage: null });
+    } else set({ touch: 'refused', touchMessage: ASK.has(back.error) ? 'The sign-in was not finished.' : `The sign-in provider answered ${back.error}.` });
+    back = null;
+  }
   if (back && back.idToken) {
     try {
       if (back.renew && rec.certified) return await certified(await call('/renew', await enrolment(rec.key, request(cfg.farm, person, rec.spki), { idToken: back.idToken })), 'token');
@@ -431,7 +475,7 @@ export async function remove({ device, all }) {
 export function reset() {
   clearTimeout(timer);
   clearTimeout(lapse);
-  started = cfg = rec = person = as = caught = null;
-  Object.assign(status, { state: 'starting', device: null, expires: null, person: null, message: null, notices: null });
+  started = cfg = rec = person = as = caught = stepUp = null;
+  Object.assign(status, { state: 'starting', device: null, expires: null, person: null, message: null, notices: null, touch: null, touchMessage: null });
   useSigner(null);
 }

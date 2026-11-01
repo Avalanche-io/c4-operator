@@ -29,7 +29,8 @@ import catalog from './views/catalog.js';
 import yourPage from './views/me.js';
 import needsYou from './views/needs.js';
 import sessions from './views/sessions.js';
-import { learnJobs } from './act.js';
+import { learnJobs, learnNeeds } from './act.js';
+import './touch.js';
 import { start as startSigning, status as signing, capture as captureSecrets } from './enrol.js';
 
 // the secrets an address can carry (a one-time code, a sign-in answer) out
@@ -578,6 +579,7 @@ function own(snap) {
   const shown = state.route && state.route.name === 'queue' && state.route.q.checks === '1';
   return { ...snap, jobs: shown ? all : all.filter((j) => !farmCheck(j)), checks };
 }
+let needsAsked = false;
 function setSnap(snap) {
   state.raw = snap;
   state.snap = own(snap);
@@ -602,6 +604,9 @@ subscribe((snap) => {
   // key is enrolled or renewed for them (enrol.js)
   if (me() !== was) applyPrefs();
   if (!staticMode && snap.viewer) startSigning(snap.viewer);
+  // which acts the farm says need a touch (shared piece S); a farm that
+  // doesn't say (404) asks for none before the click
+  if (!staticMode && !needsAsked) { needsAsked = true; get('/acts/needs').then(learnNeeds, () => {}); }
   render();
 }, (st, msg, code) => {
   state.status = staticMode ? 'static' : st;
