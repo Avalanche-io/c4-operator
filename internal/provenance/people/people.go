@@ -62,8 +62,8 @@ type Issuer struct {
 	// Index is the farm's index of device records.
 	Index *Index
 	// Provider is the install's sign-in provider (--sign-in-provider,
-	// --sign-in-client-id), booked as the setting in force until an
-	// admin's signed act sets another (set-sign-in-provider).
+	// --sign-in-client-id), booked as the setting in force. Until K9 it
+	// changes only by redeploying.
 	Provider Provider
 	// SignIns finds the person a provider subject is.
 	SignIns SignIns

@@ -43,7 +43,7 @@ type peopleOptions struct {
 	// store is the people's store, shards as name=url, comma-separated.
 	store string
 	// provider and clientID are the install's sign-in provider, booked as
-	// the setting in force until an admin's signed act sets one.
+	// the setting in force; until K9 it changes only by redeploying.
 	provider, clientID string
 	// stepUpACR are acr values that mean multi-factor at the provider.
 	stepUpACR []string

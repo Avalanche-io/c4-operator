@@ -479,11 +479,11 @@ func (x *Index) settingAt(pos int64) *Setting {
 	return s
 }
 
-// setting is the sign-in provider in force now. The install's preset is
-// booked the first time it is read, and again when the install changes
-// it, until an admin's signed act sets the provider; from then the act's
-// setting stands, whatever the install says, as the farm admin's
-// telemetry setting does.
+// setting is the sign-in provider in force now: the install's, booked the
+// first time it is read and again when a redeploy changes it. Until a
+// touch can confirm one (K9), no act sets the provider; when K9 opens it,
+// the act's setting stands, whatever the install says, as the farm
+// admin's telemetry setting does.
 func (i *Issuer) setting(ctx context.Context) (*Setting, error) {
 	x := i.Index
 	stands := func() (*Setting, bool) {

@@ -69,10 +69,10 @@ const (
 // within TwoPlaces of each other.
 const FlagTwoPlaces = "two-places"
 
-// Grades of a sign-in provider setting: install, the install's preset
-// (the cluster administrator's word, as installing the farm is); signed,
-// an admin's signed act with no touch, until the touch is built (K9);
-// confirmed, signed and touched.
+// Grades of a sign-in provider setting: install, the install's (the
+// cluster administrator's word, as installing the farm is), the only one
+// until a touch can confirm an admin's act (K9); then confirmed. Signed is
+// an act's grade with no touch, which a setting never has.
 const (
 	GradeInstall   = "install"
 	GradeSigned    = schema.GradeSigned
