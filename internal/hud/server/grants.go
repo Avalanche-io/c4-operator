@@ -171,7 +171,7 @@ func (s *Server) handleGrant(w http.ResponseWriter, r *http.Request) {
 		Change: map[string]any{"person": v.User, "tracker": tr.Name, "pools": body.Pools, "classes": body.Classes, "until": g.Spec.Until.Time}}
 	id, err := s.signControl(ctx, []string{project}, provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": sha256JSON(g.Spec)}}, pred)
 	if err != nil {
-		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		fail(w, controlStatus(err), "control record: %v", err)
 		return
 	}
 	g.Spec.Record = id
@@ -311,7 +311,7 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 		Change: map[string]any{"person": g.Spec.Person, "tracker": g.Spec.Tracker, "grant": g.Spec.Record}}
 	id, err := s.signControl(ctx, []string{project}, provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": before}}, pred)
 	if err != nil {
-		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		fail(w, controlStatus(err), "control record: %v", err)
 		return
 	}
 	g.Spec.Revoked = &c4v1.GrantRevocation{By: v.User, At: metav1.NewTime(now.UTC().Truncate(time.Second)), Record: id}

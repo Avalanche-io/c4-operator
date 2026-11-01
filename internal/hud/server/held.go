@@ -168,7 +168,7 @@ func (s *Server) handleConfirm(w http.ResponseWriter, r *http.Request) {
 		Action: action, Target: target, Change: map[string]any{"field": field, "write": wr.Value, "happened": *body.Happened, "note": body.Note}}
 	id, err := s.signControl(ctx, []string{project}, provenance.Subject{Name: target, Digest: map[string]string{"sha256": sha256JSON(wr)}}, pred)
 	if err != nil {
-		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		fail(w, controlStatus(err), "control record: %v", err)
 		return
 	}
 	now := time.Now()

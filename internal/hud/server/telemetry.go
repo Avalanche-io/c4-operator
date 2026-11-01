@@ -227,7 +227,7 @@ func (s *Server) signFarm(w http.ResponseWriter, r *http.Request, v *api.Viewer,
 	rec, err := provenance.SignStatement(ctx, s.Signer, provenance.PredicateControl,
 		[]provenance.Subject{{Name: target, Digest: map[string]string{"sha256": sha256JSON(change)}}}, pred, time.Now())
 	if err != nil {
-		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		fail(w, controlStatus(err), "control record: %v", err)
 		return "", nil, false
 	}
 	id := c4.Identify(bytes.NewReader(rec))

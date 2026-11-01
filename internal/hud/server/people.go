@@ -189,7 +189,7 @@ func (s *Server) handlePeopleConfirm(w http.ResponseWriter, r *http.Request) {
 	id, err := s.signControl(ctx, []string{project}, provenance.Subject{Name: target,
 		Digest: map[string]string{"sha256": sha256JSON(pred.Change)}}, pred)
 	if err != nil {
-		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		fail(w, controlStatus(err), "control record: %v", err)
 		return
 	}
 	tp.Namespace, tp.Name = ns, name
@@ -290,7 +290,7 @@ func (s *Server) handlePeopleRevoke(w http.ResponseWriter, r *http.Request) {
 	id, err := s.signControl(ctx, []string{project}, provenance.Subject{Name: target,
 		Digest: map[string]string{"sha256": sha256JSON(tp.Spec)}}, pred)
 	if err != nil {
-		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		fail(w, controlStatus(err), "control record: %v", err)
 		return
 	}
 	tp.Spec.Revoked = &c4v1.TrackerPersonAct{By: v.User, At: metav1.NewTime(time.Now().UTC().Truncate(time.Second)), Record: id}

@@ -141,7 +141,7 @@ func (s *Server) handleWithdraw(w http.ResponseWriter, r *http.Request) {
 	authz := s.authorization(v, "delete", "workjobs", j.Namespace, j.Name) + "; " + why
 	id, err := s.controlJob(ctx, r, v, rec, j, queue.SpecDigest(j), "withdraw", body, func(p *controlPredicate) { p.Authorization = authz })
 	if err != nil {
-		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		fail(w, controlStatus(err), "control record: %v", err)
 		return
 	}
 	if err := s.Client.Delete(ctx, j, client.Preconditions{UID: &j.UID}); err != nil && !apierrors.IsNotFound(err) {

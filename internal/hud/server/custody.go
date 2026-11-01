@@ -70,6 +70,9 @@ type controlPredicate struct {
 	// its record's C4 ID; the record matches its subject, action and
 	// params exactly (schema.ActCitation).
 	Act *schema.ActCitation `json:"act,omitempty"`
+	// Params are the request's parameters as the act signed them, when
+	// the record cites one (provenance.CheckCitation compares them).
+	Params json.RawMessage `json:"params,omitempty"`
 	// By is the person who answers for a submission and the role they
 	// acted in (submit only): a one-person farm's person signed in as a
 	// role's development viewer, the actor (c4v1.AnnotationSubmittedAs).
@@ -213,6 +216,17 @@ func (s *Server) controlJob(ctx context.Context, r *http.Request, v *api.Viewer,
 		o(&pred)
 	}
 	subject := provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": before}}
+	// A request that carries its signed act: the record is on the act's
+	// subject, the job by UID and its spec before the change, and cites
+	// it (acts.go).
+	on := provenance.ActSubject("workjob", j.Namespace, j.Name, string(j.UID), before)
+	act, err := s.citeAct(ctx, r, v, on, action)
+	if err != nil {
+		return "", err
+	}
+	if act != nil {
+		subject, pred.Act, pred.Params, pred.Custody = on, act.cite, act.params, act.grade
+	}
 	id, err := s.signControl(ctx, []string{rec.project}, subject, pred)
 	if err != nil || id == "" {
 		return id, err

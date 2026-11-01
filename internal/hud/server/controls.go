@@ -1,10 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
 	"strconv"
@@ -107,10 +109,20 @@ const (
 
 func decodeBody(r *http.Request, into any) error { return decodeBodyUpTo(r, into, controlBody) }
 
-// decodeBodyUpTo reads a JSON body of at most limit bytes.
+// decodeBodyUpTo reads a JSON body of at most limit bytes. A request that
+// carries a signed act keeps its body, which the act's params must be
+// (citeAct).
 func decodeBodyUpTo(r *http.Request, into any, limit int64) error {
-	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, limit))
-	return dec.Decode(into)
+	if r.Header.Get(ActHeader) == "" {
+		dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, limit))
+		return dec.Decode(into)
+	}
+	b, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, limit))
+	if err != nil {
+		return err
+	}
+	r.Body = io.NopCloser(bytes.NewReader(b))
+	return json.NewDecoder(bytes.NewReader(b)).Decode(into)
 }
 
 // failBody answers a body that could not be read: 413 when it was too
@@ -310,7 +322,7 @@ func (s *Server) finishJobControl(w http.ResponseWriter, r *http.Request, v *api
 	before, action, bookKind string, change any, reason, msg string) {
 	id, err := s.controlJob(r.Context(), r, v, rec, j, before, action, change)
 	if err != nil {
-		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		fail(w, controlStatus(err), "control record: %v", err)
 		return
 	}
 	s.patchJobControl(w, r, v, rec, j, patch, id, bookKind, reason, msg)
@@ -393,7 +405,7 @@ func (s *Server) handleRequeue(w http.ResponseWriter, r *http.Request) {
 	// Signed first, so the request names its record (controltrust.go).
 	id, err := s.controlJob(ctx, r, v, rec, j, before, "requeue", map[string]any{"units": units, "token": token})
 	if err != nil {
-		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		fail(w, controlStatus(err), "control record: %v", err)
 		return
 	}
 	var reqs []c4v1.WorkRequeueRequest
@@ -449,7 +461,7 @@ func (s *Server) handleAcceptValidated(w http.ResponseWriter, r *http.Request) {
 	token := strconv.FormatInt(now.UnixNano(), 36)
 	id, err := s.controlJob(ctx, r, v, rec, j, before, "accept-validated", map[string]any{"accept": *body.Accept, "token": token})
 	if err != nil {
-		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		fail(w, controlStatus(err), "control record: %v", err)
 		return
 	}
 	var reqs []c4v1.WorkAcceptValidatedRequest
@@ -558,7 +570,7 @@ func (s *Server) handleAck(w http.ResponseWriter, r *http.Request) {
 	// Signed first, so the request names its record (controltrust.go).
 	id, err := s.controlJob(ctx, r, v, rec, j, before, body.Kind, change)
 	if err != nil {
-		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		fail(w, controlStatus(err), "control record: %v", err)
 		return
 	}
 	var reqs []c4v1.WorkAckRequest
@@ -617,7 +629,7 @@ func (s *Server) handleBlacklist(w http.ResponseWriter, r *http.Request) {
 		// Signed first, so the request names its record (controltrust.go).
 		id, err := s.controlJob(ctx, r, v, rec, j, before, "allow-node", map[string]any{"node": body.Node, "token": token})
 		if err != nil {
-			fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+			fail(w, controlStatus(err), "control record: %v", err)
 			return
 		}
 		var reqs []c4v1.WorkAllowNodeRequest
@@ -732,7 +744,7 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 		Change: map[string]any{"pool": pool, "slots": cr.Spec.Slots, "jobs": cr.Spec.Jobs, "estimatedCost": cr.Spec.EstimatedCost, "projects": projects}}
 	id, err := s.signControl(ctx, projects, provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": before}}, pred)
 	if err != nil {
-		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		fail(w, controlStatus(err), "control record: %v", err)
 		return
 	}
 	if id != "" {
@@ -949,7 +961,7 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 	if err != nil {
-		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		fail(w, controlStatus(err), "control record: %v", err)
 		return
 	}
 	var reqs []c4v1.WorkDecideRequest
@@ -1096,7 +1108,7 @@ func (s *Server) handleSteer(w http.ResponseWriter, r *http.Request) {
 	token := strconv.FormatInt(now.UnixNano(), 36)
 	id, err := s.controlJob(ctx, r, v, rec, j, before, "steer", map[string]any{"unit": unit, "text": body.Text, "token": token})
 	if err != nil {
-		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		fail(w, controlStatus(err), "control record: %v", err)
 		return
 	}
 	var reqs []c4v1.WorkSteerRequest
@@ -1215,7 +1227,7 @@ func (s *Server) handleSupply(w http.ResponseWriter, r *http.Request) {
 	token := strconv.FormatInt(now.UnixNano(), 36)
 	id, err := s.controlJob(ctx, r, v, rec, j, before, "supply", map[string]any{"unit": unit, "needed": need.Text, "text": body.Text, "token": token})
 	if err != nil {
-		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		fail(w, controlStatus(err), "control record: %v", err)
 		return
 	}
 	var reqs []c4v1.WorkSupplyRequest
@@ -1324,7 +1336,7 @@ func (s *Server) handleWithdrawNeeds(w http.ResponseWriter, r *http.Request) {
 	token := strconv.FormatInt(now.UnixNano(), 36)
 	id, err := s.controlJob(ctx, r, v, rec, j, before, "withdraw-needs", map[string]any{"unit": unit, "needed": need.Text, "why": body.Why, "token": token})
 	if err != nil {
-		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		fail(w, controlStatus(err), "control record: %v", err)
 		return
 	}
 	var reqs []c4v1.WorkWithdrawRequest

@@ -115,6 +115,10 @@ type Server struct {
 	// Signer signs a control record for each action a person or agent
 	// takes through the HUD or MCP; nil signs none.
 	Signer *provenance.Signer
+	// Acts are the signed acts the HUD has taken, by payload hash, kept
+	// for as long as their certificates live, so each is carried out
+	// once; nil keeps them in this process's memory.
+	Acts provenance.SeenSet
 	// Sites place the farm's nodes on the HUD's map (--hud-sites); nil
 	// leaves the map out.
 	Sites []api.Site
@@ -166,6 +170,8 @@ type Server struct {
 	// previewCache indexes preview proxies by output view.
 	previewCache map[string]map[int]string
 	trusted      trustSet
+	// acts is the seen-set of acts when Acts is nil.
+	acts *provenance.MemorySeen
 	// marks are each job's highest done and delivered shares (work.go).
 	marks     map[string]progressMark
 	keysUntil time.Time

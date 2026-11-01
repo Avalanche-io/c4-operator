@@ -232,7 +232,7 @@ func (s *Server) handleBind(w http.ResponseWriter, r *http.Request) {
 		Change: map[string]any{"owner": b.Spec.Owner, "to": b.Spec.To, "runFor": b.Spec.RunFor, "onePerson": b.Spec.OnePerson, "right": "sign", "for": b.Spec.For, "start": b.Spec.Start.Time}}
 	id, rec, err := s.signRecord(ctx, provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": sha256JSON(b.Spec)}}, pred)
 	if err != nil {
-		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		fail(w, controlStatus(err), "control record: %v", err)
 		return
 	}
 	b.Spec.Record, b.Spec.Signed = id, rec

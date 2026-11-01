@@ -169,7 +169,7 @@ func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
 		// Signed first, so the request names its record (controltrust.go).
 		id, err := s.controlJob(ctx, r, v, rec, j, before, "close", change)
 		if err != nil {
-			fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+			fail(w, controlStatus(err), "control record: %v", err)
 			return
 		}
 		b, _ := json.Marshal([]c4v1.WorkCloseRequest{{Token: token, Why: why, Actor: actorOf(r, v),
