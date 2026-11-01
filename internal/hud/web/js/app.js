@@ -447,6 +447,30 @@ function toast(msg, err = false) {
   toastTimer = setTimeout(() => { t.hidden = true; }, 4200);
 }
 
+// pressToConfirm: a write waiting for the person's press to confirm it
+// with their passkey (api.js confirmed): the toast holds the button, and
+// the write goes on its press
+function pressToConfirm(err) {
+  const t = document.getElementById('toast');
+  const b = h('button', { class: 'btn small primary' }, 'Touch to confirm');
+  t.replaceChildren(err.message, ' ', b);
+  t.className = 'toast';
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 30000);
+  b.addEventListener('click', async () => {
+    b.disabled = true;
+    try {
+      const r = await err.confirm();
+      toast(r.message || 'Done.');
+      document.dispatchEvent(new CustomEvent('hud:changed'));
+    } catch (e) {
+      if (e.confirm) return pressToConfirm(e);
+      toast(e.message, true);
+    }
+  });
+}
+
 // value: the trimmed text of the input an action names, or ''
 const value = (elId) => { const el = elId && document.getElementById(elId); return el ? el.value.trim() : ''; };
 
@@ -527,7 +551,8 @@ document.addEventListener('click', async (e) => {
     toast(r.message || 'Done.');
     document.dispatchEvent(new CustomEvent('hud:changed'));
   } catch (err) {
-    toast(err.message, true);
+    if (err.confirm) pressToConfirm(err);
+    else toast(err.message, true);
   } finally {
     b.disabled = false;
   }

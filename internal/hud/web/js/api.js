@@ -49,10 +49,30 @@ export async function post(path, body) {
   let r = await send(await actHeaders(path, sent));
   if (r.status === 403) {
     const e = await failed(r.clone());
-    if (e.needs === 'confirmed') r = await send(await actHeaders(path, sent, { confirm: true }));
+    if (e.needs === 'confirmed') r = await send(await confirmed(path, sent, send));
   }
   if (!r.ok) throw await failed(r);
   return r.json().catch(() => ({}));
+}
+
+// confirmed: the confirmed act's headers for a write the farm refused for
+// want of a touch. A browser may refuse the passkey's prompt this long
+// after the click (Safari wants a fresh press: NotAllowedError); the write
+// then waits for one, as an error whose confirm() the person's press
+// calls: Touch to confirm (app.js).
+async function confirmed(path, sent, send) {
+  try {
+    return await actHeaders(path, sent, { confirm: true });
+  } catch (err) {
+    if (!err || err.name !== 'NotAllowedError') throw err;
+    const e = new Error('This needs your touch. Confirm with your passkey to send it.');
+    e.confirm = async () => {
+      const r = await send(await actHeaders(path, sent, { confirm: true }));
+      if (!r.ok) throw await failed(r);
+      return r.json().catch(() => ({}));
+    };
+    throw e;
+  }
 }
 
 export async function del(path) {
