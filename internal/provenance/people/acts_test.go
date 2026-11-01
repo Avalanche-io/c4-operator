@@ -104,43 +104,35 @@ func TestLeafWithoutRecordIsAForgery(t *testing.T) {
 	}
 }
 
-// The sign-in provider setting is an admin's signed act. It is on the
-// touch list; until the touch is built it is booked as signed, not
-// confirmed. From then on it is the provider in force, and the install's
-// preset no longer replaces it. A person who isn't an admin can't set it.
-func TestProviderSettingIsASignedAct(t *testing.T) {
+// Until a touch can confirm it, the sign-in provider changes only with the
+// install: an admin's signed set-sign-in-provider act is refused, so a
+// page served by a compromised HUD can't sign one with the admin's browser
+// key and point the farm at another client. Redeploying with other flags
+// books a new install setting, and a token for the old client no longer
+// certifies anyone.
+func TestProviderSettingOnlyByInstall(t *testing.T) {
 	r := studio(t)
-	dana, noor := newDev(t), newDev(t)
+	dana := newDev(t)
 	kd := r.key(dana, r.signIn(dana, "dana", danaSub))
-	kn := r.key(noor, r.signIn(noor, "noor", noorSub))
-	next := map[string]string{"issuer": "https://login.studio.example", "clientID": "c4-farm-2"}
-	if code, body, _ := r.book(r.act(kn, "noor", "set-sign-in-provider", r.farmSubject(), next, false), ""); code != http.StatusForbidden || !strings.Contains(body, "not an admin") {
-		t.Errorf("noor set the provider: %d %s", code, body)
-	}
-	code, body, b := r.book(r.act(kd, "dana", "set-sign-in-provider", r.farmSubject(), next, false), "")
-	if code != http.StatusOK || b.Grade != people.GradeSigned || b.Entry.Grade != people.GradeSigned || b.Entry.Issuer != next["issuer"] {
-		t.Fatalf("set: %d %s", code, body)
+	next := map[string]string{"issuer": ssoIssuer, "clientID": "c4-farm-attacker"}
+	if code, body, _ := r.book(r.act(kd, "dana", "set-sign-in-provider", r.farmSubject(), next, false), ""); code != http.StatusForbidden || !strings.Contains(body, "redeploying") {
+		t.Errorf("an admin's act set the provider: %d %s", code, body)
 	}
 	var cfg people.Config
 	r.call("GET", "/v1/people/config", "", nil, &cfg)
-	if cfg.Provider == nil || cfg.Provider.Issuer != next["issuer"] || cfg.Provider.Grade != people.GradeSigned {
-		t.Errorf("config %+v", cfg.Provider)
+	if cfg.Provider == nil || cfg.Provider.ClientID != clientID || cfg.Provider.Grade != people.GradeInstall {
+		t.Fatalf("config %+v", cfg.Provider)
 	}
-	// A token from the old provider no longer certifies anyone.
+	r.iss.Provider = people.Provider{Issuer: ssoIssuer, ClientID: "c4-farm-2"}
+	r.call("GET", "/v1/people/config", "", nil, &cfg)
+	if cfg.Provider.ClientID != "c4-farm-2" || cfg.Provider.Grade != people.GradeInstall || len(r.entries(people.KindSetting)) != 2 {
+		t.Errorf("redeployed: %+v", cfg.Provider)
+	}
 	d := newDev(t)
 	e := r.enrolment(d, "dana", "", "browser")
 	e.IDToken = r.sso.token(r.now, danaSub, d.id, nil)
-	if code, _ := r.call("POST", "/v1/people/enroll", "", e, nil); code == http.StatusOK {
-		t.Error("the old provider's token certified a key after the setting changed")
-	}
-	if n := len(r.entries(people.KindSetting)); n != 2 {
-		t.Errorf("%d settings booked", n)
-	}
-	// The same act sent twice is taken once.
-	act := r.act(kd, "dana", "set-sign-in-provider", r.farmSubject(), next, false)
-	r.book(act, "")
-	if code, _, _ := r.book(act, ""); code != http.StatusConflict {
-		t.Errorf("an act taken twice: %d", code)
+	if code, _ := r.call("POST", "/v1/people/enroll", "", e, nil); code != http.StatusForbidden {
+		t.Errorf("a token for the old client certified a key: %d", code)
 	}
 }
 

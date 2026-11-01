@@ -2,11 +2,9 @@ package people
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"regexp"
 	"time"
 
@@ -22,10 +20,12 @@ import (
 //     person themselves or an admin. From its position on, the device's
 //     certificates are no longer in force. params.from, a time before the
 //     act, needs a touch (ActNeeds).
-//   - set-sign-in-provider: on farm:<farm ID>, params {issuer, clientID}.
-//     An admin. It is on the touch list; until the touch is built (K9) it
-//     is booked signed, not confirmed, and K8 can't be switched on while
-//     the setting in force is unconfirmed (PEOPLE-KEYS-2 10.4 item 12).
+//   - set-sign-in-provider is refused. It is on the touch list, and until
+//     the touch is built (K9) a page served by a compromised HUD could
+//     sign it with an admin's browser key and point the farm at another
+//     client. The provider changes only by redeploying the farm with
+//     --sign-in-provider and --sign-in-client-id, a cluster
+//     administrator's act; K9 opens it, confirmed.
 //   - approve-machine: on device:<ID> of a key not yet enrolled, confirmed
 //     with the person's touch key: that key may enrol as the person's
 //     within ApprovalTTL (evidence approval), as a second machine on a
@@ -92,10 +92,10 @@ func (i *Issuer) takeAct(r *http.Request, data []byte) (*Booked, error) {
 	if v.Confirmed() {
 		grade = GradeConfirmed
 	}
-	// The sign-in provider setting alone is taken without its touch, until
-	// the touch is built, and booked as signed (ErrNeedsTouch is checked
-	// last, so nothing else was skipped).
-	if err := provenance.CheckSigner(v); err != nil && !(verb == ActSetProvider && errors.Is(err, provenance.ErrNeedsTouch)) {
+	if verb == ActSetProvider {
+		return nil, refuse(http.StatusForbidden, "until a touch can confirm it, the sign-in provider changes only by redeploying the farm with --sign-in-provider and --sign-in-client-id")
+	}
+	if err := provenance.CheckSigner(v); err != nil {
 		return nil, err
 	}
 	if by == "" {
@@ -125,14 +125,12 @@ func (i *Issuer) takeAct(r *http.Request, data []byte) (*Booked, error) {
 	switch verb {
 	case ActRemoveDevice:
 		build, err = i.removal(r, by, device, farmSubject, params)
-	case ActSetProvider:
-		build, err = i.providerSetting(r, by, farmSubject, params, grade)
 	case ActApprove:
 		build, err = i.approval(by, device, now)
 	case ActBrowserCode, ActCountersign:
 		build, err = i.ownerAct(r, v, verb, by, device, farmSubject, params, now)
 	default:
-		err = refuse(http.StatusBadRequest, "the people's issuer books %s, %s, %s, %s and %s acts, not %s", ActRemoveDevice, ActSetProvider, ActApprove, ActBrowserCode, ActCountersign, verb)
+		err = refuse(http.StatusBadRequest, "the people's issuer books %s, %s, %s and %s acts, not %s", ActRemoveDevice, ActApprove, ActBrowserCode, ActCountersign, verb)
 	}
 	if err != nil {
 		return nil, err
@@ -194,24 +192,6 @@ func (i *Issuer) removal(r *http.Request, by, device string, farmSubject bool, p
 			return nil, refuse(http.StatusForbidden, "%s may remove their own devices, and an admin anyone's; %s's are not %s's", by, person, by)
 		}
 		return &Entry{Kind: KindRemoval, Device: device, Person: person, From: params["from"]}, nil
-	}, nil
-}
-
-// providerSetting books the farm's sign-in provider: an admin's act.
-func (i *Issuer) providerSetting(r *http.Request, by string, farmSubject bool, params map[string]string, grade string) (func() (*Entry, error), error) {
-	u, err := url.Parse(params["issuer"])
-	switch {
-	case !farmSubject:
-		return nil, refuse(http.StatusBadRequest, "set-sign-in-provider is on the farm, farm:%s", i.Farm())
-	case len(params) != 2 || params["clientID"] == "":
-		return nil, refuse(http.StatusBadRequest, "set-sign-in-provider takes issuer and clientID")
-	case err != nil || u.Scheme != "https" || u.Host == "":
-		return nil, refuse(http.StatusBadRequest, "the provider's issuer is an https URL, not %q", params["issuer"])
-	case !i.admin(r.Context(), by):
-		return nil, refuse(http.StatusForbidden, "%s is not an admin of this farm: the farm owner's admins set its sign-in provider", by)
-	}
-	return func() (*Entry, error) {
-		return &Entry{Kind: KindSetting, Issuer: params["issuer"], ClientID: params["clientID"], Grade: grade}, nil
 	}, nil
 }
 

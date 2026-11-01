@@ -206,10 +206,9 @@ func checkAct(v *Verified) (*schema.Act, error) {
 }
 
 // ErrNeedsTouch means an act's kind is on the touch list and no touch key
-// signed it. checkAct checks it last, so an act refused for it alone has
-// passed every other rule: the people's issuer books a sign-in provider
-// setting refused only for it as signed, not confirmed, until the touch
-// is built (PEOPLE-KEYS-2 10.4 item 12).
+// signed it, so a caller can tell a missing touch from any other refusal.
+// checkAct checks it last: an act refused for it alone has passed every
+// other rule.
 var ErrNeedsTouch = errors.New("needs the person's touch")
 
 // unitSigns reports whether a unit's identity,
