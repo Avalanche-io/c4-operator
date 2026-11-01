@@ -4,13 +4,16 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/internal/keystore"
@@ -163,4 +166,99 @@ func EnrolOwner(ctx context.Context, c *Client, st keystore.Store, owner string)
 		}
 	}
 	return &out, nil
+}
+
+// A browser enrolled from the CLI (3.3): c4 farm open books a one-time
+// code with the owner's key, the web app it opens enrols its key with the
+// code, and the CLI reads back the key the code enrolled and countersigns
+// it in the farm book. A code someone else used first shows as a key the
+// CLI didn't see the browser make.
+
+// ownerAct signs a silent act of the owner's with their device key, as the
+// issuer books it.
+func ownerAct(st keystore.Store, farm, owner string, on provenance.Subject, act string, params any) (json.RawMessage, error) {
+	key, err := st.Key(keystore.Device)
+	if err != nil {
+		return nil, err
+	}
+	cert, err := LoadCert(st, keystore.Device)
+	if err != nil {
+		return nil, err
+	}
+	if cert == nil {
+		return nil, errors.New("this machine's key is not enrolled at the farm: c4 farm up enrols it")
+	}
+	p, err := json.Marshal(params)
+	if err != nil {
+		return nil, err
+	}
+	b, err := provenance.SignPersonAct(provenance.PersonAct{Farm: farm, Subject: on, Act: act, Params: p, Person: owner},
+		key, deviceCert(cert), nil, nil)
+	return json.RawMessage(b), err
+}
+
+// BookBrowserCode books a one-time code for the browser c4 farm open opens:
+// the act browser-code on the farm, naming the code by its SHA-256, signed
+// with the owner's key. It returns the code, which only this machine and
+// the browser it opens see.
+func BookBrowserCode(ctx context.Context, c *Client, st keystore.Store, farm, owner string) (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	code := hex.EncodeToString(raw)
+	act, err := ownerAct(st, farm, owner, provenance.Subject{Name: "farm:" + farm, Digest: map[string]string{"c4": farm}},
+		"browser-code", map[string]string{"code": people.CodeHash(code)})
+	if err != nil {
+		return "", err
+	}
+	if err := c.Issuer(ctx, http.MethodPost, "/v1/people/acts", act, nil); err != nil {
+		return "", fmt.Errorf("booking the browser's code: %w", err)
+	}
+	return code, nil
+}
+
+// BrowserURL is the HUD's address with the browser's code where only the
+// web app reads it: in the fragment, which no request or log carries.
+// installer is the installer code that signs the browser in, if any.
+func BrowserURL(hud, installer, code string) string {
+	base := strings.TrimSuffix(hud, "/")
+	if installer == "" {
+		return base + "/#/?browser=" + url.QueryEscape(code)
+	}
+	return base + "/installer?code=" + url.QueryEscape(installer) + "&next=%2F#/?browser=" + url.QueryEscape(code)
+}
+
+// WatchCode reads the code's state until the browser has enrolled with it,
+// the code has lapsed, or wait has passed.
+func WatchCode(ctx context.Context, c *Client, code string, wait, poll time.Duration) (*people.CodeState, error) {
+	end := time.Now().Add(wait)
+	for {
+		var st people.CodeState
+		if err := c.Issuer(ctx, http.MethodGet, "/v1/people/codes/"+people.CodeHash(code), nil, &st); err != nil {
+			return nil, err
+		}
+		if st.State != "waiting" || time.Now().After(end) {
+			return &st, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(poll):
+		}
+	}
+}
+
+// Countersign books the owner's countersignature of the browser's device:
+// the act countersign-device on it, naming its record.
+func Countersign(ctx context.Context, c *Client, st keystore.Store, farm, owner string, enrolled *people.CodeState) error {
+	act, err := ownerAct(st, farm, owner, provenance.Subject{Name: "device:" + enrolled.Device, Digest: map[string]string{"c4": enrolled.Device}},
+		"countersign-device", map[string]string{"record": enrolled.Record})
+	if err != nil {
+		return err
+	}
+	if err := c.Issuer(ctx, http.MethodPost, "/v1/people/acts", act, nil); err != nil {
+		return fmt.Errorf("countersigning the browser: %w", err)
+	}
+	return nil
 }

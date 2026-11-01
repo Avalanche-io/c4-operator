@@ -2,6 +2,7 @@ package farmcli
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/provtest"
+	"github.com/Avalanche-io/c4-operator/schema"
 )
 
 // ownerIssuer is a one-person farm's people's issuer, noor's, with no
@@ -94,5 +96,50 @@ func TestUpEnrolsTheOwnersKey(t *testing.T) {
 	}
 	if err := o.index.CheckAct(ctx, v, pos); err != nil {
 		t.Errorf("the people's index: %v", err)
+	}
+}
+
+// c4 farm open books a code with the owner's key; the browser it opens
+// enrols its key with the code; the CLI reads back the key the code
+// enrolled, the browser's, and countersigns it. A code no browser used
+// reads as waiting.
+func TestOpenEnrolsAndCountersignsTheBrowser(t *testing.T) {
+	o := newOwnerIssuer(t)
+	ctx := context.Background()
+	st := keystore.Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
+	if _, err := EnrolOwner(ctx, o.client, st, "noor"); err != nil {
+		t.Fatal(err)
+	}
+	code, err := BookBrowserCode(ctx, o.client, st, o.scratch.ID, "noor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u := BrowserURL("http://127.0.0.1:30080", "inst", code); u != "http://127.0.0.1:30080/installer?code=inst&next=%2F#/?browser="+code {
+		t.Errorf("the URL: %s", u)
+	}
+	if s, err := WatchCode(ctx, o.client, code, 0, time.Millisecond); err != nil || s.State != "waiting" {
+		t.Fatalf("before the browser: %v %+v", err, s)
+	}
+
+	// the web app (K3), as it enrols with the code
+	browser, err := keystore.Store{Dir: filepath.Join(t.TempDir(), "browser"), FileOnly: true}.Key(keystore.Device)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := enrolment(browser, o.scratch.ID, "noor", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Kind, e.Protection, e.Code = "browser", schema.ProtectionBrowser, code
+	if err := o.client.Issuer(ctx, http.MethodPost, "/v1/people/browser", e, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := WatchCode(ctx, o.client, code, time.Second, time.Millisecond)
+	if err != nil || s.State != "enrolled" || s.Device != deviceID(browser) || s.Key != base64.RawURLEncoding.EncodeToString(browser.SPKI()) {
+		t.Fatalf("after the browser: %v %+v", err, s)
+	}
+	if err := Countersign(ctx, o.client, st, o.scratch.ID, "noor", s); err != nil {
+		t.Fatal(err)
 	}
 }
