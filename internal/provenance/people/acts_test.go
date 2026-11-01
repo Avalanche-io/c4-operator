@@ -203,9 +203,63 @@ func TestTouchKeyByApproval(t *testing.T) {
 		t.Fatalf("approve: %d %s", code, body)
 	}
 	r.now = r.now.Add(people.ApprovalTTL + time.Second)
-	el := r.enrolment(late, "dana", "", "linux")
+	el := r.enrolment(late, "dana", desk.id, "mac")
 	el.Approval = lb.Record
 	if code, body := r.call("POST", "/v1/people/enroll", "", el, nil); code != http.StatusForbidden || !strings.Contains(body, "lapsed") {
 		t.Errorf("a lapsed approval: %d %s", code, body)
+	}
+}
+
+// On a farm with a sign-in provider, every device renews on a fresh ID
+// token for its person, whatever it was enrolled on, and an approval
+// enrols only a touch key (review probe P2). A device approved from
+// another would otherwise renew on its own proof for ever, and a leaver
+// would keep it.
+func TestLeaverKeepsNoApprovedDevice(t *testing.T) {
+	r := studio(t)
+	laptop, laptopTouch, desk := newDev(t), newDev(t), newDev(t)
+	k := r.key(laptop, r.signIn(laptop, "dana", danaSub))
+	r.signIn(desk, "dana", danaSub)
+	e := r.enrolment(laptopTouch, "dana", laptop.id, "mac")
+	e.IDToken = r.sso.token(r.now, danaSub, laptopTouch.id, map[string]any{"auth_time": r.now.Unix(), "amr": []string{"hwk", "pin"}})
+	var tc people.Certified
+	if code, body := r.call("POST", "/v1/people/enroll", "", e, &tc); code != http.StatusOK {
+		t.Fatalf("touch: %d %s", code, body)
+	}
+	k.Touch = r.key(laptopTouch, &tc)
+	approve := func(id string) string {
+		code, body, b := r.book(r.act(k, "dana", "approve-machine", deviceSubject(id), map[string]string{}, true), "")
+		if code != http.StatusOK {
+			t.Fatalf("approve: %d %s", code, body)
+		}
+		return b.Record
+	}
+	stash := newDev(t)
+	es := r.enrolment(stash, "dana", "", "linux")
+	es.Approval = approve(stash.id)
+	if code, body := r.call("POST", "/v1/people/enroll", "", es, nil); code != http.StatusForbidden || !strings.Contains(body, "enrols by signing in") {
+		t.Fatalf("an approved plain device on a provider farm: %d %s", code, body)
+	}
+	deskTouch := newDev(t)
+	ed := r.enrolment(deskTouch, "dana", desk.id, "mac")
+	ed.Approval = approve(deskTouch.id)
+	if code, body := r.call("POST", "/v1/people/enroll", "", ed, nil); code != http.StatusOK {
+		t.Fatalf("an approved touch key: %d %s", code, body)
+	}
+	r.now = r.now.Add(6 * time.Hour)
+	if code, body := r.call("POST", "/v1/people/renew", "", r.enrolment(deskTouch, "dana", desk.id, "mac"), nil); code != http.StatusForbidden || !strings.Contains(body, "fresh ID token") {
+		t.Errorf("an approved touch key renewed on its proof: %d %s", code, body)
+	}
+	// dana leaves: no token of hers passes, and nothing of hers renews.
+	r.iss.SignIns = people.StaticSignIns{"noor": {{Issuer: ssoIssuer, Subject: noorSub}}}
+	for _, d := range []struct {
+		dev      *dev
+		touchFor string
+	}{{laptop, ""}, {deskTouch, desk.id}, {laptopTouch, laptop.id}} {
+		en := r.enrolment(d.dev, "dana", d.touchFor, "mac")
+		en.IDToken = r.sso.token(r.now, danaSub, d.dev.id, nil)
+		if code, body := r.call("POST", "/v1/people/renew", "", en, nil); code != http.StatusForbidden {
+			t.Errorf("a leaver's device renewed: %d %s", code, body)
+		}
 	}
 }

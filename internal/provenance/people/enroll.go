@@ -252,6 +252,17 @@ func (i *Issuer) enrollApproved(r *http.Request, e *Enrolment) (*Certified, erro
 	if err != nil {
 		return nil, err
 	}
+	// On a farm with a sign-in provider a new device enrols by signing in
+	// (PEOPLE-KEYS-2 7); an approval enrols only a touch key there.
+	if e.Request.TouchFor == "" {
+		set, err := i.setting(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if set != nil {
+			return nil, refuse(http.StatusForbidden, "this farm signs in at %s: a new device enrols by signing in, and an approval enrols only a touch key", set.Issuer)
+		}
+	}
 	p.Evidence, p.Approval = schema.EvidenceApproval, e.Approval
 	x := i.Index
 	es, err := x.append(ctx, now, func() ([]pending, error) {
@@ -318,12 +329,19 @@ func (i *Issuer) renew(r *http.Request, e *Enrolment) (*Certified, error) {
 	if err != nil {
 		return nil, err
 	}
+	set, err := i.setting(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var in *signIn
-	if evidence == schema.EvidenceIDToken {
-		// The provider vouches again, or nothing renews: a leaver's
-		// sign-in is refused there, and their last leaf ends.
+	if set != nil {
+		// On a farm with a sign-in provider, every device renews on a
+		// fresh ID token for its person, whatever it was enrolled on: the
+		// provider vouches again, or nothing renews, so a leaver's last
+		// leaf ends. Only a farm with no provider, a one-person farm,
+		// renews on the device's own proof.
 		if e.IDToken == "" {
-			return nil, refuse(http.StatusForbidden, "device %.16s was enrolled on a sign-in: it renews on a fresh ID token", device)
+			return nil, refuse(http.StatusForbidden, "this farm signs in at %s: device %.16s renews on a fresh ID token", set.Issuer, device)
 		}
 		if in, err = i.signedIn(ctx, e.IDToken, device, p.Person, false); err != nil {
 			return nil, err
