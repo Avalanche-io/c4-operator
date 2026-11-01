@@ -62,8 +62,6 @@ func Discover(ctx context.Context, hc *http.Client, issuer string) (OIDCEndpoint
 type LoginArgs struct {
 	// Store is the farm's keys on this machine.
 	Store keystore.Store
-	// Person is who signs in, as the farm names them.
-	Person string
 	// Farm is the people's issuer's config: the farm's ID and its provider.
 	Farm *people.Config
 	// Endpoints are the provider's (Discover); Provider reaches it.
@@ -94,7 +92,13 @@ func Login(ctx context.Context, c *Client, a LoginArgs) (*people.Certified, erro
 	if err != nil {
 		return nil, err
 	}
-	e, err := enrolment(key, a.Farm.Farm, a.Person, "")
+	// whose sign-in it is, as the farm names them: no one types a name, and
+	// the request the key signs names that person
+	var who people.WhoamiAnswer
+	if err := c.Issuer(ctx, http.MethodPost, "/v1/people/whoami", people.Whoami{IDToken: token}, &who); err != nil {
+		return nil, fmt.Errorf("whose sign-in this is: %w", err)
+	}
+	e, err := enrolment(key, a.Farm.Farm, who.Person, "")
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +109,9 @@ func Login(ctx context.Context, c *Client, a LoginArgs) (*people.Certified, erro
 	}
 	if err := saveCert(a.Store, keystore.Device, &cert); err != nil {
 		return nil, err
+	}
+	if a.Say != nil {
+		a.Say("signed in as %s\n", who.Person)
 	}
 	return &cert, nil
 }

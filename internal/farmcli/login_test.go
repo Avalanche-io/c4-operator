@@ -79,7 +79,7 @@ func TestLoginCertifiesThisMachinesKey(t *testing.T) {
 	}
 	st := keystore.Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
 	var said strings.Builder
-	a := LoginArgs{Store: st, Person: "dana", Farm: cfg, Provider: provider.Client(),
+	a := LoginArgs{Store: st, Farm: cfg, Provider: provider.Client(),
 		Endpoints: OIDCEndpoints{Authorization: provider.URL + "/authorize", Token: provider.URL + "/token"},
 		// the browser: follow the provider's redirect back to the CLI
 		Open: func(u string) error {
@@ -101,7 +101,7 @@ func TestLoginCertifiesThisMachinesKey(t *testing.T) {
 	if kept, err := LoadCert(st, keystore.Device); err != nil || kept == nil || kept.Record != cert.Record {
 		t.Errorf("the kept certificate: %v %+v", err, kept)
 	}
-	if !strings.Contains(said.String(), "ssh -L ") {
+	if !strings.Contains(said.String(), "signed in as dana\n") || !strings.Contains(said.String(), "ssh -L ") {
 		t.Errorf("no SSH recipe for a machine with no browser:\n%s", said.String())
 	}
 
