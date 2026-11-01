@@ -5,7 +5,7 @@
 // without a preflight the farm refuses, so it cannot post to a control
 // with the cookie.
 
-import { actHeaders } from './act.js';
+import { actHeaders, learnRead } from './act.js';
 
 const params = new URLSearchParams(location.search);
 export const as = params.get('as') || '';
@@ -26,10 +26,13 @@ async function failed(r) {
   return e;
 }
 
+// get: a read; what it names for a person's acts is learnt (act.js)
 export async function get(path) {
   const r = await fetch(withViewer('/api/v1' + path), { headers: { Accept: 'application/json' } });
   if (!r.ok) throw await failed(r);
-  return r.json();
+  const out = await r.json();
+  learnRead(path, out);
+  return out;
 }
 
 const WRITE = { 'X-C4-HUD': '1' };
@@ -55,6 +58,16 @@ export async function post(path, body) {
   return r.json().catch(() => ({}));
 }
 
+// del: a write that takes something back (a grant, a tracker login): its
+// act, revoking, is the person's own and signed, with no body ({} as its
+// params). Taking authority away never needs a touch.
+export async function del(path) {
+  const acts = await actHeaders(path, undefined, { method: 'DELETE' });
+  const r = await fetch(withViewer('/api/v1' + path), { method: 'DELETE', headers: { Accept: 'application/json', ...WRITE, ...acts } });
+  if (!r.ok) throw await failed(r);
+  return r.json().catch(() => ({}));
+}
+
 // confirmed: the confirmed act's headers for a write the farm refused for
 // want of a touch. A browser may refuse the passkey's prompt this long
 // after the click (Safari wants a fresh press: NotAllowedError); the write
@@ -75,11 +88,6 @@ async function confirmed(path, sent, send) {
   }
 }
 
-export async function del(path) {
-  const r = await fetch(withViewer('/api/v1' + path), { method: 'DELETE', headers: { Accept: 'application/json', ...WRITE } });
-  if (!r.ok) throw await failed(r);
-  return r.json().catch(() => ({}));
-}
 
 // issuer: a call to the farm's people's issuer, which the HUD serves at its
 // own origin (enrol.js): a read, or with a body a write, marked as the

@@ -29,7 +29,7 @@ import catalog from './views/catalog.js';
 import yourPage from './views/me.js';
 import needsYou from './views/needs.js';
 import sessions from './views/sessions.js';
-import { learnJobs, learnNeeds } from './act.js';
+import { learnSnapshot, learnNeeds } from './act.js';
 import './touch.js';
 import { start as startSigning, status as signing, capture as captureSecrets } from './enrol.js';
 
@@ -608,8 +608,9 @@ let needsAsked = false;
 function setSnap(snap) {
   state.raw = snap;
   state.snap = own(snap);
-  // what a signed act on each job names: its UID and spec digest (act.js)
-  learnJobs(snap && snap.jobs);
+  // what a person's signed acts are on: each job by UID and spec digest,
+  // each project, a burst waiting for approval, the farm (act.js)
+  learnSnapshot(snap);
 }
 
 window.addEventListener('hashchange', () => {

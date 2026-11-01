@@ -11,9 +11,13 @@
 //
 // An act is an in-toto statement (act/v1) in a DSSE envelope, in the
 // farm's attestation bundle with the device's certificate chain
-// (c4-operator internal/provenance): its subject the job by UID and spec
-// digest, its act the control's action, its params the request's body
-// exactly as sent (the farm compares them in canonical form, RFC 8785).
+// (c4-operator internal/provenance): its subject what it acts on, its act
+// the endpoint's action, its params the request's body exactly as sent
+// (the farm compares them in canonical form, RFC 8785; {} for none). A job
+// control is on the job by UID and spec digest; every other person's act
+// (a grant and its revocation, a tracker login confirmed or revoked, a
+// held write said to have happened or not, a burst approved) on the
+// subject the farm serves for it (actOn), learnt as the HUD reads it.
 // The signature is raw r||s, 64 bytes, over the SHA-256 of the DSSE
 // pre-authentication encoding, with S folded into the lower half of the
 // group, the one form the farm accepts.
@@ -57,6 +61,25 @@ export function actOf(path, body) {
 // of its spec as the farm served it (provenance.ActSubject)
 export function subjectOf(ns, name, uid, specDigest) {
   return { name: `workjob:${ns}/${name}@${uid}`, digest: { sha256: specDigest } };
+}
+
+// writeOf: the act a write that isn't a job control is, by its method,
+// path and body, and the key its subject is learnt under (learnRead,
+// learnSnapshot), or null for a write that takes none: { act, key }
+const WRITES = [
+  ['POST', /^\/grants$/, (m, b) => ({ act: 'grant', key: `project:${b && (b.project || b.namespace)}` })],
+  ['DELETE', /^\/grants\/([^/]+)\/([^/]+)$/, (m) => ({ act: 'revoke', key: `grant:${m[1]}/${m[2]}` })],
+  ['POST', /^\/people$/, (m, b) => ({ act: 'people-confirm', key: `offer:${b && b.namespace}/${b && b.tracker}/${b && b.login}` })],
+  ['DELETE', /^\/people\/([^/]+)\/([^/]+)$/, (m) => ({ act: 'people-revoke', key: `people:${m[1]}/${m[2]}` })],
+  ['POST', /^\/held\/([^/]+)\/([^/]+)\/([^/]+)$/, (m, b) => ({ act: b && b.happened ? 'confirm-write' : 'deny-write', key: `held:${m[1]}/${m[2]}/${m[3]}` })],
+  ['POST', /^\/capacity\/([^/]+)\/approve$/, (m) => ({ act: 'approve-capacity', key: `burst:${m[1]}` })],
+];
+export function writeOf(method, path, body) {
+  for (const [verb, re, fn] of WRITES) {
+    const m = verb === method && re.exec(path);
+    if (m) return fn(m.map((x) => (x === undefined ? x : decodeURIComponent(x))), body);
+  }
+  return null;
 }
 
 // ------------------------------------------------------------ bytes
@@ -243,6 +266,8 @@ export async function forgetKey(farm) { await idbDo('readwrite', (s) => s.delete
 // (K2), and the jobs it can name by UID and spec digest.
 let signer = null;
 const jobs = new Map();
+// the subjects of every other act, by key (writeOf): { name, digest }
+const subjects = new Map();
 
 // The touch (K9, touch.js). The farm says which acts need one (GET
 // /api/v1/acts/needs, shared piece S); the HUD keeps no list of its own,
@@ -255,9 +280,11 @@ const needs = new Set();
 let toucher = () => null;
 export function useToucher(fn) { toucher = fn || (() => null); }
 
-// learnNeeds: the acts the farm says need a touch, in any of the forms it
-// may serve them: a list of names, a list of { act, needs }, or an object
-// of act to grade, alone or under acts or needs
+// learnNeeds: the acts the farm says need a touch, as GET
+// /api/v1/acts/needs serves them ({ acts: { <kind>: { person?, touch?,
+// relayed? } } }), or in the simpler forms a farm may: a list of names, a
+// list of { act, needs }, or an object of act to grade. A kind whose need
+// turns on its params (the farm's params list) is left to the farm's 403.
 export function learnNeeds(x) {
   needs.clear();
   const v = x && !Array.isArray(x) && typeof x === 'object' ? (x.acts || x.needs || x) : x;
@@ -265,7 +292,7 @@ export function learnNeeds(x) {
     if (typeof e === 'string') needs.add(e);
     else if (e && e.act && (e.needs || e.minGrade || 'confirmed') === 'confirmed') needs.add(e.act);
   }
-  else if (v && typeof v === 'object') for (const [k, g] of Object.entries(v)) if (g === 'confirmed') needs.add(k);
+  else if (v && typeof v === 'object') for (const [k, g] of Object.entries(v)) if (g === 'confirmed' || (g && g.touch)) needs.add(k);
 }
 export const needsTouch = (act) => needs.has(act);
 
@@ -279,21 +306,57 @@ export function learnJobs(list) {
   for (const j of list || []) if (j.uid && j.specDigest) jobs.set(`${j.namespace}/${j.name}`, j);
 }
 
+const learn = (key, on) => { if (on && on.name && on.digest) subjects.set(key, on); };
+
+// learnSnapshot: what a snapshot names for acts: its jobs, each project
+// (what a grant is made in), each pool's burst waiting for approval, and
+// the farm
+export function learnSnapshot(snap) {
+  learnJobs(snap && snap.jobs);
+  if (!snap) return;
+  for (const p of snap.projects || []) learn(`project:${p.name}`, p.actOn);
+  for (const p of snap.pools || []) learn(`burst:${p.name}`, p.burst && p.burst.approve);
+  learn('farm', snap.farm && snap.farm.actOn);
+}
+
+// learnRead: what a read names for acts: grants (revoked on themselves),
+// tracker logins (confirmed on the offer, revoked on the confirmation) and
+// held writes
+export function learnRead(path, data) {
+  if (!data) return;
+  if (path.startsWith('/grants')) for (const g of data.grants || []) learn(`grant:${g.namespace}/${g.name}`, g.actOn);
+  if (path.startsWith('/people')) for (const e of data.entries || []) {
+    learn(`offer:${e.namespace}/${e.tracker}/${e.login}`, e.confirmOn);
+    learn(`people:${e.namespace}/${e.name}`, e.revokeOn);
+  }
+  if (path.startsWith('/held')) for (const w of data.held || []) learn(`held:${w.namespace}/${w.link}/${w.field}`, w.actOn);
+}
+
 // actHeaders: the headers a write carries for its act, {} when this page
 // cannot sign it (no certified key yet, a write that takes no act, or a
 // job whose uid and specDigest it has not been told), or when the act
 // needs a touch this browser can't give. confirm: the farm said this act
 // needs a touch (a 403's needs: confirmed), whatever the list said.
-export async function actHeaders(path, body, { confirm = false } = {}) {
+export async function actHeaders(path, body, { confirm = false, method = 'POST' } = {}) {
   if (!signer) return {};
-  const a = actOf(path, body);
-  const j = a && jobs.get(`${a.ns}/${a.name}`);
-  if (!j) return {};
+  let act, subject;
+  const a = method === 'POST' && actOf(path, body);
+  if (a) {
+    const j = jobs.get(`${a.ns}/${a.name}`);
+    if (!j) return {};
+    act = a.act;
+    subject = subjectOf(a.ns, a.name, j.uid, j.specDigest);
+  } else {
+    const w = writeOf(method, path, body);
+    subject = w && subjects.get(w.key);
+    if (!subject) return {};
+    act = w.act;
+  }
   let touch = null;
-  if (confirm || needsTouch(a.act)) {
+  if (confirm || needsTouch(act)) {
     touch = toucher();
     if (!touch) return {};
   }
-  const bundle = await signAct(signer, { subject: subjectOf(a.ns, a.name, j.uid, j.specDigest), act: a.act, params: body === undefined ? {} : body }, new Date(), { touch });
+  const bundle = await signAct(signer, { subject, act, params: body === undefined || body === null ? {} : body }, new Date(), { touch });
   return { [ACT_HEADER]: b64(bundle) };
 }
