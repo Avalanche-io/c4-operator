@@ -6,13 +6,16 @@ package people_test
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/internal/farmbook"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/provtest"
 	"github.com/Avalanche-io/c4-operator/schema"
@@ -202,5 +205,32 @@ func TestSealedEntryThatNoLongerChecksCountsForNothing(t *testing.T) {
 	b.relist(provtest.ID("another listing"))
 	if _, err := sealer.Seal(context.Background()); err != nil {
 		t.Errorf("a new sealer stopped: %v", err)
+	}
+}
+
+// On a quiet book, with no seal for months, a device past its lapse is
+// refused by the issuer's live check at its own clock, while a verifier
+// judging at the old seal still sees it in force there.
+func TestLiveCheckUsesTheClockOnAQuietBook(t *testing.T) {
+	b := inBook(studio(t), nil)
+	laptop, desk := newDev(t), newDev(t)
+	b.signIn(laptop, "dana", danaSub)
+	b.signIn(desk, "dana", danaSub)
+	b.seal()
+	pos := b.sealedAt()
+	b.now = b.now.Add(people.Lapse + time.Hour)
+	// A leaf for the laptop, valid now, as a copied key might hold: the
+	// issuer refuses its act, since the laptop lapsed by the clock.
+	leaf, err := b.farm.CA.IssueLeaf(&laptop.key.PublicKey, provenance.UserIdentity("dana"), laptop.id, "", time.Hour, b.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := &provtest.Key{Identity: provenance.UserIdentity("dana"), Device: laptop.id, P256: laptop.key, Chain: []*x509.Certificate{leaf, b.farm.CA.Cert}}
+	act := b.act(k, "dana", "remove-device", deviceSubject(desk.id), nil, false)
+	if code, body, _ := b.book(act, ""); code != http.StatusForbidden || !strings.Contains(body, "no device record in force") {
+		t.Errorf("the issuer took a lapsed device's act on a quiet book: %d %s", code, body)
+	}
+	if err := b.checkAt(act, pos); err != nil {
+		t.Errorf("a verifier at the old seal: %v", err)
 	}
 }

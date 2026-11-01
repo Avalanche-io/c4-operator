@@ -583,7 +583,13 @@ func (x *Index) loadAct(e *Entry, b []byte, pending bool) error {
 	if v.PredicateType != provenance.PredicateAct {
 		return fmt.Errorf("a %s entry books a %s record, not an act", e.Kind, v.PredicateType)
 	}
-	if err := x.checkAct(v, e.Position-1); err != nil {
+	// A booked act is judged at the time its entry counts from (in the
+	// issuer's own order, the act's signedAt).
+	at := v.SignedAt
+	if inBook(e) || x.Book != nil || !x.sealing.IsZero() {
+		at = e.time()
+	}
+	if err := x.checkAct(v, e.Position-1, at); err != nil {
 		return err
 	}
 	a, errs := schema.ParseAct(v.Payload)
@@ -915,7 +921,7 @@ func (x *Index) CheckAct(ctx context.Context, v *provenance.Verified, pos int64)
 	if err := x.verifiable(pos); err != nil {
 		return err
 	}
-	return x.checkAct(v, pos)
+	return x.checkAct(v, pos, x.timeAt(pos, v.SignedAt))
 }
 
 // verifiable refuses a verifier's position past the sealed head, where
@@ -928,9 +934,12 @@ func (x *Index) verifiable(pos int64) error {
 }
 
 // checkAct is CheckAct on the index as this process has read it.
-func (x *Index) checkAct(v *provenance.Verified, pos int64) error {
+//
+// at is the time time-based ends are judged at: a verifier's, the time pos
+// was sealed (CheckAct); a live decision's, the issuer's clock (takeAct).
+func (x *Index) checkAct(v *provenance.Verified, pos int64, at time.Time) error {
 	var devs []*schema.Device
-	for _, d := range x.inForce(pos, x.timeAt(pos, v.SignedAt)) {
+	for _, d := range x.inForce(pos, at) {
 		devs = append(devs, d.rec)
 	}
 	person, ok := strings.CutPrefix(v.Identity, provenance.IdentityBase+"user/")

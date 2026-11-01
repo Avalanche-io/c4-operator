@@ -62,15 +62,12 @@ func (x *Index) Order() string {
 	return OrderIssuer
 }
 
-// timeAt is the time a position is judged at: with a farm book, when the
-// queue sealed it (a pending position, now); without one, the issuer's own
-// order, at.
+// timeAt is the time a verifier judges a position at: with a farm book,
+// when the queue sealed it (a pending position, now); without one, the
+// issuer's own order, at. A live decision passes its own clock instead.
 func (x *Index) timeAt(pos int64, at time.Time) time.Time {
-	if x.Book == nil && x.sealing.IsZero() {
+	if x.Book == nil {
 		return at
-	}
-	if !x.sealing.IsZero() {
-		return x.sealing
 	}
 	if x.fbook != nil && pos <= x.sealed {
 		if t, err := x.fbook.SealedAt(pos); err == nil {

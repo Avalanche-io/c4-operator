@@ -144,7 +144,9 @@ func (i *Issuer) takeAct(r *http.Request, data []byte) (*Booked, error) {
 		// The device that signed it is in force here, and a confirmed
 		// act's touch key is that device's own (CheckTouchKey): its record
 		// names the device, and it is the same person's, on this farm.
-		if err := x.checkAct(v, x.pos); err != nil {
+		// A live decision: judged at the issuer's clock, so a device past
+		// its lapse is refused at once on a quiet book.
+		if err := x.checkAct(v, x.pos, now); err != nil {
 			return nil, refuse(http.StatusForbidden, "%v", err)
 		}
 		// The index is shared and lasting, so an act it books is refused a

@@ -376,3 +376,27 @@ func TestReaderInTheManagerReadsTheSealersHead(t *testing.T) {
 		t.Errorf("a State past the sealer's head: %v", err)
 	}
 }
+
+// In force is judged at the time the caller passes: a verifier at the
+// time a position was sealed sees a device in force that a live decision,
+// at the clock, sees lapsed on a quiet book, and a grant past its until
+// likewise.
+func TestInForceAtTakesItsTime(t *testing.T) {
+	r := newRig(t)
+	device := provtest.ID("dana's laptop key")
+	key := "submitgrant:saltmarsh/dana-flow"
+	r.writer.Append(r.ctx, farmbook.Submission{Entry: &farmbook.Entry{Kind: "device", Device: device, Person: "dana", Order: farmbook.OrderPending, At: r.now.Format(time.RFC3339Nano)}})
+	r.book(r.control(r.hud, "grant", key, grantChange("dana", r.now.Add(time.Hour)), r.now), nil)
+	r.seal()
+	b := r.read()
+	pos := b.Head().Position
+	later := r.now.Add(farmbook.DeviceLapse + time.Hour)
+	for _, c := range []struct{ kind, key string }{{farmbook.ForceDevice, device}, {farmbook.ForceGrant, key}} {
+		if on, _ := b.InForce(c.kind, c.key, pos); on == nil {
+			t.Errorf("%s: a verifier at its seal sees it out of force", c.kind)
+		}
+		if on, err := b.InForceAt(c.kind, c.key, pos, later); err != nil || on != nil {
+			t.Errorf("%s: a live check, past its end, sees it in force (%v)", c.kind, err)
+		}
+	}
+}

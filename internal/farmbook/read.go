@@ -492,7 +492,19 @@ func (b *Book) InForce(kind, key string, pos int64) (*Sealed, error) {
 	if err != nil {
 		return nil, err
 	}
-	return inForce(b.entries[:pos], kind, key, at)
+	return b.InForceAt(kind, key, pos, at)
+}
+
+// InForceAt is InForce judged at time at: what put key in force by the
+// entries sealed to pos, and still is at at. A verifier passes the time
+// pos was sealed (InForce does); a live decision passes the clock, so a
+// time-based end (a device's lapse, a grant's until) counts at once on a
+// quiet book, not only after the next seal.
+func (b *Book) InForceAt(kind, key string, pos int64, at time.Time) (*Sealed, error) {
+	if pos < 0 || pos > int64(len(b.entries)) {
+		return nil, fmt.Errorf("%w: position %d, the book is sealed to %d", ErrNotSealed, pos, len(b.entries))
+	}
+	return InForceAt(b.entries[:pos], kind, key, at)
 }
 
 // InForce is the entry that put key in force at pos, pending entries
@@ -503,11 +515,20 @@ func (v *View) InForce(kind, key string, pos int64) (*Sealed, error) {
 	if pos <= sealed {
 		return v.Book.InForce(kind, key, pos)
 	}
-	es := append(append([]*Sealed(nil), v.Book.entries...), v.pending...)
-	return inForce(es[:min(pos, int64(len(es)))], kind, key, v.Now)
+	return v.InForceAt(kind, key, pos, v.Now)
 }
 
-func inForce(es []*Sealed, kind, key string, at time.Time) (*Sealed, error) {
+// InForceAt is InForce judged at time at, pending entries counted.
+func (v *View) InForceAt(kind, key string, pos int64, at time.Time) (*Sealed, error) {
+	es := append(append([]*Sealed(nil), v.Book.entries...), v.pending...)
+	return InForceAt(es[:max(0, min(pos, int64(len(es))))], kind, key, at)
+}
+
+// InForceAt is the one "in force" rule, for every kind: the entry among
+// es (in book order) that put key in force, and still is at time at, or
+// nil. Each time-based end is judged at at, which the caller chooses: a
+// verifier the time its position was sealed, a live decision its clock.
+func InForceAt(es []*Sealed, kind, key string, at time.Time) (*Sealed, error) {
 	if kind == ForceDevice {
 		return deviceInForce(es, key, at), nil
 	}
