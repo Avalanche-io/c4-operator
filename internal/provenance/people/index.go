@@ -582,9 +582,19 @@ var ErrNotInForce = errors.New("no device record in force")
 // touch key is that person's touch key for that device (CheckTouchKey).
 // An act that isn't a person's passes.
 func (x *Index) CheckAct(ctx context.Context, v *provenance.Verified, pos int64) error {
-	devs, err := x.DevicesAt(ctx, pos, v.SignedAt)
-	if err != nil {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if err := x.sync(ctx); err != nil {
 		return err
+	}
+	return x.checkAct(v, pos)
+}
+
+// checkAct is CheckAct on the index as this process has read it.
+func (x *Index) checkAct(v *provenance.Verified, pos int64) error {
+	var devs []*schema.Device
+	for _, d := range x.inForce(pos, v.SignedAt) {
+		devs = append(devs, d.rec)
 	}
 	person, ok := strings.CutPrefix(v.Identity, provenance.IdentityBase+"user/")
 	if !ok {

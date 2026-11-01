@@ -104,13 +104,6 @@ func (i *Issuer) takeAct(r *http.Request, data []byte) (*Booked, error) {
 	if d := now.Sub(v.SignedAt); d > provenance.ActSkew || d < -provenance.ActSkew {
 		return nil, fmt.Errorf("%w: signed %s from the issuer's clock", provenance.ErrClock, d.Round(time.Second))
 	}
-	pos, err := x.Position(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := x.CheckAct(ctx, v, pos); err != nil {
-		return nil, err
-	}
 	var params map[string]string
 	if err := json.Unmarshal(a.Predicate.Params, &params); err != nil {
 		return nil, refuse(http.StatusBadRequest, "%s's params are an object of strings: %v", verb, err)
@@ -139,11 +132,16 @@ func (i *Issuer) takeAct(r *http.Request, data []byte) (*Booked, error) {
 	if t := v.SignedAt.Add(provenance.ActSkew); t.After(until) {
 		until = t
 	}
-	if err := i.acts().Take(provenance.PayloadHash(v.Payload), until); err != nil {
-		return nil, fmt.Errorf("the act was taken once already: %w", err)
-	}
 	hash := provenance.PayloadHash(v.Payload)
+	taken := false
+	// Every check that reads the index runs inside the append, on the index
+	// as it stands when the act is booked: a removal booked a moment
+	// before refuses the removed device's act. The act is taken once only
+	// after they pass, so a refused act isn't used up.
 	es, err := x.append(ctx, now, func() ([]pending, error) {
+		if err := x.checkAct(v, int64(len(x.entries))); err != nil {
+			return nil, err
+		}
 		// The index is shared and lasting, so an act it books is refused a
 		// second time at any replica, after any restart, by its payload
 		// hash (PEOPLE-KEYS-2 2.1, replay).
@@ -153,6 +151,12 @@ func (i *Issuer) takeAct(r *http.Request, data []byte) (*Booked, error) {
 		e, err := build()
 		if err != nil {
 			return nil, err
+		}
+		if !taken {
+			if err := i.acts().Take(hash, until); err != nil {
+				return nil, fmt.Errorf("the act was taken once already: %w", err)
+			}
+			taken = true
 		}
 		e.By = by
 		return []pending{{entry: e, record: data}}, nil

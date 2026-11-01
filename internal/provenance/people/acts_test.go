@@ -1,9 +1,11 @@
 package people_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -284,5 +286,66 @@ func TestActReplayedAtAnotherReplica(t *testing.T) {
 	}
 	if n := len(r.entries(people.KindApproval)); n != 1 {
 		t.Errorf("%d approvals booked", n)
+	}
+}
+
+// racingHead runs before once, the first time a write is made through
+// it: another replica's booking that lands between this one's checks and
+// its write.
+type racingHead struct {
+	*people.MemoryHead
+	before func()
+}
+
+func (h *racingHead) Write(ctx context.Context, from, to people.HeadState) error {
+	if f := h.before; f != nil {
+		h.before = nil
+		f()
+	}
+	return h.MemoryHead.Write(ctx, from, to)
+}
+
+// An act is checked against the index as it stands when it is booked: a
+// removal another replica books in between refuses the removed device's
+// act (review item 8). A refused act isn't used up: sent again, it is
+// refused for its own reason, not as taken already.
+func TestActCheckedWhenBooked(t *testing.T) {
+	r := studio(t)
+	laptop, touch, desk := newDev(t), newDev(t), newDev(t)
+	k := r.key(laptop, r.signIn(laptop, "dana", danaSub))
+	kdesk := r.key(desk, r.signIn(desk, "dana", danaSub))
+	e := r.enrolment(touch, "dana", laptop.id, "mac")
+	e.IDToken = r.sso.token(r.now, danaSub, touch.id, map[string]any{"auth_time": r.now.Unix(), "amr": []string{"pwd", "otp"}})
+	var tc people.Certified
+	if code, body := r.call("POST", "/v1/people/enroll", "", e, &tc); code != http.StatusOK {
+		t.Fatalf("touch: %d %s", code, body)
+	}
+	k.Touch = r.key(touch, &tc)
+	other := &people.Issuer{CA: r.iss.CA, Index: &people.Index{Farm: r.farm.ID, Roots: r.farm.Roots, Store: r.store, Head: r.head},
+		Now: r.iss.Now, Admin: r.iss.Admin, Provider: r.iss.Provider, SignIns: r.iss.SignIns, HTTPClient: r.iss.HTTPClient}
+	race := &racingHead{MemoryHead: r.head, before: func() {
+		req := httptest.NewRequest("POST", "/v1/people/acts", bytes.NewReader(r.act(kdesk, "dana", "remove-device", deviceSubject(laptop.id), nil, false)))
+		w := httptest.NewRecorder()
+		other.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("the other replica's removal: %d %s", w.Code, w.Body)
+		}
+	}}
+	r.iss.Index = &people.Index{Farm: r.farm.ID, Roots: r.farm.Roots, Store: r.store, Head: race}
+	r.index = r.iss.Index
+	act := r.act(k, "dana", "approve-machine", deviceSubject(newDev(t).id), map[string]string{}, true)
+	if code, body, _ := r.book(act, ""); code != http.StatusForbidden || !strings.Contains(body, "no device record") {
+		t.Errorf("the removed laptop's act, booked after the removal: %d %s", code, body)
+	}
+	if n := len(r.entries(people.KindApproval)); n != 0 {
+		t.Errorf("%d approvals booked", n)
+	}
+	noor := newDev(t)
+	kn := r.key(noor, r.signIn(noor, "noor", noorSub))
+	refusedAct := r.act(kn, "noor", "remove-device", deviceSubject(desk.id), nil, false)
+	for try := 0; try < 2; try++ {
+		if code, body, _ := r.book(refusedAct, ""); code != http.StatusForbidden || !strings.Contains(body, "an admin") {
+			t.Errorf("try %d of a refused act: %d %s", try, code, body)
+		}
 	}
 }
