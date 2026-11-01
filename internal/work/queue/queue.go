@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
 	"github.com/Avalanche-io/c4-operator/internal/work/policy"
@@ -123,6 +124,11 @@ type Queue struct {
 	// accounts are the model accounts held for a usage limit, by label,
 	// until it resets (usagelimit.go).
 	accounts map[string]*accountHold
+	// FarmBook seals the farm book (internal/farmbook), the farm-wide log of
+	// farm-level acts the HUD and the people's issuer write: the queue is
+	// its one sealer, at FarmBook.Every, signing each segment as itself.
+	// Nil where the install names no system store.
+	FarmBook *farmbook.Sealer
 	// Namespace is the operator's namespace, where the queue keeps the
 	// pointers to each project's saved calibrations (persist.go). Empty,
 	// or without Stores, calibrations are not saved.
@@ -214,6 +220,11 @@ func (q *Queue) Start(ctx context.Context) error {
 	}
 	if q.CaptureWait <= 0 {
 		q.CaptureWait = 2 * time.Minute
+	}
+	if q.FarmBook != nil {
+		// The book seals on its own interval, seconds apart, beside the
+		// ticks, on the leader alone.
+		go q.FarmBook.Run(ctx)
 	}
 	t := time.NewTicker(q.Every)
 	defer t.Stop()
