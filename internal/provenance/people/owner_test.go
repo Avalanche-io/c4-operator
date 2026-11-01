@@ -129,3 +129,35 @@ func TestBrowserCode(t *testing.T) {
 		t.Errorf("a code after its minute: %d %s", status, body)
 	}
 }
+
+// A one-time code enrols the browser's device key, never a touch key
+// (review probes P1 and P1b). Otherwise a page holding the browser key
+// would enrol a second silent key as its touch key, and the two would
+// sign a confirmed grant CheckAct takes. touchFor is refused whatever it
+// names: a device of the person's, or the owner's own touch key.
+func TestBrowserCodeEnrolsNoTouchKey(t *testing.T) {
+	r := onePerson(t)
+	cli, touch := newDev(t), newDev(t)
+	_, _, owner := r.up(cli, touch)
+	code1 := codeOf(t)
+	r.browserCode(cli, owner.Owner, code1)
+	b1 := newDev(t)
+	e1 := r.enrolment(b1, "noor", "", "browser")
+	e1.Code = code1
+	var c1 people.Certified
+	if s, b := r.call("POST", "/v1/people/browser", local, e1, &c1); s != http.StatusOK {
+		t.Fatalf("browser 1: %d %s", s, b)
+	}
+	for _, touchFor := range []string{b1.id, touch.id, cli.id} {
+		code := codeOf(t)
+		r.browserCode(cli, owner.Owner, code)
+		e := r.enrolment(newDev(t), "noor", touchFor, "browser")
+		e.Code = code
+		if s, body := r.call("POST", "/v1/people/browser", local, e, nil); s != http.StatusForbidden || !strings.Contains(body, "not a touch key") {
+			t.Errorf("a code enrolled a touch key for %.12s: %d %s", touchFor, s, body)
+		}
+	}
+	if n := len(r.entries(people.KindDevice)); n != 3 {
+		t.Errorf("%d device records, want the owner's two and one browser", n)
+	}
+}

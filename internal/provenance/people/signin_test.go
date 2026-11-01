@@ -292,3 +292,31 @@ func TestTouchKeyNeedsStepUp(t *testing.T) {
 		t.Errorf("devices %+v", list.Devices)
 	}
 }
+
+// On every path, a touch key's touchFor names a plain device key of the
+// same person, in force: not a touch key, not another person's device,
+// not a device never enrolled.
+func TestTouchForNamesAPlainDeviceInForce(t *testing.T) {
+	r := studio(t)
+	d, noor := newDev(t), newDev(t)
+	r.signIn(d, "dana", danaSub)
+	r.signIn(noor, "noor", noorSub)
+	stepUp := map[string]any{"auth_time": r.now.Unix(), "amr": []string{"pwd", "otp"}}
+	enrol := func(touchFor string) (int, string) {
+		touch := newDev(t)
+		e := r.enrolment(touch, "dana", touchFor, "mac")
+		e.IDToken = r.sso.token(r.now, danaSub, touch.id, stepUp)
+		return r.call("POST", "/v1/people/enroll", "", e, nil)
+	}
+	first := newDev(t)
+	e := r.enrolment(first, "dana", d.id, "mac")
+	e.IDToken = r.sso.token(r.now, danaSub, first.id, stepUp)
+	if code, body := r.call("POST", "/v1/people/enroll", "", e, nil); code != http.StatusOK {
+		t.Fatalf("dana's touch key: %d %s", code, body)
+	}
+	for name, touchFor := range map[string]string{"a touch key": first.id, "noor's device": noor.id, "no device": newDev(t).id} {
+		if code, body := enrol(touchFor); code != http.StatusForbidden {
+			t.Errorf("touchFor %s: %d %s", name, code, body)
+		}
+	}
+}

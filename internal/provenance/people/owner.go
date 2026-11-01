@@ -193,6 +193,15 @@ func (i *Issuer) handleBrowser(w http.ResponseWriter, r *http.Request) {
 		fail(w, refuse(http.StatusBadRequest, "a browser presents the one-time code it was opened with (code), and nothing else"))
 		return
 	}
+	// A code enrols the browser's device key, never a touch key: a touch
+	// key comes only from a step-up sign-in, c4 farm up, or a touch on
+	// another of the person's touch keys (PEOPLE-KEYS-2 4.3), or anything
+	// that can use the browser key could enrol a second key that never
+	// asks, and sign confirmed acts with the two.
+	if e.Request.TouchFor != "" {
+		fail(w, refuse(http.StatusForbidden, "a one-time code enrols a device key, not a touch key: a touch key is enrolled on a step-up sign-in, at c4 farm up, or on a touch from another touch key"))
+		return
+	}
 	p, pub, device, err := i.predicate(&e, now)
 	if err != nil {
 		fail(w, err)
