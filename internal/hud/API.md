@@ -2231,6 +2231,129 @@ its `chain` (chain/1): `by` the tracker user, `for` the mapped person, and
 through, with `accountable: false` and a `gap` saying who has not
 confirmed it.
 
+## The people's issuer
+
+The people's issuer (PEOPLE-KEYS-2 3, slice K2) certifies a person's device
+key, ECDSA P-256, as `user/<name>` naming the device, for at most 12 hours.
+It certifies only on evidence a verifier can check later without the HUD's
+word: an ID token from the farm's sign-in provider, or on a one-person farm
+the installer token once and then the owner's own key.
+
+**Where it is.** It sits beside the workload issuer, at `/v1/people/` on
+the issuer's listener (`--signer-addr`, the `c4-signer` Service). The HUD
+also serves it at its own origin as `/issuer/v1/people/`, outside
+`/api/v1`. The web app's key lives in the HUD's storage, so it enrols
+without leaving the origin. The HUD adds nothing and is trusted for
+nothing. The issuer runs only where the install names its store
+(`--people-store`); otherwise no farm changes. Nothing refuses an act for
+want of it until slice K8.
+
+**What a device sends** (`Enrolment`):
+
+```
+{ request: { farm, person, key, touchFor?, nonce, requestedAt },
+  proof, protection, kind, label?, idToken?, approval?, code? }
+```
+
+- `key` is the DER SubjectPublicKeyInfo, base64url. Its device ID is the C4
+  ID of those bytes.
+- `nonce` is 16 random bytes, base64url, and `requestedAt` is the device's
+  clock (RFC 3339), within five minutes of the issuer's.
+- `proof` is the key's raw `r||s` signature (low S, base64url) over the
+  request's canonical JSON (RFC 8785): `schema.DevicePredicate.ProofMessage`.
+  The farm and person are in it, so a request works at no other farm and
+  for no other person.
+- `protection` is `hardware`, `software-browser` or `software-file`, and
+  `kind` is `browser`, `mac`, `windows` or `linux`, as `device/v1` has them.
+- **The ID token's nonce is the device ID** (the `c4…` string), never the
+  request's `nonce`. A client sends the person to the provider with
+  `nonce=<device ID>`, silently (`prompt=none`) once a session is open.
+  For a touch key it uses the touch key's device ID.
+
+**What it answers** (`Certified`): `{ farm, identity, device, record,
+position, order, chain, expires }`.
+- `identity` is the leaf's identity exactly as certified: a client copies
+  it and never computes it.
+- `chain` is DER, base64, leaf first, then the farm CA.
+- `farm` is the C4 ID of the CA certificate, what an act names.
+- `record` is the device record's C4 ID, and `position` its index entry.
+
+| route                         | body                                                     | answer                                                                                                                                                                                                                                                                                                                                                                                | caller                                       |
+| ----------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `GET /v1/people/config`       |                                                          | `{ farm, order, position, provider?: { issuer, clientID, grade, position, record? }, nonce, stepUp: { maxAge, acr, amr }, owner?, ownerEnrolled, leafTTL, lapse }`: where to send the person and how                                                                                                                                                                                  | the web app (K3), the CLI (K4)               |
+| `POST /v1/people/enroll`      | `Enrolment` with `idToken`, or with `approval`           | `Certified`. On a token: from the provider in force, for the farm's client ID, issued in the last 10 minutes, its nonce the device ID, its subject the person's sign-in. A touch key (`touchFor`) needs a step-up, and its device must be the person's, in force. On `approval`: a booked approval naming this key, unexpired. `409` for a key seen before, `403` for anything refused | the web app (K3), `c4 farm login` (K4)       |
+| `POST /v1/people/renew`       | `Enrolment` with a fresh `idToken`, the same nonce       | `Certified` for a device in force: a device record of its own naming the one it renews. A device enrolled on a sign-in renews only on a token, so a leaver's last leaf ends. A one-person farm's device renews on its own proof. `403` once removed or lapsed: make a new key                                                                                                          | the web app (K3), the CLI (K4)               |
+| `POST /v1/people/owner`       | `{ owner: Enrolment, touch?: Enrolment }`                | `{ owner: Certified, touch? }`: a one-person farm's owner key and touch key, evidence `installer`, over loopback with `X-C4-Installer`. `409` once an owner key exists                                                                                                                                                                                                                 | `c4 farm up` (K4, K7)                        |
+| `POST /v1/people/browser`     | `Enrolment` with `code`, kind `browser`                  | `Certified`, evidence `owner`: the code the owner's key booked, within a minute, once, over loopback (Host and Origin)                                                                                                                                                                                                                                                                | the web app opened by `c4 farm open` (K3)    |
+| `GET /v1/people/codes/{hash}` |                                                          | `{ state: waiting \| enrolled \| lapsed, expires, device?, record?, position?, key?, label? }` for the SHA-256 of a code: the key the code enrolled, for the CLI to compare with the one it saw made                                                                                                                                                                                    | `c4 farm open` (K4)                          |
+| `POST /v1/people/acts`        | an `act/v1` bundle                                       | `{ record, position, grade, entry }`: the act booked in the index (below)                                                                                                                                                                                                                                                                                                             | the HUD's device page (K3), the CLI (K4)     |
+| `GET /v1/people/index`        | `?from={position}`                                       | `{ farm, order, position, entries: [{ id, entry }] }`: the entries after `from`, in order                                                                                                                                                                                                                                                                                             | the CLI's new-device notices (K4), verifiers |
+| `GET /v1/people/records/{id}` |                                                          | a record or entry by C4 ID, as stored: a device record, an act, a provider key or an entry                                                                                                                                                                                                                                                                                            | verifiers                                    |
+| `GET /v1/people/devices`      | `?person={name}`                                         | `{ farm, position, devices: [{ device, record, person, kind, label?, protection, evidence, touchFor?, enrolled, renewed, renewedAt, countersigned?, flags? }] }`: the devices in force now                                                                                                                                                                                              | each person's device page (K3)               |
+
+**Acts it books** (`POST /v1/people/acts`). Each is signed by a person's
+device in force at the index's position, within five minutes of the
+issuer's clock, and taken once by its payload hash:
+
+| act                    | subject                                        | params                 | who                                                                 |
+| ---------------------- | ---------------------------------------------- | ---------------------- | ------------------------------------------------------------------- |
+| `remove-device`        | `device:<ID>`, or `farm:<farm ID>`             | `from?`, or `person`   | the person, or an admin; `from` before the act needs a touch        |
+| `set-sign-in-provider` | `farm:<farm ID>`                               | `issuer`, `clientID`   | an admin; booked `signed` until the touch is built (K9)             |
+| `approve-machine`      | `device:<ID>` of the key to enrol              | `{}`                   | the person, confirmed with a touch key; works for 10 minutes        |
+| `browser-code`         | `farm:<farm ID>`                               | `code`: its SHA-256    | a one-person farm's owner, with the key `up` enrolled, over loopback |
+| `countersign-device`   | `device:<ID>`                                  | `record`               | the same                                                            |
+
+- **A removal on `farm:<farm ID>`** removes all of that person's devices
+  enrolled before it.
+- **From a removal's position on,** the device's certificates are no longer
+  in force. A removed key never comes back.
+- **Before ORGANIZATION's Parties,** an admin is the farm binding's owner.
+
+**Step-up**, for a touch key:
+- `auth_time` within five minutes;
+- multi-factor in `acr`: OpenID PAPE's `…/multi-factor` or
+  `…/multi-factor-physical`, or a value in `--sign-in-step-up-acr`;
+- or in `amr`: `mfa`, or factors of two kinds (RFC 8176). The kinds are
+  known (`pwd`, `pin`, `kba`), held (`otp`, `sms`, `tel`, `hwk`, `swk`,
+  `sc`, `pop`) and being (`fpt`, `face`, `iris`, `retina`, `vbm`).
+
+**The index.** Each entry is canonical JSON, kept in the people's store by
+its C4 ID:
+
+```
+{ farm, position, prev?, order: "issuer", at, kind, record?, device?, person?, by?,
+  addr?, issuer?, kid?, clientID?, grade?, from?, code?, of?, expires?, flag?, seen? }
+```
+
+- **`prev`** is the C4 ID of the entry before, so the entries form a hash
+  chain. The head (the last entry's ID and position) is the Secret
+  `c4-people-index` in the signing namespace, moved by resourceVersion.
+- **`kind`** is one of:
+  - `device`, a device record, an enrolment or a renewal;
+  - `provider-key`, a provider's JWK, canonical, the first time a device
+    record names its C4 ID (`providerKey`);
+  - `setting`, `removal`, `code`, `countersign`, `approval`;
+  - `flag`, a device renewing from two addresses within an hour.
+- **`order: issuer`** says the order is the issuer's own. Slice 2's farm
+  book takes the index unchanged; until then a device is in force by the
+  index's order:
+  - enrolled;
+  - not removed at or before the position;
+  - renewed within 90 days;
+  - for a touch key, its device in force too.
+- **Who reads it.** `people.Index.DevicesAt` and `CheckAct` are what a
+  verifier and `CheckTouchKey` read. `VerifyBookedToken` checks a record's
+  ID token against the booked provider key, after the provider has
+  rotated it away.
+
+**Sign-ins** are matched by subject, never by email. Until ORGANIZATION's
+Parties carry `signIns`, they are the Secret `c4-sign-ins` in the signing
+namespace: one key per person, each line `<issuer URL> <subject ID>`.
+
+**The sign-in provider** is the install's preset until an admin's act
+sets it. The preset is `--sign-in-provider` and `--sign-in-client-id`,
+booked with grade `install`.
+
 ## Changes from the first draft of the contract
 
 | change                                    | why                                                                                                                                               |

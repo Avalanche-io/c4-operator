@@ -1171,6 +1171,63 @@ the HUD serves as each job's `specDigest`), with the act's params;
 K8, a request without an act is still taken and graded as before. A device
 record (`device/v1`) is the people's issuer's (`component/issuer`).
 
+**The people's issuer** (PEOPLE-KEYS-2 3, slice K2;
+`internal/provenance/people`). It sits beside the workload issuer, at
+`/v1/people/` on the same listener, and the HUD serves it at its own origin
+(`/issuer/v1/people/`, internal/hud/API.md). It runs where the install
+names its store (`--people-store`).
+
+It certifies a person's device key as `user/<name>` naming the device, for
+at most 12 hours. It never takes the HUD's word, so whoever controls the
+HUD still can't have a key certified as someone. It certifies on one of:
+- **an ID token from the farm's one sign-in provider,** pinned four ways:
+  - the issuer;
+  - the audience, the farm's own client ID (`azp` too when the token names
+    others);
+  - the nonce, which is the device ID, the C4 ID of the key's
+    SubjectPublicKeyInfo, so the provider's "this is dana" binds this key
+    and no other;
+  - the subject, matched against the person's sign-ins, never the email.
+
+  go-oidc checks the signature against the provider's keys, the issuer,
+  the audience and the expiry. The issuer also requires the token to have
+  been issued within the last ten minutes.
+- **on a one-person farm, the installer token,** over loopback, once, for
+  the owner's key and touch key (evidence `installer`). After that the
+  owner's key books a one-time code (`browser-code`). The browser presents
+  the code with its key within a minute over loopback (evidence `owner`),
+  and the CLI reads the key back and countersigns it.
+- **a touch key** on a step-up sign-in (a recent `auth_time`, multi-factor
+  in `acr` or `amr`), or on a confirmed `approve-machine` from another of
+  the person's devices (evidence `approval`).
+
+Every enrolment and renewal is a device record of its own. The issuer signs
+it, and it carries the device's own proof over its request, the raw ID
+token and the provider key's ID.
+
+**The people's index.** Each record goes to the people's store by C4 ID,
+and an append-only index books it. The index's entries are canonical JSON,
+each naming the one before by its C4 ID. Its head is a Secret in the
+signing namespace, moved by resourceVersion. It also books:
+- each provider key the first time a record names it, so a token can be
+  checked after the provider rotates its keys (the farm's word, until
+  external timestamping);
+- removals, which are signed acts by the person or an admin. From a
+  removal's position, the device's certificates are no longer in force;
+- the sign-in provider setting, an admin's signed act, `signed` until the
+  touch exists;
+- one-person codes and countersignatures, approvals, and a device seen
+  renewing from two addresses within an hour.
+
+A device is in force by the index's order: enrolled, not removed, and
+renewed within 90 days. Each entry says the order is the issuer's own
+(`order: issuer`), until slice 2's farm book adopts the index.
+
+A device enrolled on a sign-in renews only on a fresh token, so a leaver's
+last leaf ends within 12 hours. A leaf for `user/<name>` with no device
+record in force behind it is refused as a forgery (`Index.CheckAct`, which
+also feeds `CheckTouchKey`).
+
 **The farm binding.** `c4 farm up --owner` names a local farm's one
 person; the farm binding, a signed record, follows when the installer
 binds the farm (`POST /api/v1/farm/binding`; `up` does not send it yet).
@@ -1218,10 +1275,10 @@ source ingested with signing off) is reported as a gap, not a failure.
 
 **Designed, not built.** `signedAt` is the signer's own claim; an RFC 3161
 timestamp authority or a private Rekor makes it independent. Revocation is
-by short lifetimes, with no revocation list. People act through the HUD
-(the HUD signs that it authenticated and authorized them); certificates for
-people from the studio's OIDC provider, so an artist or agent signs a
-submission or approval with their own key, are designed. Node disable and
+by short lifetimes, with no revocation list. People still act through the
+HUD (the HUD signs that it authenticated and authorized them). The people's
+issuer certifies their keys on the studio's OIDC provider, but the web app
+and the CLI don't make or use those keys yet (slices K3 and K4). Node disable and
 enable are recorded as Events only, for want of a farm-level audit store.
 Records are not yet batched at chain checkpoints (section 2.5).
 
