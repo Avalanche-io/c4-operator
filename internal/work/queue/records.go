@@ -31,7 +31,11 @@ type decisionRecord struct {
 	Policy []c4v1.WorkPolicyUse
 }
 
-// SpecDigest names a job's spec as it is now: the SHA-256 of its JSON.
+// SpecDigest names a job's spec as it is now: the SHA-256 of its JSON. It
+// is the one digest of a job's spec: the HUD serves it beside each job
+// (api.Job.SpecDigest), an act on the job names it in its subject
+// (provenance.ActSubject), and the control record that carries the act
+// out is on the same subject.
 func SpecDigest(j *c4v1.WorkJob) string { return specDigest(j) }
 
 // specDigest names a job's spec: the SHA-256 of its JSON.

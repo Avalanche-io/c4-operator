@@ -15,6 +15,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/authoring"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
+	"github.com/Avalanche-io/c4-operator/internal/work/queue"
 )
 
 // snapshot is GET /snapshot for one viewer.
@@ -220,6 +221,7 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		Pools: j.Spec.Pools, DependsOn: []string{}, CreatedAt: j.CreationTimestamp.Time.UTC(),
 		Nudge:     api.Nudge{Hold: (j.Spec.Nudge.Hold || j.Spec.Nudge.HoldStop) && !pendingJob(j), Boost: num(j.Spec.Nudge.Boost)},
 		Blacklist: st.Blacklist, Inputs: []api.Input{}}
+	aj.UID, aj.SpecDigest = string(j.UID), queue.SpecDigest(j)
 	aj.Shot = j.Labels[LabelShot]
 	aj.ToolTest = j.Labels[LabelToolTest]
 	aj.TrackerRef = j.Annotations[c4v1.AnnotationTrackerRef]

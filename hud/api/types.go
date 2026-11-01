@@ -664,10 +664,17 @@ type Input struct {
 type Job struct {
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
-	Project   string `json:"project"`
-	Class     string `json:"class"`
-	Driver    string `json:"driver"`
-	Owner     string `json:"owner,omitempty"`
+	// UID and SpecDigest are what a signed act on the job names (act/v1):
+	// its subject is workjob:<namespace>/<name>@<uid>, with SpecDigest as
+	// its sha256, the SHA-256 of the job's spec as the farm serves it
+	// (queue.SpecDigest). An act on a spec that has changed since is
+	// refused, so a person signs only what they saw.
+	UID        string `json:"uid,omitempty"`
+	SpecDigest string `json:"specDigest,omitempty"`
+	Project    string `json:"project"`
+	Class      string `json:"class"`
+	Driver     string `json:"driver"`
+	Owner      string `json:"owner,omitempty"`
 	// ToolTest names the tool a job tests when publishing it: its outcome
 	// is the publisher's (the tool's versions), never a person's to-do,
 	// and it offers no requeue or accept.
