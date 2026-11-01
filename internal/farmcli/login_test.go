@@ -242,3 +242,41 @@ func TestKeysRenewBeforeTheyEnd(t *testing.T) {
 		t.Errorf("the owner's key on its own proof: %v %+v", err, again)
 	}
 }
+
+// Each run at a terminal keeps this machine's keys: a key near its end
+// renews (on a one-person farm, on its own proof, saying nothing), and a
+// device enrolled as the person since is told, once.
+func TestEachRunKeepsTheKeys(t *testing.T) {
+	ctx := context.Background()
+	o := newOwnerIssuer(t)
+	ost := keystore.Store{Dir: filepath.Join(t.TempDir(), "owner"), FileOnly: true}
+	first, err := EnrolOwner(ctx, o.client, ost, "noor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var said strings.Builder
+	say := func(f string, v ...any) { fmt.Fprintf(&said, f, v...) }
+	KeepKeys(ctx, o.client, KeepArgs{Store: ost, Say: say, Now: first.Owner.Expires.Add(-time.Hour)})
+	if kept, _ := LoadCert(ost, keystore.Device); kept.Record == first.Owner.Record || said.Len() != 0 {
+		t.Errorf("near its end: renewed %v, said %q", kept.Record != first.Owner.Record, said.String())
+	}
+
+	f := peopletest.Studio(t)
+	c, _, st := loginAs(t, f)
+	d := peopletest.NewDevice(t)
+	e := f.Enrolment(t, d, "dana", "", "browser")
+	e.IDToken = f.SSO.Token(time.Now(), peopletest.DanaSub, d.ID, nil)
+	if err := c.Issuer(ctx, http.MethodPost, "/v1/people/enroll", e, nil); err != nil {
+		t.Fatal(err)
+	}
+	said.Reset()
+	KeepKeys(ctx, c, KeepArgs{Store: st, Say: say})
+	if !strings.Contains(said.String(), "devices   a new device signed in as you") {
+		t.Errorf("said: %q", said.String())
+	}
+	said.Reset()
+	KeepKeys(ctx, c, KeepArgs{Store: st, Say: say})
+	if said.Len() != 0 {
+		t.Errorf("told twice: %q", said.String())
+	}
+}

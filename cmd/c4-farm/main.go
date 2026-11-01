@@ -179,14 +179,23 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		return err
 	}
 	// connect resolves the farm, its client, the project and the output.
+	kept := false
 	connect := func() (*farmcli.Client, farmcli.Farm, farmcli.Out, string, error) {
-		_, f, err := cfg.Resolve(cm.farm)
+		name, f, err := cfg.Resolve(cm.farm)
 		if err != nil {
 			return nil, f, farmcli.Out{}, "", err
 		}
 		c, err := farmcli.NewClient(f)
 		if err != nil {
 			return nil, f, farmcli.Out{}, "", err
+		}
+		// this machine's keys there, once a run, for a person at a
+		// terminal: renewed in time, and new devices of theirs told, on
+		// stderr so a command's output stays its own
+		if !kept && isTerminal(stdin) && !farmcli.InsideAgent() {
+			kept = true
+			farmcli.KeepKeys(ctx, c, farmcli.KeepArgs{Store: farmcli.KeysFor(name), Open: openURL,
+				Say: func(format string, a ...any) { fmt.Fprintf(os.Stderr, format, a...) }})
 		}
 		o := farmcli.Out{W: stdout, In: stdin, Clock: farmcli.Clock{UTC: cm.utc}}
 		return c, f, o, cm.project, nil
