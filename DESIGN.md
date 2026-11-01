@@ -1172,10 +1172,10 @@ K8, a request without an act is still taken and graded as before. A device
 record (`device/v1`) is the people's issuer's (`component/issuer`).
 
 **The people's issuer** (PEOPLE-KEYS-2 3, slice K2;
-`internal/provenance/people`). It sits beside the workload issuer, at
-`/v1/people/` on the same listener, and the HUD serves it at its own origin
-(`/issuer/v1/people/`, internal/hud/API.md). It runs where the install
-names its store (`--people-store`).
+`internal/provenance/people`). It runs in the manager beside the workload
+issuer, and is served only at the HUD's own origin (`/issuer/v1/people/`,
+internal/hud/API.md). The workload issuer's listener stays the workloads'.
+It runs where the install names its store (`--people-store`).
 
 It certifies a person's device key as `user/<name>` naming the device, for
 at most 12 hours. It never takes the HUD's word, so whoever controls the
@@ -1192,18 +1192,39 @@ HUD still can't have a key certified as someone. It certifies on one of:
   go-oidc checks the signature against the provider's keys, the issuer,
   the audience and the expiry. The issuer also requires the token to have
   been issued within the last ten minutes.
-- **on a one-person farm, the installer token,** over loopback, once, for
-  the owner's key and touch key (evidence `installer`). After that the
-  owner's key books a one-time code (`browser-code`). The browser presents
-  the code with its key within a minute over loopback (evidence `owner`),
-  and the CLI reads the key back and countersigns it.
+- **on a one-person farm, the installer token,** once, for the owner's key
+  and touch key (evidence `installer`). After that the owner's key books a
+  one-time code (`browser-code`). The browser presents the code with its
+  key within a minute, once (evidence `owner`), and the CLI reads the key
+  back and countersigns it. A code enrols a device key, never a touch key.
 - **a touch key** on a step-up sign-in (a recent `auth_time`, multi-factor
   in `acr` or `amr`), or on a confirmed `approve-machine` from another of
   the person's devices (evidence `approval`).
+  - Its `touchFor` is a plain device key of the same person, in force.
+  - On a farm with a sign-in provider, an approval enrols only a touch key,
+    since a new device there enrols by signing in.
 
-Every enrolment and renewal is a device record of its own. The issuer signs
-it, and it carries the device's own proof over its request, the raw ID
-token and the provider key's ID.
+**What protects the owner's routes** is the installer token and the
+one-minute, single-use, countersigned code, never a Host or Origin the
+client sets. Where the HUD listens only on a loopback address, the
+request's remote address must also be the machine's own.
+
+**Renewal goes back to the provider.** On a farm with a sign-in provider,
+every device renews on a fresh ID token for its person, whatever it was
+enrolled on, so a leaver's last leaf ends within 12 hours. Only a farm
+with no provider renews on the device's own proof.
+
+**The sign-in provider is the install's** (`--sign-in-provider`,
+`--sign-in-client-id`). Until a touch can confirm it (K9), an admin's
+`set-sign-in-provider` act is refused, and changing the provider means
+redeploying, a cluster administrator's act.
+
+**The record.** Every enrolment and renewal is a device record of its own.
+The issuer signs it, and it carries the device's own proof over its
+request, the raw ID token and the provider key's ID. A record's ID token
+and the addresses the issuer saw go only to that person and the farm's
+admins. Reads need the person signed in at the HUD, and anyone else reads
+the record redacted.
 
 **The people's index.** Each record goes to the people's store by C4 ID,
 and an append-only index books it. The index's entries are canonical JSON,
@@ -1212,12 +1233,18 @@ signing namespace, moved by resourceVersion. It also books:
 - each provider key the first time a record names it, so a token can be
   checked after the provider rotates its keys (the farm's word, until
   external timestamping);
+- the people's sign-ins whenever they changed since last booked. A later
+  check of a record's token reads the setting and the sign-ins in force at
+  its position (`Index.VerifyBookedToken`);
 - removals, which are signed acts by the person or an admin. From a
   removal's position, the device's certificates are no longer in force;
-- the sign-in provider setting, an admin's signed act, `signed` until the
-  touch exists;
 - one-person codes and countersignatures, approvals, and a device seen
   renewing from two addresses within an hour.
+
+**Acts are checked when they are booked.** Each act is checked against
+the index inside the append that books it, so a removal booked a moment
+before refuses the removed device's act. It is booked once: an act whose
+payload hash the index already books is refused at any replica.
 
 **What holds the index together.**
 - **Each entry is checked against what it books** whenever the index is
@@ -1236,12 +1263,9 @@ signing namespace, moved by resourceVersion. It also books:
 
 A device is in force by the index's order: enrolled, not removed, and
 renewed within 90 days. Each entry says the order is the issuer's own
-(`order: issuer`), until slice 2's farm book adopts the index.
-
-A device enrolled on a sign-in renews only on a fresh token, so a leaver's
-last leaf ends within 12 hours. A leaf for `user/<name>` with no device
-record in force behind it is refused as a forgery (`Index.CheckAct`, which
-also feeds `CheckTouchKey`).
+(`order: issuer`), until slice 2's farm book adopts the index. A leaf for
+`user/<name>` with no device record in force behind it is refused as a
+forgery (`Index.CheckAct`, which also feeds `CheckTouchKey`).
 
 **The farm binding.** `c4 farm up --owner` names a local farm's one
 person; the farm binding, a signed record, follows when the installer
