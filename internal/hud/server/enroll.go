@@ -132,6 +132,8 @@ func (s *Server) handleEnrollOffer(w http.ResponseWriter, r *http.Request) {
 	}
 	s.offers[node] = enrollOffer{code: code, holder: body.Holder, expires: expires, record: rec}
 	s.offerMu.Unlock()
+	// The offer is the node's own act, and nothing more is written for it.
+	s.bookFarm(ctx, rec)
 	writeJSON(w, http.StatusOK, map[string]any{"node": node, "code": code, "expires": expires.UTC(), "record": rec,
 		"message": fmt.Sprintf("to enroll %s as yours, sign in to the farm and give this code within %s: %s", node, EnrollOfferFor, code)})
 }
@@ -245,7 +247,7 @@ func (s *Server) handleNodeEnroll(w http.ResponseWriter, r *http.Request) {
 		msg = fmt.Sprintf("%s enrolled for %s by its holder %s: %s's jobs spend %s's sign-in", node, who, v.User, who, v.User)
 	}
 	out := map[string]any{"node": node, "owners": owners, "record": rec, "message": msg}
-	s.record(ctx, &n, "Node", v.User, "Enrolled", msg, bookNote{actor: actorOf(r, v), kind: "enroll"})
+	s.record(ctx, &n, "Node", v.User, "Enrolled", msg, bookNote{actor: actorOf(r, v), kind: "enroll", record: rec})
 	writeJSON(w, http.StatusOK, out)
 }
 

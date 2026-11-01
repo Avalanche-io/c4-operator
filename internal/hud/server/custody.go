@@ -191,6 +191,7 @@ func (s *Server) signControl(ctx context.Context, projects []string, subject pro
 	if err != nil {
 		return "", err
 	}
+	s.keepFarmRecord(ctx, pred.Action, rec)
 	id := c4.Identify(bytes.NewReader(rec))
 	for _, p := range projects {
 		st, err := s.Stores(ctx, p)

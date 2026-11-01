@@ -36,6 +36,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/imageref"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/telemetry/ring"
@@ -171,6 +172,11 @@ type Server struct {
 	// force at its current position, a confirmed one's touch key that
 	// device's (PEOPLE-KEYS-2 10.4 item 21).
 	PeopleIndex ActIndex
+	// FarmBook writes the farm book's entries for the farm-level acts the
+	// HUD signs, and FarmBookReader reads it for GET /book/farm
+	// (farmbook.go); nil where the install names no system store.
+	FarmBook       *farmbook.Writer
+	FarmBookReader *farmbook.Reader
 
 	mu      sync.RWMutex
 	m       *model
@@ -266,6 +272,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/tools/{project}", s.handleTools)
 	mux.HandleFunc("GET /api/v1/tools/{project}/{tool}", s.handleTool)
 	mux.HandleFunc("GET /api/v1/schema/{format}", s.handleSchema)
+	mux.HandleFunc("GET /api/v1/book/farm", s.handleFarmBook)
 	mux.HandleFunc("POST /api/v1/objects/{project}/missing", s.handleMissing)
 	mux.HandleFunc("PUT /api/v1/objects/{project}/{id}", s.handlePutObject)
 	mux.HandleFunc("POST /api/v1/views/{project}", s.handlePostView)

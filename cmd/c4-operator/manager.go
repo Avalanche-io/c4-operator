@@ -287,7 +287,7 @@ func runManager(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := addHUD(mgr, kube, q, stores, sig, *hudAddr, *hudDev, proxy, *hudSites, *hudRoles, *farmTZ, *namespace, *tierToken, *standIn, *singlePerson, *hudSandbox, hudImages{registry: *hudImageRegistry, tag: *hudImageTag, plain: splitList(*hudPlainRegistries)}, devGuard{token: installer, open: *hudDevOpen}); err != nil {
+		if err := addHUD(mgr, kube, q, stores, sig, *hudAddr, *hudDev, proxy, *hudSites, *hudRoles, *farmTZ, *namespace, *tierToken, *standIn, *singlePerson, *hudSandbox, hudImages{registry: *hudImageRegistry, tag: *hudImageTag, plain: splitList(*hudPlainRegistries)}, devGuard{token: installer, open: *hudDevOpen}, book); err != nil {
 			return err
 		}
 	}
@@ -421,7 +421,7 @@ func installerToken(dev, file string, open bool) ([]byte, error) {
 	return b, nil
 }
 
-func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores queue.StoreFunc, sig *signing, addr, dev string, proxy []byte, sites, roles, tz, namespace, tierToken, standIn, singlePerson, sandbox string, images hudImages, guard devGuard) error {
+func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores queue.StoreFunc, sig *signing, addr, dev string, proxy []byte, sites, roles, tz, namespace, tierToken, standIn, singlePerson, sandbox string, images hudImages, guard devGuard, book *farmBook) error {
 	if standIn != "allow" && standIn != "deny" {
 		return fmt.Errorf("--decide-stand-in: allow or deny, not %q", standIn)
 	}
@@ -485,6 +485,13 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 	// The browser and the CLI reach the people's issuer at the HUD's own
 	// origin, where the web app's key lives.
 	srv.People = sig.people
+	if book != nil {
+		// The HUD writes the farm-level acts it signs to the farm book, and
+		// serves the book through a reader of its own, which keeps the last
+		// head it saw.
+		srv.FarmBook = book.writer()
+		srv.FarmBookReader = &farmbook.Reader{Farm: book.reader.Farm, Roots: book.reader.Roots, Store: book.store, Pointer: book.ptr}
+	}
 	if iss, ok := sig.people.(*people.Issuer); ok {
 		// Where the HUD listens only on a loopback address, a request's
 		// remote address is the machine's own, and the owner's routes need

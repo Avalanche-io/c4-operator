@@ -22,6 +22,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
@@ -146,6 +147,11 @@ func (s *Server) liveJob(ctx context.Context, ns, name string) (*c4v1.WorkJob, e
 // record writes the Event of a control, naming the user. Its annotations
 // carry the actor, the book kind and the control record for GET /book.
 func (s *Server) record(ctx context.Context, obj client.Object, kind, user, reason, msg string, note bookNote) {
+	// A farm-level act's write took effect: its control record goes into
+	// the farm book.
+	if note.record != "" && farmbook.IsControlAct(note.kind) {
+		s.bookFarm(ctx, note.record)
+	}
 	if s.Kube == nil {
 		return
 	}
@@ -675,6 +681,21 @@ func (s *Server) handleDisable(w http.ResponseWriter, r *http.Request) {
 	}
 	patch := client.MergeFrom(n.DeepCopy())
 	n.Spec.Unschedulable = body.Disabled
+	action := map[bool]string{true: "disable", false: "enable"}[body.Disabled]
+	// The act is signed, as every farm-level act, and booked once the
+	// node is patched. A HUD without a signer, or a record it couldn't
+	// sign, still disables: nothing that worked before is refused.
+	record := ""
+	if s.Signer != nil {
+		pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r),
+			Authorization: s.authorization(v, "patch", "nodes", "", name), Action: action, Target: "node:" + name,
+			Change: map[string]any{"unschedulable": body.Disabled}}
+		id, _, err := s.signRecord(ctx, provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": sha256JSON(pred.Change)}}, pred)
+		if err != nil {
+			s.Log.Error(err, "sign a node's disable or enable", "node", name)
+		}
+		record = id
+	}
 	if err := s.Client.Patch(ctx, &n, patch); err != nil {
 		fail(w, http.StatusConflict, "%v", err)
 		return
@@ -683,7 +704,7 @@ func (s *Server) handleDisable(w http.ResponseWriter, r *http.Request) {
 	if !body.Disabled {
 		msg = name + ": enabled"
 	}
-	s.record(ctx, &n, "Node", v.User, "Disabled", msg, bookNote{actor: actorOf(r, v), kind: map[bool]string{true: "disable", false: "enable"}[body.Disabled]})
+	s.record(ctx, &n, "Node", v.User, "Disabled", msg, bookNote{actor: actorOf(r, v), kind: action, record: record})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": msg, "node": map[string]any{"name": name, "disabled": body.Disabled}})
 }
 

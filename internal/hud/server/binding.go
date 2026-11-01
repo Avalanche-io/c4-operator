@@ -283,6 +283,7 @@ func (s *Server) signRecord(ctx context.Context, subject provenance.Subject, pre
 	if err != nil {
 		return "", nil, err
 	}
+	s.keepFarmRecord(ctx, pred.Action, rec)
 	id := c4.Identify(bytes.NewReader(rec))
 	if m := s.current(); m != nil && s.Stores != nil {
 		for _, p := range m.projects {

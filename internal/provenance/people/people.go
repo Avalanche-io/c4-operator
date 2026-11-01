@@ -368,6 +368,40 @@ func (i *Issuer) sees(ctx context.Context, caller, person string) bool {
 	return caller == person || i.admin(ctx, caller)
 }
 
+// Sees reports whether caller may read person's ID tokens and addresses:
+// the person themselves, or an admin. The farm book's reads at the HUD
+// keep the same rule (RedactEntry).
+func (i *Issuer) Sees(ctx context.Context, caller, person string) bool {
+	return caller != "" && i.sees(ctx, caller, person)
+}
+
+// RedactEntry is a booked entry, as stored, as a caller reads it: whole
+// when it carries no addresses or sees says the caller may read its
+// person's; otherwise without addr and seen, which Redacted names. Every
+// other field is as stored.
+func RedactEntry(raw []byte, sees func(person string) bool) (json.RawMessage, Redacted, error) {
+	var e Entry
+	if err := json.Unmarshal(raw, &e); err != nil {
+		return nil, nil, err
+	}
+	if (e.Addr == "" && len(e.Seen) == 0) || sees(e.Person) {
+		return raw, nil, nil
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, nil, err
+	}
+	var out Redacted
+	for _, f := range []string{"addr", "seen"} {
+		if _, ok := m[f]; ok {
+			delete(m, f)
+			out = append(out, f)
+		}
+	}
+	b, err := json.Marshal(m)
+	return b, out, err
+}
+
 // Redacted is what a read leaves out, by field name.
 type Redacted []string
 
