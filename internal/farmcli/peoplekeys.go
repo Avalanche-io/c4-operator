@@ -162,7 +162,10 @@ func enrolOwner(ctx context.Context, c *Client, st keystore.Store, owner string,
 	if cfg.OwnerEnrolled {
 		dev, err := LoadCert(st, keystore.Device)
 		if err != nil || dev == nil {
-			return nil, fmt.Errorf("the farm's owner key is enrolled, and this machine has no certificate for it: %v", err)
+			if err == nil {
+				err = errors.New("none is kept in " + st.Dir)
+			}
+			return nil, fmt.Errorf("the farm's owner key is enrolled, and this machine has no certificate for it (%v): a farm takes its owner key once, so c4 farm down, then up, makes the farm again with a new one", err)
 		}
 		touch, _ := LoadCert(st, keystore.Touch)
 		return &people.OwnerCertified{Owner: dev, Touch: touch}, nil
