@@ -26,3 +26,5 @@ hack/demo/out/
 
 # written by the release build (make tool-locks)
 /tools/*/tool.lock
+# the Secure Enclave's static library, built by make keystore-se
+internal/keystore/c4se/libc4se.a

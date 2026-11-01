@@ -86,6 +86,29 @@ build:
 	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/c4-agent ./cmd/c4-agent
 	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/c4-sync ./cmd/c4-sync
 
+# c4-farm on a Mac keeps a person's keys in the Secure Enclave
+# (internal/keystore, PEOPLE-KEYS-2 10.4 item 15): CryptoKit through a Swift
+# static library, linked by cgo with -tags c4se, so c4-farm stays one binary
+# linking only the Swift runtime macOS ships. Built for GOARCH (arm64 or
+# amd64), for macOS $(MACOS_MIN) and later. A build without the tag keeps
+# key files, and every other platform's build is unchanged.
+MACOS_MIN ?= 13.0
+GOARCH ?= $(shell go env GOARCH)
+SE_ARCH = $(if $(filter amd64,$(GOARCH)),x86_64,arm64)
+SE_ENV = CGO_ENABLED=1 GOOS=darwin GOARCH=$(GOARCH) CC="clang -arch $(SE_ARCH)" \
+	CGO_CFLAGS=-mmacosx-version-min=$(MACOS_MIN) CGO_LDFLAGS=-mmacosx-version-min=$(MACOS_MIN)
+keystore-se:
+	swiftc -parse-as-library -emit-library -static -O -module-name c4se \
+		-target $(SE_ARCH)-apple-macosx$(MACOS_MIN) internal/keystore/c4se/c4se.swift -o internal/keystore/c4se/libc4se.a
+
+c4-farm-mac: keystore-se
+	$(SE_ENV) go build -tags c4se -trimpath -ldflags="$(LDFLAGS)" -o bin/c4-farm ./cmd/c4-farm
+
+# The keystore's Secure Enclave tests: keys made and deleted, silently;
+# the touch key is made, never signed with, since that would ask for Touch ID.
+test-keystore-se: keystore-se
+	$(SE_ENV) go test -tags c4se ./internal/keystore/
+
 # The image is assembled from a binary cross-compiled on the host: Go builds
 # for any architecture without emulation, and the image needs no toolchain.
 # The image is built from a context holding only what its Dockerfile
