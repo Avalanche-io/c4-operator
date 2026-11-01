@@ -46,8 +46,17 @@ type APIError struct {
 
 func (e *APIError) Error() string { return e.Msg }
 
-func (c *Client) url(path string) string {
-	u := c.Base + "/api/v1" + path
+func (c *Client) url(path string) string { return c.urlAt(apiPrefix, path) }
+
+// The HUD's two roots: its API, and the people's issuer, served at the
+// HUD's own origin (internal/hud/API.md, The people's issuer).
+const (
+	apiPrefix    = "/api/v1"
+	issuerPrefix = "/issuer"
+)
+
+func (c *Client) urlAt(prefix, path string) string {
+	u := c.Base + prefix + path
 	if c.As != "" {
 		sep := "?"
 		if strings.Contains(u, "?") {
@@ -59,7 +68,11 @@ func (c *Client) url(path string) string {
 }
 
 func (c *Client) request(ctx context.Context, method, path string, body io.Reader, size int64, ctype string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, method, c.url(path), body)
+	return c.requestAt(ctx, apiPrefix, method, path, body, size, ctype)
+}
+
+func (c *Client) requestAt(ctx context.Context, prefix, method, path string, body io.Reader, size int64, ctype string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, c.urlAt(prefix, path), body)
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +118,15 @@ func apiError(resp *http.Response) error {
 // Do sends a JSON request and decodes a JSON answer into out. Answers
 // whose status is in also are decoded too, and returned with an APIError.
 func (c *Client) Do(ctx context.Context, method, path string, in, out any, also ...int) error {
+	return c.doAt(ctx, apiPrefix, method, path, in, out, also...)
+}
+
+// Issuer is Do at the people's issuer (/issuer/v1/people/...).
+func (c *Client) Issuer(ctx context.Context, method, path string, in, out any, also ...int) error {
+	return c.doAt(ctx, issuerPrefix, method, path, in, out, also...)
+}
+
+func (c *Client) doAt(ctx context.Context, prefix, method, path string, in, out any, also ...int) error {
 	var body io.Reader
 	size := int64(-1)
 	if in != nil {
@@ -120,7 +142,7 @@ func (c *Client) Do(ctx context.Context, method, path string, in, out any, also 
 	}
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	resp, err := c.request(cctx, method, path, body, size, ctype)
+	resp, err := c.requestAt(cctx, prefix, method, path, body, size, ctype)
 	if err != nil {
 		return err
 	}
