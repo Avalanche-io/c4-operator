@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
 )
@@ -103,5 +104,22 @@ func TestOpenDevViewerIsNoCaller(t *testing.T) {
 	icall(s, "GET", "/issuer/v1/people/index?as=wrangler", nil)
 	if got != "" {
 		t.Errorf("an open development viewer is the issuer's caller %q", got)
+	}
+}
+
+// Every HUD response, the web app's pages above all, tells the browser to
+// send no Referer: a page's address can carry the one-time browser code
+// or the provider's sign-in answer for a moment, and neither may leave
+// with a link or a fetch to another site.
+func TestHUDSendsNoReferrer(t *testing.T) {
+	s := farm(t)
+	s.Web = fstest.MapFS{"index.html": {Data: []byte("hud")}}
+	h := s.Handler()
+	for _, path := range []string{"/", "/api/v1/snapshot", "/issuer/v1/people/config"} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		if got := w.Header().Get("Referrer-Policy"); got != "no-referrer" {
+			t.Errorf("GET %s: Referrer-Policy %q, want no-referrer", path, got)
+		}
 	}
 }

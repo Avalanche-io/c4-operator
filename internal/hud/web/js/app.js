@@ -30,7 +30,11 @@ import yourPage from './views/me.js';
 import needsYou from './views/needs.js';
 import sessions from './views/sessions.js';
 import { learnJobs } from './act.js';
-import { start as startSigning, status as signing } from './enrol.js';
+import { start as startSigning, status as signing, capture as captureSecrets } from './enrol.js';
+
+// the secrets an address can carry (a one-time code, a sign-in answer) out
+// of the address bar before anything reads it, the router included
+captureSecrets();
 
 const VIEWS = { queue, job, pools, workers: pools, map, tiers, graph, cost, wall, widget, mine, catalog, me: yourPage, needs: needsYou, sessions };
 // each view and the mode it arrives at (docs/intro/ladder.md)

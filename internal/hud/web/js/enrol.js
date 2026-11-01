@@ -14,17 +14,19 @@
 //         of the address bar at once; it works for a minute, on loopback
 //       a studio farm: an ID token from the farm's sign-in provider, whose
 //         nonce is the device ID, fetched on a silent round trip
-//         (prompt=none, an authorization code with PKCE); a provider that
-//         wants the person to sign in first leaves a Sign in button on
-//         their page, never a loop of redirects
+//         (prompt=none, an authorization code with PKCE, answered in the
+//         fragment so the code never reaches a server or a log); a
+//         provider that wants the person to sign in first leaves a Sign in
+//         button on their page, never a loop of redirects
 //   - signs every act with it (act.js useSigner), as the person: on a
 //     one-person farm the farm's owner, with the role they view in (a
 //     role's sign-in, artist or wrangler) as the act's `as`
 //   - tells the person when a device they haven't seen signs in as them,
 //     or one of theirs is seen from two places at once (notices)
 //   - renews it before its leaf ends: on its own proof on a one-person
-//     farm; on a studio farm by the same round trip, taken when the page
-//     is out of sight so nothing the person is typing is lost
+//     farm; on a studio farm by the same round trip, which leaves the
+//     page, so only while the page is out of sight and no form on it holds
+//     input the person hasn't sent
 //   - forgets a key the issuer says was removed or has lapsed, and makes a
 //     new one: a removed key never comes back
 
@@ -64,6 +66,12 @@ const real = {
   session: () => globalThis.sessionStorage,
   now: () => Date.now(),
   hidden: () => document.hidden,
+  // a field whose value isn't what the page drew: input not sent yet
+  dirty: () => [...document.querySelectorAll('input, textarea, select')].some((el) => (el.tagName === 'SELECT'
+    ? [...el.options].some((o) => o.selected !== o.defaultSelected)
+    : el.type === 'checkbox' || el.type === 'radio' ? el.checked !== el.defaultChecked : el.value !== el.defaultValue)),
+  onVisibility: (fn) => document.addEventListener('visibilitychange', fn),
+  offVisibility: (fn) => document.removeEventListener('visibilitychange', fn),
   local: () => globalThis.localStorage,
   changed: () => document.dispatchEvent(new CustomEvent('hud:refresh')),
 };
@@ -108,6 +116,41 @@ async function call(path, body) {
   return out;
 }
 
+// ------------------------------------------------------------ secrets in the address
+
+// The secrets an address can carry, taken out of the address bar before
+// anything else reads it (app.js calls capture first, before its router):
+//   - the one-time browser code (#/<route>?browser=<code>)
+//   - the sign-in provider's answer (#code=…&state=…, response_mode
+//     fragment; in the query too, should a provider answer there)
+// The provider's answer is taken out whether or not this page asked for
+// it: a code from a sign-in someone else started never stays in the
+// address bar or its history, and the HUD sends no Referer
+// (Referrer-Policy), so it leaves with no link either.
+const ANSWER = ['code', 'state', 'iss', 'error', 'error_description', 'session_state'];
+const answerIn = (p) => (ANSWER.some((k) => p.has(k)) ? Object.fromEntries(ANSWER.filter((k) => p.has(k)).map((k) => [k, p.get(k)])) : null);
+let caught = null;
+export function capture() {
+  if (caught) return caught;
+  const loc = deps.location();
+  let hash = loc.hash;
+  let answer = null;
+  if (!hash.startsWith('#/')) {
+    answer = answerIn(new URLSearchParams(hash.replace(/^#/, '')));
+    if (answer) hash = '';
+  }
+  const q = new URLSearchParams(loc.search);
+  const inQuery = answerIn(q);
+  if (inQuery) for (const k of ANSWER) q.delete(k);
+  const b = codeIn(hash);
+  // the address is rewritten only when a secret came out of it (the query
+  // as it was otherwise: URLSearchParams would re-encode it)
+  const search = inQuery ? (q.toString() ? '?' + q : '') : loc.search;
+  if (answer || inQuery || b.code) deps.replaceURL(loc.pathname + search + b.hash);
+  caught = { browser: b.code, answer: answer || inQuery };
+  return caught;
+}
+
 // ------------------------------------------------------------ the round trip
 
 // codeIn: the one-time code a link carries in its route's query
@@ -123,10 +166,10 @@ export function codeIn(hash) {
 }
 
 // authorizeURL: the provider's authorization request for a device: its
-// nonce the device ID, an authorization code with PKCE, silent unless the
-// person asked to sign in
+// nonce the device ID, an authorization code with PKCE answered in the
+// fragment, silent unless the person asked to sign in
 export function authorizeURL(endpoint, { clientID, redirect, device, state, challenge, silent }) {
-  const q = new URLSearchParams({ response_type: 'code', client_id: clientID, redirect_uri: redirect, scope: 'openid', nonce: device, state, code_challenge: challenge, code_challenge_method: 'S256' });
+  const q = new URLSearchParams({ response_type: 'code', response_mode: 'fragment', client_id: clientID, redirect_uri: redirect, scope: 'openid', nonce: device, state, code_challenge: challenge, code_challenge_method: 'S256' });
   if (silent) q.set('prompt', 'none');
   return `${endpoint}${endpoint.includes('?') ? '&' : '?'}${q}`;
 }
@@ -151,21 +194,19 @@ export async function signIn(cfg, device, { silent = true, renew = false } = {})
   deps.go(authorizeURL(meta.authorization_endpoint, { clientID: cfg.provider.clientID, redirect: redirectOf(loc), device, state, challenge, silent }));
 }
 
-// returned: the provider's answer, when this load is the round trip's end:
-// { idToken } or { error }, or null; the address bar is put back as the
-// person left it either way
+// returned: the provider's answer, when this load is the round trip's end
+// and the round trip is this page's own (its state): { idToken } or
+// { error }, or null; capture() has already taken it out of the address,
+// and the route the person left from is put back
 async function returned(cfg) {
-  const loc = deps.location();
-  const q = new URLSearchParams(loc.search);
-  if (!q.has('state')) return null;
+  const a = capture().answer;
+  if (!a || !a.state) return null;
   const saved = JSON.parse(deps.session().getItem(RETURN) || 'null');
-  if (!saved || saved.state !== q.get('state') || saved.farm !== cfg.farm) return null;
+  if (!saved || saved.state !== a.state || saved.farm !== cfg.farm) return null;
   deps.session().removeItem(RETURN);
-  // read before the address bar is put back: it is the same location
-  const code = q.get('code'), err = q.get('error'), redirect = redirectOf(loc);
-  for (const k of ['code', 'state', 'error', 'error_description', 'session_state', 'iss']) q.delete(k);
-  const rest = q.toString();
-  deps.replaceURL(loc.pathname + (rest ? '?' + rest : '') + saved.back);
+  const loc = deps.location();
+  const code = a.code, err = a.error, redirect = redirectOf(loc);
+  deps.replaceURL(loc.pathname + loc.search + saved.back);
   if (err) return { error: err, silent: saved.silent, renew: saved.renew };
   const r = await deps.token(saved.token, new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirect, client_id: cfg.provider.clientID, code_verifier: saved.verifier }).toString());
   const t = await r.json().catch(() => ({}));
@@ -178,7 +219,7 @@ const ASK = new Set(['login_required', 'interaction_required', 'consent_required
 
 // ------------------------------------------------------------ the flow
 
-let cfg = null, rec = null, person = null, as = null, timer = null;
+let cfg = null, rec = null, person = null, as = null, timer = null, lapse = null;
 
 // use: sign with a certified key from now on, and renew it in time; a key
 // just certified waits a minute at least, so a browser clock hours off the
@@ -189,6 +230,7 @@ function use(r, fresh) {
   set({ state: 'signing', device: c.device, expires: c.expires, person: c.person, message: null });
   notices();
   clearTimeout(timer);
+  clearTimeout(lapse);
   const left = Date.parse(c.expires) - deps.now();
   timer = setTimeout(renewNow, Math.max(fresh ? 60 * 1000 : 0, left - RENEW_BEFORE));
 }
@@ -228,14 +270,18 @@ async function renewNow() {
     }
     return;
   }
-  if (deps.hidden()) return signIn(cfg, rec.device, { renew: true });
-  document.addEventListener('visibilitychange', function away() {
-    if (!deps.hidden()) return;
-    document.removeEventListener('visibilitychange', away);
+  // the round trip leaves the page: only while it is out of sight, and
+  // never while a form on it holds input the person hasn't sent
+  const may = () => deps.hidden() && !deps.dirty();
+  if (may()) return signIn(cfg, rec.device, { renew: true });
+  deps.onVisibility(function away() {
+    if (!may()) return;
+    deps.offVisibility(away);
     signIn(cfg, rec.device, { renew: true });
   });
   // past the leaf's end the page signs nothing until it renews
-  setTimeout(() => { useSigner(null); set({ state: 'enrolling', message: 'This browser’s key renews when you next leave or reload the page.' }); },
+  clearTimeout(lapse);
+  lapse = setTimeout(() => { useSigner(null); set({ state: 'enrolling', message: 'This browser’s key renews when you next leave or reload the page.' }); },
     Math.max(0, Date.parse(rec.certified.expires) - deps.now()));
 }
 
@@ -315,10 +361,7 @@ async function run(viewer) {
   }
   rec = await deps.deviceKey(cfg.farm);
   set({ device: rec.device });
-  const loc = deps.location();
-  const { code, hash } = codeIn(loc.hash);
-  // the code is a secret for a minute: out of the address bar at once
-  if (code) deps.replaceURL(loc.pathname + loc.search + hash);
+  const code = capture().browser;
 
   const back = cfg.provider ? await returned(cfg) : null;
   if (back && back.idToken) {
@@ -387,7 +430,8 @@ export async function remove({ device, all }) {
 // reset: forget this page's flow (tests)
 export function reset() {
   clearTimeout(timer);
-  started = cfg = rec = person = as = null;
+  clearTimeout(lapse);
+  started = cfg = rec = person = as = caught = null;
   Object.assign(status, { state: 'starting', device: null, expires: null, person: null, message: null, notices: null });
   useSigner(null);
 }

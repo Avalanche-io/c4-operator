@@ -321,7 +321,19 @@ func (s *Server) Handler() http.Handler {
 		w.Header().Set("Cache-Control", "no-cache")
 		files.ServeHTTP(w, r)
 	}))
-	return s.proxyGuard(mux)
+	return s.proxyGuard(noReferrer(mux))
+}
+
+// noReferrer keeps the HUD's addresses out of every Referer it would send:
+// a page can carry a secret in its address for a moment (the one-time
+// browser code, the provider's sign-in answer, /installer's code), and a
+// link or a fetch to another site must not take it along (PEOPLE-KEYS-2
+// K3).
+func noReferrer(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		h.ServeHTTP(w, r)
+	})
 }
 
 // proxyGuard lets X-Forwarded-User and X-Forwarded-Groups through only on

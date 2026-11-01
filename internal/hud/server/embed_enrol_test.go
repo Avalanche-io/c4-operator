@@ -189,6 +189,7 @@ enrol.stubs({
   session: () => ({ getItem: (k) => session.get(k) ?? null, setItem: (k, v) => session.set(k, v), removeItem: (k) => session.delete(k) }),
   now: () => Date.now(),
   hidden: () => true,
+  dirty: () => false,
   changed: () => {},
   local: () => ({ getItem: () => null, setItem: () => {} }),
 });
@@ -199,7 +200,8 @@ if (went) {
   const u = new URL(went);
   Object.assign(out, { nonce: u.searchParams.get('nonce'), prompt: u.searchParams.get('prompt'), clientID: u.searchParams.get('client_id') });
   enrol.reset();
-  loc.search = '?code=from-the-provider&state=' + u.searchParams.get('state');
+  if (u.searchParams.get('response_mode') !== 'fragment') throw new Error('the code must come back in the fragment');
+  loc.hash = '#code=from-the-provider&state=' + u.searchParams.get('state');
   await enrol.start({ user: i.person });
 }
 Object.assign(out, { enrolled: enrol.status.state, device: enrol.status.device, expires: enrol.status.expires, message: enrol.status.message });
