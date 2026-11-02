@@ -133,7 +133,8 @@ func TestIssuerBeforeParties(t *testing.T) {
 func TestIssuerUnrelatedPartyChangesNothing(t *testing.T) {
 	ctx := context.Background()
 	r := newIssuerFarm(t, "noor", organisation("saltmarsh"), person("dana", c4v1.PartySignIn{Issuer: sso, Subject: "00u-dana"}))
-	r.bookControl(t, "make-party", farmbook.PartyKey("saltmarsh"), map[string]any{"name": "saltmarsh", "member": "dana", "purposes": []string{"member", "admin"}})
+	r.bookControl(t, "make-party", farmbook.PartyKey("saltmarsh"), map[string]any{"name": "saltmarsh", "kind": "organisation", "firstAdmin": "dana"})
+	r.bookControl(t, "accept-admin", farmbook.MemberKey("saltmarsh", "dana"), map[string]any{"party": "saltmarsh", "member": "dana", "purposes": []string{"member", "admin"}})
 	ins := r.signIns(t)
 	if ins.Person(sso, "00u-noor") != "noor" || ins.Person(sso, "00u-lee") != "lee" || ins.Person(sso, "00u-dana") != "dana" {
 		t.Errorf("an unrelated Party changed the sign-ins: %v", ins)
@@ -173,10 +174,10 @@ func TestIssuerSignInsPerPerson(t *testing.T) {
 	}
 }
 
-// Admins come from the farm owner's Party once it exists and its
-// make-party is booked: before, the binding's owner, as before Parties;
-// after, those holding admin by name in it, never the binding's owner by
-// that alone.
+// Admins come from the farm owner's Party once it exists, its make-party
+// is booked and the first admin it names has accepted, as themselves:
+// before, the binding's owner, as before Parties; after, those holding
+// admin by name in it, never the binding's owner by that alone.
 func TestIssuerAdminsFromTheOwnersParty(t *testing.T) {
 	ctx := context.Background()
 	r := newIssuerFarm(t, "kestrel", organisation("kestrel"), person("dana"))
@@ -184,7 +185,11 @@ func TestIssuerAdminsFromTheOwnersParty(t *testing.T) {
 	if !admin(ctx, "kestrel") || admin(ctx, "dana") {
 		t.Fatal("before kestrel's make-party is booked, the binding's owner is not the one admin")
 	}
-	r.bookControl(t, "make-party", farmbook.PartyKey("kestrel"), map[string]any{"name": "kestrel", "member": "dana", "purposes": []string{"member", "admin"}})
+	r.bookControl(t, "make-party", farmbook.PartyKey("kestrel"), map[string]any{"name": "kestrel", "kind": "organisation", "firstAdmin": "dana"})
+	if !admin(ctx, "kestrel") || admin(ctx, "dana") {
+		t.Fatal("before dana accepts, the binding's owner is not the one admin")
+	}
+	r.bookControl(t, "accept-admin", farmbook.MemberKey("kestrel", "dana"), map[string]any{"party": "kestrel", "member": "dana", "purposes": []string{"member", "admin"}})
 	r.bookControl(t, "add-member", farmbook.MemberKey("kestrel", "lee"), map[string]any{"party": "kestrel", "member": "lee", "purposes": []string{"member", "view-spend"}})
 	if !admin(ctx, "dana") || admin(ctx, "lee") || admin(ctx, "kestrel") {
 		t.Errorf("kestrel's admins: dana %v (want true), lee %v, kestrel %v", admin(ctx, "dana"), admin(ctx, "lee"), admin(ctx, "kestrel"))
@@ -194,12 +199,13 @@ func TestIssuerAdminsFromTheOwnersParty(t *testing.T) {
 		t.Error("an admin after dana's membership ended")
 	}
 
-	// a membership signed at another farm, whose CA the roots trust too,
+	// an acceptance signed at another farm, whose CA the roots trust too,
 	// makes no one an admin here
 	r = newIssuerFarm(t, "kestrel", organisation("kestrel"))
 	other := provtest.NewFarm(t, time.Now())
 	r.f.Roots.AddCert(other.CA.Cert)
-	r.bookUnder(t, other.CA, "make-party", farmbook.PartyKey("kestrel"), map[string]any{"name": "kestrel", "member": "mallory", "purposes": []string{"member", "admin"}})
+	r.bookControl(t, "make-party", farmbook.PartyKey("kestrel"), map[string]any{"name": "kestrel", "kind": "organisation", "firstAdmin": "mallory"})
+	r.bookUnder(t, other.CA, "accept-admin", farmbook.MemberKey("kestrel", "mallory"), map[string]any{"party": "kestrel", "member": "mallory", "purposes": []string{"member", "admin"}})
 	if farmAdmins(r.reader, r.book)(ctx, "mallory") {
 		t.Error("another farm's record makes mallory an admin")
 	}
@@ -213,6 +219,31 @@ func TestIssuerAdminsFromTheOwnersParty(t *testing.T) {
 	r.bookControl(t, "make-party", farmbook.PartyKey("noor"), map[string]any{"name": "noor", "kind": "person"})
 	if !admin(ctx, "noor") || admin(ctx, "lee") {
 		t.Error("noor's Party: noor is not the one admin")
+	}
+}
+
+// P6 of the O1 review: a farm admin who makes the organisation named as
+// the binding's owner, naming herself or anyone its first admin, is not
+// thereby the farm owner's admin at the people's issuer; the binding's
+// owner stays it until the first admin accepts (R4).
+func TestIssuerMakingTheOwnersPartyMakesNoAdmin(t *testing.T) {
+	r := newIssuerFarm(t, "noor", organisation("noor"))
+	r.bookControl(t, "make-party", farmbook.PartyKey("noor"), map[string]any{"name": "noor", "kind": "organisation", "firstAdmin": "ines"})
+	admin := farmAdmins(r.reader, r.book)
+	ctx := context.Background()
+	if admin(ctx, "ines") || !admin(ctx, "noor") {
+		t.Errorf("the farm admin who made the owner's Party: admin(ines) %v, admin(noor) %v", admin(ctx, "ines"), admin(ctx, "noor"))
+	}
+}
+
+// P5 of the O1 review, the issuer's half: the owner's own Party, as the
+// HUD now lets her make it (her provider subject proved), keeps her
+// signed in at the people's issuer (R6); the HUD refuses one without it
+// (TestPartyLeavingTheSecretKeepsTheSubject).
+func TestIssuerOwnersOwnPartyKeepsHerSignedIn(t *testing.T) {
+	r := newIssuerFarm(t, "noor", person("noor", c4v1.PartySignIn{Subject: "noor"}, c4v1.PartySignIn{Issuer: sso, Subject: "00u-noor"}))
+	if got := r.signIns(t).Person(sso, "00u-noor"); got != "noor" {
+		t.Errorf("the owner's own Party leaves her signed in as %q", got)
 	}
 }
 

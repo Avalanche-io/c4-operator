@@ -546,6 +546,9 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		if ps, ok := iss.SignIns.(*partySignIns); ok {
 			srv.StandInSignIns = ps.secret
 		}
+		// a provider subject goes on a person's Party only on a token the
+		// issuer checks
+		srv.ProveSignIn = iss.ProveSignIn
 	}
 	if sandbox != "" {
 		if srv.DevViewers == nil {

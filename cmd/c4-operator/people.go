@@ -303,11 +303,13 @@ func (s *partySignIns) Load(ctx context.Context) (people.StaticSignIns, error) {
 // farmAdmins decides who the farm owner's admins are, who may remove
 // anyone's devices and read others' ID tokens and addresses (Issuer.Sees,
 // the farm book's private parts):
-//   - once the farm owner's Party (the binding owner's name) exists and its
-//     make-party is in the farm book, a person holding admin by name in it,
-//     in force in the book now; for a person's Party, that person;
+//   - once the farm owner's Party (the binding owner's name) exists, its
+//     make-party is in the farm book and, for an organisation, the first
+//     admin it names has accepted with their own touched act (R4): a
+//     person holding admin by name in it, in force in the book now; for a
+//     person's Party, that person;
 //   - until then, whatever other Parties exist, the farm binding's owner,
-//     as before Parties.
+//     as before Parties. Making the owner's Party makes its maker nothing.
 //
 // Parties or a book that can't be read make no one an admin.
 func farmAdmins(reader client.Reader, book *farmBook) func(ctx context.Context, person string) bool {
@@ -338,6 +340,10 @@ func farmAdmins(reader client.Reader, book *farmBook) func(ctx context.Context, 
 		}
 		if owner.Spec.Kind == c4v1.PartyPerson {
 			return owner.Name == person
+		}
+		if farmbook.AdminAccepted(view.All(), owner.Name) == nil {
+			// named, not accepted: the binding's owner still
+			return b.Spec.Owner == person
 		}
 		ok, _ := farmbook.HoldsByName(ctx, view, book.store, book.roots, owner.Name, person, server.PurposeAdmin)
 		return ok
