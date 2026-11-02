@@ -114,3 +114,18 @@ func TestPeopleIssuerComesUpWithTheFarm(t *testing.T) {
 		t.Errorf("the install without the empty Secret: %v\n%s", err, out)
 	}
 }
+
+// A farm made where there is no Secure Enclave takes touch keys kept in
+// files, and says so to its issuer; a Mac's never does, and a patch never
+// keeps the flag from before.
+func TestSoftwareTouchKeysOnlyWithoutTheSecureEnclave(t *testing.T) {
+	if slices.Contains(ManagerArgs(Options{}), "--software-touch-keys") {
+		t.Error("a Mac's farm takes software touch keys")
+	}
+	if !slices.Contains(ManagerArgs(Options{SoftwareTouchKeys: true}), "--software-touch-keys") {
+		t.Error("a farm with no Secure Enclave doesn't say so")
+	}
+	if p := string(ManagerPatch(Options{}, []string{"manager", "--software-touch-keys"})); strings.Contains(p, "software-touch-keys") {
+		t.Errorf("patch kept the flag: %s", p)
+	}
+}

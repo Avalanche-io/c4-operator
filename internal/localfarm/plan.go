@@ -96,6 +96,10 @@ func DevViewers(owner string) string {
 // Options shape the local farm.
 type Options struct {
 	Name string
+	// SoftwareTouchKeys is a farm made on a machine with no Secure
+	// Enclave, or with C4_KEYS=file: its issuer takes a touch key that is a
+	// key file (--software-touch-keys). A Mac's farm never does.
+	SoftwareTouchKeys bool
 	// OperatorImage replaces the image the install manifest names (a
 	// development build loaded into the cluster).
 	OperatorImage string
@@ -334,6 +338,11 @@ func ManagerArgs(o Options) []string {
 	// the people's issuer (PEOPLE-KEYS-2 3.3): up enrols the owner's keys
 	// there on the installer token, then binds the farm with them
 	args = append(args, "--people-store="+PeopleStore)
+	// a machine with no Secure Enclave keeps its touch key in a file, which
+	// the issuer takes only when the farm says it does
+	if o.SoftwareTouchKeys {
+		args = append(args, "--software-touch-keys")
+	}
 	return args
 }
 
@@ -353,10 +362,13 @@ func ManagerPatch(o Options, args []string) []byte {
 	for _, a := range args {
 		drop := false
 		for _, f := range []string{"--hud-dev-viewers=", "--capacity-provider=", "--hud-sites=", "--tz=", "--hud-plain-registries=", "--single-person-farm=",
-			"--hud-image-registry=", "--hud-image-tag=", "--hud-sandbox=", "--hud-installer-token-file=", "--people-store="} {
+			"--hud-image-registry=", "--hud-image-tag=", "--hud-sandbox=", "--hud-installer-token-file=", "--people-store=", "--software-touch-keys="} {
 			if strings.HasPrefix(a, f) {
 				drop = true
 			}
+		}
+		if a == "--software-touch-keys" {
+			drop = true
 		}
 		if !drop {
 			keep = append(keep, a)

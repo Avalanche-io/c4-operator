@@ -44,6 +44,10 @@ const (
 // after the Mac's first unlock.
 func Workload(name string) Kind { return Kind("workload-" + name) }
 
+// SecureEnclave reports whether this build and machine keep keys in the
+// Secure Enclave.
+func SecureEnclave() bool { return seAvailable() }
+
 // Key is a person's key on this machine.
 type Key interface {
 	// SPKI is its public key, DER SubjectPublicKeyInfo.

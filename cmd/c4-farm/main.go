@@ -781,7 +781,8 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		tz := localfarm.LocalTZ()
 		lat, lon := localfarm.Place(tz)
 		o := localfarm.UpOptions{Options: localfarm.Options{TZ: tz, Lat: lat, Lon: lon, OperatorImage: *image, HUDHostPort: *port, StoreHostPort: *storePort,
-			RegistryHostPort: *registryPort, LocalImages: farmcli.DevBuild && *install != "", Owner: *owner, Tracker: *trackerOn},
+			RegistryHostPort: *registryPort, LocalImages: farmcli.DevBuild && *install != "", Owner: *owner, Tracker: *trackerOn,
+			SoftwareTouchKeys: !keystore.SecureEnclave() || os.Getenv("C4_KEYS") == "file"},
 			Install: *install, Version: version, ImageArchive: *archive, SyncInstall: *syncInstall, SyncImage: *syncImage, Log: stdout,
 			Timings: &localfarm.Timings{}}
 		// the owner is chosen when the farm is made, and kept after
@@ -1343,6 +1344,9 @@ func upKeys(ctx context.Context, o localfarm.Options, pinned string, touch bool,
 			line = "no touch key yet, so the acts that ask for your touch go unsigned for now: c4 farm touch-key, at a terminal, makes one"
 		}
 		fmt.Fprintf(stdout, "keys      %s's key on this machine is the farm's owner key (%s), %s\n", o.Owner, farmcli.ShortDevice(out.Owner.Device), line)
+		if pc, err := farmcli.PeopleConfig(ctx, c); err == nil && pc.SoftwareTouchKeys {
+			fmt.Fprintf(stdout, "keys      this farm takes touch keys kept in files: this machine has no Secure Enclave, or C4_KEYS=file\n")
+		}
 	}
 	return out.Owner.Device, nil
 }
