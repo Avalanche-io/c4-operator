@@ -190,3 +190,44 @@ func TestTouchKeyStatesHardwareOrIsAPasskey(t *testing.T) {
 		t.Errorf("the config says softwareTouchKeys: %d %s", code, body)
 	}
 }
+
+// c4 farm touch-key: an owner enrolled with no touch key (up with no one
+// at the terminal) enrols their first one on the installer token, from
+// the farm's own machine, for the owner's key; once one was ever enrolled
+// the route answers 409. Before the owner is enrolled, for another key,
+// without the token or from another machine, it is refused.
+func TestOwnersFirstTouchKey(t *testing.T) {
+	r := onePerson(t)
+	cli := newDev(t)
+	touch := func(d *dev, touchFor, host, token string) (int, string, *people.Certified) {
+		var out people.Certified
+		code, body := r.call("POST", "/v1/people/owner/touch", host, r.enrolment(d, "noor", touchFor, "mac"), &out, people.InstallerHeader, token)
+		return code, body, &out
+	}
+	if code, body, _ := touch(newDev(t), cli.id, local, installerToken); code != http.StatusForbidden || !strings.Contains(body, "not enrolled yet") {
+		t.Errorf("before the owner: %d %s", code, body)
+	}
+	if code, body, _ := r.up(cli, nil); code != http.StatusOK {
+		t.Fatalf("up: %d %s", code, body)
+	}
+	tk := newDev(t)
+	for name, c := range map[string]func() int{
+		"from another machine": func() int { code, _, _ := touch(tk, cli.id, "", installerToken); return code },
+		"another token":        func() int { code, _, _ := touch(tk, cli.id, local, strings.Repeat("0", 64)); return code },
+		"for another key":      func() int { code, _, _ := touch(tk, newDev(t).id, local, installerToken); return code },
+	} {
+		if code := c(); code != http.StatusForbidden {
+			t.Errorf("%s: %d", name, code)
+		}
+	}
+	if code, body, _ := touch(tk, "", local, installerToken); code != http.StatusBadRequest {
+		t.Errorf("a device key, not a touch key: %d %s", code, body)
+	}
+	code, body, out := touch(tk, cli.id, local, installerToken)
+	if code != http.StatusOK || out.Device != tk.id {
+		t.Fatalf("the first touch key: %d %s", code, body)
+	}
+	if code, body, _ := touch(newDev(t), cli.id, local, installerToken); code != http.StatusConflict || !strings.Contains(body, "touch key already") {
+		t.Errorf("a second: %d %s", code, body)
+	}
+}

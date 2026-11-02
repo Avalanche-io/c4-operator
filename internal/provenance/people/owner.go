@@ -154,6 +154,103 @@ func (i *Issuer) handleOwner(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// handleOwnerTouch enrols a one-person farm owner's first touch key on the
+// installer token (evidence installer), for a farm up made with no one at
+// the terminal to give the touch (c4 farm touch-key): only while no touch
+// key was ever enrolled for the owner's key, which then answers 409, as
+// the owner route does. A later touch key comes from a touch on this one.
+func (i *Issuer) handleOwnerTouch(w http.ResponseWriter, r *http.Request) {
+	ctx, now := r.Context(), i.now()
+	owner := i.owner(ctx)
+	switch {
+	case !i.local(r):
+		fail(w, refuse(http.StatusForbidden, "the owner's touch key is enrolled from the farm's own machine (c4 farm touch-key)"))
+		return
+	case len(i.InstallerToken) == 0 || owner == "":
+		fail(w, refuse(http.StatusForbidden, "this is not a one-person farm: a touch key is enrolled on a step-up sign-in"))
+		return
+	case !i.installer(r):
+		fail(w, refuse(http.StatusForbidden, "the owner's touch key is enrolled with this machine's installer token (%s)", InstallerHeader))
+		return
+	}
+	var e Enrolment
+	if err := decode(r, &e); err != nil {
+		fail(w, err)
+		return
+	}
+	if e.IDToken != "" || e.Approval != "" || e.Code != "" {
+		fail(w, refuse(http.StatusBadRequest, "the owner's first touch key is enrolled on the installer token alone"))
+		return
+	}
+	p, pub, device, err := i.predicate(&e, now)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	switch {
+	case p.Person != owner:
+		fail(w, refuse(http.StatusForbidden, "this farm is %s's, and the request is %s's", owner, p.Person))
+		return
+	case p.TouchFor == "":
+		fail(w, refuse(http.StatusBadRequest, "a touch key confirms for the owner's key (touchFor)"))
+		return
+	}
+	p.Evidence = schema.EvidenceInstaller
+	x := i.Index
+	es, err := x.append(ctx, now, i.sign, func() ([]pending, error) {
+		oe := x.ownerEntry()
+		switch {
+		case oe == nil:
+			return nil, refuse(http.StatusForbidden, "this farm's owner is not enrolled yet: c4 farm up enrols them")
+		case p.TouchFor != oe.Device:
+			return nil, refuse(http.StatusForbidden, "the touch key confirms for the owner's key %.16s, and the request names %.16s", oe.Device, p.TouchFor)
+		case x.touchKeyFor(oe.Device):
+			return nil, refuse(http.StatusConflict, "the owner's key has a touch key already: the installer token enrols the first one only, and a touch on it enrols another")
+		}
+		if err := x.unseen(device); err != nil {
+			return nil, err
+		}
+		if err := x.touchesFor(p, now); err != nil {
+			return nil, err
+		}
+		rec, err := i.deviceRecord(ctx, p, device, now)
+		if err != nil {
+			return nil, err
+		}
+		return []pending{{entry: &Entry{Kind: KindDevice, Device: device, Person: owner, Addr: i.addr(r)}, record: rec}}, nil
+	})
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	c, err := i.certify(pub, owner, device, es[0], now)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+// ownerEntry is the index entry that enrolled the owner's key, or nil.
+func (x *Index) ownerEntry() *Entry {
+	for _, e := range x.entries {
+		if d := x.devices[e.Record]; e.Kind == KindDevice && d != nil && d.Predicate.Evidence == schema.EvidenceInstaller && d.Predicate.TouchFor == "" {
+			return e
+		}
+	}
+	return nil
+}
+
+// touchKeyFor reports whether a touch key was ever enrolled for device.
+func (x *Index) touchKeyFor(device string) bool {
+	for _, e := range x.entries {
+		if d := x.devices[e.Record]; e.Kind == KindDevice && d != nil && d.Predicate.TouchFor == device {
+			return true
+		}
+	}
+	return false
+}
+
 // CodeHash is how a one-time code is booked and read back: the SHA-256 of
 // the code as the CLI made it, hex.
 func CodeHash(code string) string {

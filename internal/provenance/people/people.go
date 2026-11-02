@@ -212,6 +212,7 @@ func (i *Issuer) mux() *http.ServeMux {
 	m.HandleFunc("POST /v1/people/whoami", i.handleWhoami)
 	m.HandleFunc("POST /v1/people/renew", i.handleRenew)
 	m.HandleFunc("POST /v1/people/owner", i.handleOwner)
+	m.HandleFunc("POST /v1/people/owner/touch", i.handleOwnerTouch)
 	m.HandleFunc("POST /v1/people/browser", i.handleBrowser)
 	m.HandleFunc("GET /v1/people/codes/{code}", i.handleCode)
 	m.HandleFunc("POST /v1/people/acts", i.handleAct)
