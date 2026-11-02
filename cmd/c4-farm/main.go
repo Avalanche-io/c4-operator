@@ -457,6 +457,9 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			case pc.TouchKeyUntil == "":
 				return errors.New("you have a touch key at this farm already: a touch on it enrols another")
 			}
+			if until, err := time.Parse(time.RFC3339, pc.TouchKeyUntil); err == nil && time.Now().Before(until) {
+				return fmt.Errorf("the window to make your touch key is open until %s: run c4 farm touch-key now", until.Local().Format("Jan 2 15:04"))
+			}
 			fmt.Fprintf(stdout, "rotating the farm's installer token; a browser signed in with the old one signs in again with c4 farm open\n")
 			tok, err := localfarm.RotateInstallerToken(ctx, name, f.HUD)
 			if err != nil {
