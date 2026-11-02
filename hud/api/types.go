@@ -1295,6 +1295,23 @@ type ActOn struct {
 	Digest map[string]string `json:"digest"`
 }
 
+// Act is a person's act as the HUD shows it beside what carried it out
+// (internal/hud/API.md, A person's act): a farm book entry, a grant, a
+// people-map confirmation. Grade is the act's: confirmed when the person's
+// touch key signed too, else signed. Kind, Label and Protection are the
+// device record in force for the device that signed, at the position the
+// act is judged at; As is the role the person acted in, when the act names
+// one (noor as artist on her one-person farm). It names no addresses.
+// There is none for a record that cites no person's act, such as one the
+// HUD signed for a person before personal keys.
+type Act struct {
+	Grade      string `json:"grade"`
+	Kind       string `json:"kind"`
+	Label      string `json:"label,omitempty"`
+	Protection string `json:"protection"`
+	As         string `json:"as,omitempty"`
+}
+
 // ActNeeds answers GET /api/v1/acts/needs: what each act kind needs of its
 // signer, the product's list. A kind not in Acts needs neither a person
 // nor a touch; one in Params needs what its params make it (in words).

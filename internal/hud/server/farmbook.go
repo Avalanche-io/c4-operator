@@ -22,6 +22,7 @@ import (
 
 	"github.com/Avalanche-io/c4"
 
+	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
 )
@@ -32,15 +33,50 @@ const (
 )
 
 // keepFarmRecord puts a farm-level act's control record into the system
-// store as it is signed, so the queue finds it when its entry is sealed.
-// A record kept but never booked (its write failed) counts for nothing.
-func (s *Server) keepFarmRecord(ctx context.Context, action string, rec []byte) {
-	if s.FarmBook == nil || !farmbook.IsControlAct(action) {
+// store as it is signed, so the queue finds it when its entry is sealed,
+// and the person's act it cites beside it, by the C4 ID it cites, so the
+// book can show whose device signed (farmbook.Reader.Act). A record kept
+// but never booked (its write failed) counts for nothing.
+func (s *Server) keepFarmRecord(ctx context.Context, pred controlPredicate, rec []byte) {
+	if s.FarmBook == nil || !farmbook.IsControlAct(pred.Action) {
 		return
+	}
+	if pred.Act != nil && pred.actBundle != nil {
+		if err := s.FarmBook.Store.Put(ctx, pred.Act.Record, pred.actBundle); err != nil {
+			s.Log.Error(err, "keep a control record's act for the farm book", "act", pred.Act.Record)
+		}
 	}
 	id := c4.Identify(bytes.NewReader(rec)).String()
 	if err := s.FarmBook.Store.Put(ctx, id, rec); err != nil {
 		s.Log.Error(err, "keep a control record for the farm book", "record", id)
+	}
+}
+
+// bookActs reads the farm book once, when first asked, for the person's
+// act each control record cites: by the entry that books the record,
+// sealed or pending (farmbook.Reader.Act), or nil. A farm with no farm
+// book, or a record it doesn't book, shows none.
+func (s *Server) bookActs(ctx context.Context) func(record string) *api.Act {
+	var view *farmbook.View
+	read := false
+	return func(record string) *api.Act {
+		if s.FarmBookReader == nil || record == "" {
+			return nil
+		}
+		if !read {
+			read = true
+			var err error
+			if view, err = s.FarmBookReader.View(ctx, time.Now()); err != nil {
+				s.Log.Error(err, "read the farm book for the acts it books")
+			}
+		}
+		if view == nil {
+			return nil
+		}
+		if pos := view.Booking(record); pos > 0 {
+			return s.FarmBookReader.Act(ctx, view, pos)
+		}
+		return nil
 	}
 }
 
@@ -145,18 +181,20 @@ func (s *Server) handleFarmBook(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, es := range [][]farmbook.PageEntry{page.Entries, page.Pending} {
 		for k := range es {
-			if isControlEntry(es[k].Entry) {
-				continue
+			if !isControlEntry(es[k].Entry) {
+				private, red, err := people.Private(ctx, s.FarmBookReader.Store, es[k].Entry, sees)
+				if err != nil {
+					fail(w, http.StatusInternalServerError, "entry %d: %v", es[k].Position, err)
+					return
+				}
+				es[k].Private, es[k].Redacted = private, red
+				if slices.Contains(red, farmbook.RedactedEntry) {
+					// withheld whole: nothing of it, its act neither
+					es[k].Entry = nil
+					continue
+				}
 			}
-			private, red, err := people.Private(ctx, s.FarmBookReader.Store, es[k].Entry, sees)
-			if err != nil {
-				fail(w, http.StatusInternalServerError, "entry %d: %v", es[k].Position, err)
-				return
-			}
-			es[k].Private, es[k].Redacted = private, red
-			if slices.Contains(red, farmbook.RedactedEntry) {
-				es[k].Entry = nil
-			}
+			es[k].Act = s.FarmBookReader.Act(ctx, view, es[k].Position)
 		}
 	}
 	writeJSON(w, http.StatusOK, page)

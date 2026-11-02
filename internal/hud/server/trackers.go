@@ -53,7 +53,7 @@ func (s *Server) handleTrackers(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, "%v", err)
 		return
 	}
-	now := time.Now()
+	now, act := time.Now(), s.bookActs(ctx)
 	type key struct{ ns, name string }
 	held := map[key]int{}
 	mine := map[key]*api.Grant{}
@@ -64,7 +64,7 @@ func (s *Server) handleTrackers(w http.ResponseWriter, r *http.Request) {
 			held[k]++
 		}
 		if g.Spec.Person == v.User {
-			gv := grantView(g, m.nsProject[g.Namespace], now)
+			gv := grantView(g, m.nsProject[g.Namespace], now, act)
 			mine[k] = &gv
 		}
 	}

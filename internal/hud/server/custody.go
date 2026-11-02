@@ -77,6 +77,9 @@ type controlPredicate struct {
 	// acted in (submit only): a one-person farm's person signed in as a
 	// role's development viewer, the actor (c4v1.AnnotationSubmittedAs).
 	By *actedBy `json:"by,omitempty"`
+	// actBundle is the act the record cites, as signed: kept beside a
+	// farm-level act's record (keepFarmRecord), never in the record.
+	actBundle []byte
 }
 
 // actedBy is a control record's by: a person, and the role they acted in.
@@ -191,7 +194,7 @@ func (s *Server) signControl(ctx context.Context, projects []string, subject pro
 	if err != nil {
 		return "", err
 	}
-	s.keepFarmRecord(ctx, pred.Action, rec)
+	s.keepFarmRecord(ctx, pred, rec)
 	id := c4.Identify(bytes.NewReader(rec))
 	for _, p := range projects {
 		st, err := s.Stores(ctx, p)

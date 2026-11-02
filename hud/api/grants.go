@@ -30,8 +30,10 @@ type Grant struct {
 	Pools     []string  `json:"pools,omitempty"`
 	Classes   []string  `json:"classes,omitempty"`
 	Until     time.Time `json:"until"`
-	// Record is the C4 ID of the signed control record of the grant.
+	// Record is the C4 ID of the signed control record of the grant, and
+	// Act the person's act it cites, when the farm book books it.
 	Record  string        `json:"record,omitempty"`
+	Act     *Act          `json:"act,omitempty"`
 	Revoked *GrantRevoked `json:"revoked,omitempty"`
 	// Active says whether it serves now; Why says why not.
 	Active bool   `json:"active"`
@@ -40,11 +42,13 @@ type Grant struct {
 	ActOn *ActOn `json:"actOn,omitempty"`
 }
 
-// GrantRevoked is who took a grant back, and when.
+// GrantRevoked is who took a grant back, and when, with the person's act
+// its record cites, when the farm book books it.
 type GrantRevoked struct {
 	By     string    `json:"by"`
 	At     time.Time `json:"at"`
 	Record string    `json:"record,omitempty"`
+	Act    *Act      `json:"act,omitempty"`
 }
 
 // GrantResponse answers a grant or a revocation.

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+
+	"github.com/Avalanche-io/c4-operator/hud/api"
 )
 
 // Page is the book as GET /api/v1/book/farm?since= serves it
@@ -47,6 +49,10 @@ type PageEntry struct {
 	Entry    json.RawMessage `json:"entry"`
 	Private  json.RawMessage `json:"private,omitempty"`
 	Redacted []string        `json:"redacted,omitempty"`
+	// Act is the person's act the entry's record cites, as the HUD shows
+	// it (Reader.Act): served beside the entry, never part of it, so the
+	// entry's ID doesn't change for it. None for an entry withheld whole.
+	Act *api.Act `json:"act,omitempty"`
 }
 
 // Redactions a page entry may carry.

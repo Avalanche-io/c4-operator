@@ -236,7 +236,7 @@ func TestEnrolmentOffersBookedOnceAMinute(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		b.s.keepFarmRecord(ctx, "enroll-offer", rec)
+		b.s.keepFarmRecord(ctx, controlPredicate{Action: "enroll-offer"}, rec)
 		b.s.bookOffer(ctx, "offers-07", c4id(rec))
 	}
 	if st, _ := b.ptr.Read(ctx); len(st.Pending) != 1 {

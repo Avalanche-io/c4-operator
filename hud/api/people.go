@@ -34,11 +34,13 @@ type PeopleEntry struct {
 	RevokeOn  *ActOn `json:"revokeOn,omitempty"`
 }
 
-// PeopleAct is who did something to an entry, when, and its record.
+// PeopleAct is who did something to an entry, when, and its record, with
+// the person's act the record cites, when the farm book books it.
 type PeopleAct struct {
 	By     string    `json:"by"`
 	At     time.Time `json:"at"`
 	Record string    `json:"record,omitempty"`
+	Act    *Act      `json:"act,omitempty"`
 }
 
 // PeopleList answers GET /api/v1/people.

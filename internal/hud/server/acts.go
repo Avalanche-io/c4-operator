@@ -62,6 +62,8 @@ type citedAct struct {
 	grade  string
 	// on is the act's subject, the control record's.
 	on provenance.Subject
+	// bundle is the act as signed, which the record cites by its C4 ID.
+	bundle []byte
 }
 
 // citeAct verifies the act a request carries, if it carries one, against
@@ -133,7 +135,7 @@ func (s *Server) citeAct(ctx context.Context, r *http.Request, v *api.Viewer, su
 		return nil, fmt.Errorf("%w: %w", errAct, err)
 	}
 	return &citedAct{cite: &schema.ActCitation{Payload: provenance.PayloadHash(vr.Payload), Record: c4.Identify(bytes.NewReader(data)).String()},
-		params: p.Params, grade: p.Chain.By.Grade, on: subject}, nil
+		params: p.Params, grade: p.Chain.By.Grade, on: subject, bundle: data}, nil
 }
 
 // requestBody is the request's body as its client sent it, {} for none.
@@ -169,7 +171,7 @@ func onAct(act *citedAct, subject provenance.Subject, pred *controlPredicate) pr
 	if act == nil {
 		return subject
 	}
-	pred.Act, pred.Params, pred.Custody = act.cite, act.params, act.grade
+	pred.Act, pred.Params, pred.Custody, pred.actBundle = act.cite, act.params, act.grade, act.bundle
 	return act.on
 }
 

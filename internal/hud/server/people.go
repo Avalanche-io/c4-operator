@@ -37,17 +37,19 @@ func speaksAs(v *api.Viewer, person string) bool {
 	return person != "" && person == v.User
 }
 
-func peopleAct(a *c4v1.TrackerPersonAct) *api.PeopleAct {
+// peopleAct is a confirmation or its revocation, with the person's act its
+// record cites (act: Server.bookActs).
+func peopleAct(a *c4v1.TrackerPersonAct, act func(record string) *api.Act) *api.PeopleAct {
 	if a == nil {
 		return nil
 	}
-	return &api.PeopleAct{By: a.By, At: a.At.UTC(), Record: a.Record}
+	return &api.PeopleAct{By: a.By, At: a.At.UTC(), Record: a.Record, Act: act(a.Record)}
 }
 
-func peopleEntry(tp *c4v1.TrackerPerson, project string, v *api.Viewer) api.PeopleEntry {
+func peopleEntry(tp *c4v1.TrackerPerson, project string, v *api.Viewer, act func(record string) *api.Act) api.PeopleEntry {
 	e := api.PeopleEntry{Namespace: tp.Namespace, Project: project, Tracker: tp.Spec.Tracker, Login: tp.Spec.Login,
-		Person: tp.Spec.Person, State: "confirmed", Name: tp.Name, Confirmed: peopleAct(&tp.Spec.Accepted),
-		Revoked: peopleAct(tp.Spec.Revoked), Yours: speaksAs(v, tp.Spec.Person), Lets: lets(tp.Spec.Tracker, tp.Spec.Login, tp.Spec.Person)}
+		Person: tp.Spec.Person, State: "confirmed", Name: tp.Name, Confirmed: peopleAct(&tp.Spec.Accepted, act),
+		Revoked: peopleAct(tp.Spec.Revoked, act), Yours: speaksAs(v, tp.Spec.Person), Lets: lets(tp.Spec.Tracker, tp.Spec.Login, tp.Spec.Person)}
 	if tp.Spec.Revoked != nil {
 		e.State = "revoked"
 	} else {
@@ -70,6 +72,7 @@ func (s *Server) handlePeople(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	act := s.bookActs(ctx)
 	out := api.PeopleList{Entries: []api.PeopleEntry{}}
 	var trs c4v1.TrackerList
 	if err := s.Client.List(ctx, &trs); err != nil {
@@ -102,7 +105,7 @@ func (s *Server) handlePeople(w http.ResponseWriter, r *http.Request) {
 		if tp.Spec.Revoked == nil {
 			confirmed[tp.Namespace+"/"+tp.Name] = true
 		}
-		keep(peopleEntry(tp, project, v))
+		keep(peopleEntry(tp, project, v, act))
 	}
 	for i := range trs.Items {
 		t := &trs.Items[i]
@@ -242,7 +245,7 @@ func (s *Server) handlePeopleConfirm(w http.ResponseWriter, r *http.Request) {
 		note += "; record " + shortID(id)
 	}
 	s.record(ctx, tp, "TrackerPerson", v.User, "Confirmed", note, bookNote{actor: actorOf(r, v), kind: "people-confirm", record: id})
-	writeJSON(w, http.StatusOK, api.PeopleResponse{OK: true, Message: msg, Entry: peopleEntry(tp, project, v), Record: id})
+	writeJSON(w, http.StatusOK, api.PeopleResponse{OK: true, Message: msg, Entry: peopleEntry(tp, project, v, s.bookActs(ctx)), Record: id})
 }
 
 // lets says what a confirmed login does: what the person grants by
@@ -327,7 +330,7 @@ func (s *Server) handlePeopleRevoke(w http.ResponseWriter, r *http.Request) {
 		note += "; record " + shortID(id)
 	}
 	s.record(ctx, tp, "TrackerPerson", v.User, "Revoked", note, bookNote{actor: actorOf(r, v), kind: "people-revoke", record: id})
-	writeJSON(w, http.StatusOK, api.PeopleResponse{OK: true, Message: msg, Entry: peopleEntry(tp, project, v), Record: id})
+	writeJSON(w, http.StatusOK, api.PeopleResponse{OK: true, Message: msg, Entry: peopleEntry(tp, project, v, s.bookActs(ctx)), Record: id})
 }
 
 // confirmedLogin is the standing confirmation that tracker t's login is

@@ -64,11 +64,13 @@ func (s *Server) isSync(v *api.Viewer) bool {
 	return v.User == c4v1.SyncAccount || (isDev(v) && v.User == c4v1.SyncDevViewer)
 }
 
-func grantView(g *c4v1.SubmitGrant, project string, now time.Time) api.Grant {
+// grantView is a grant as the HUD shows it, with the person's act each of
+// its records cites (act: Server.bookActs).
+func grantView(g *c4v1.SubmitGrant, project string, now time.Time, act func(record string) *api.Act) api.Grant {
 	out := api.Grant{Namespace: g.Namespace, Name: g.Name, Project: project, Person: g.Spec.Person, Tracker: g.Spec.Tracker,
-		Pools: g.Spec.Pools, Classes: g.Spec.Classes, Until: g.Spec.Until.UTC(), Record: g.Spec.Record}
+		Pools: g.Spec.Pools, Classes: g.Spec.Classes, Until: g.Spec.Until.UTC(), Record: g.Spec.Record, Act: act(g.Spec.Record)}
 	if r := g.Spec.Revoked; r != nil {
-		out.Revoked = &api.GrantRevoked{By: r.By, At: r.At.UTC(), Record: r.Record}
+		out.Revoked = &api.GrantRevoked{By: r.By, At: r.At.UTC(), Record: r.Record, Act: act(r.Record)}
 	} else {
 		out.ActOn = actOn(grantSubject(g))
 	}
@@ -200,7 +202,7 @@ func (s *Server) handleGrant(w http.ResponseWriter, r *http.Request) {
 		note += "; record " + shortID(id)
 	}
 	s.record(ctx, g, "SubmitGrant", v.User, "Granted", note, bookNote{actor: actorOf(r, v), kind: "grant", record: id})
-	writeJSON(w, http.StatusOK, api.GrantResponse{OK: true, Message: msg, Grant: grantView(g, project, now), Record: id})
+	writeJSON(w, http.StatusOK, api.GrantResponse{OK: true, Message: msg, Grant: grantView(g, project, now, s.bookActs(ctx)), Record: id})
 }
 
 func describeScope(g *c4v1.SubmitGrant) string {
@@ -244,7 +246,7 @@ func (s *Server) handleGrants(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, "%v", err)
 		return
 	}
-	now := time.Now()
+	now, act := time.Now(), s.bookActs(r.Context())
 	out := api.GrantList{Grants: []api.Grant{}}
 	for i := range list.Items {
 		g := &list.Items[i]
@@ -258,7 +260,7 @@ func (s *Server) handleGrants(w http.ResponseWriter, r *http.Request) {
 		if tracker != "" && g.Namespace+"/"+g.Spec.Tracker != tracker && g.Spec.Tracker != tracker {
 			continue
 		}
-		out.Grants = append(out.Grants, grantView(g, project, now))
+		out.Grants = append(out.Grants, grantView(g, project, now, act))
 	}
 	slices.SortFunc(out.Grants, func(a, b api.Grant) int { return strings.Compare(a.Namespace+"/"+a.Name, b.Namespace+"/"+b.Name) })
 	writeJSON(w, http.StatusOK, out)
@@ -340,7 +342,7 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 		note += "; record " + shortID(id)
 	}
 	s.record(ctx, g, "SubmitGrant", v.User, "Revoked", note, bookNote{actor: actorOf(r, v), kind: "revoke", record: id})
-	writeJSON(w, http.StatusOK, api.GrantResponse{OK: true, Message: msg, Grant: grantView(g, project, now), Record: id})
+	writeJSON(w, http.StatusOK, api.GrantResponse{OK: true, Message: msg, Grant: grantView(g, project, now, s.bookActs(ctx)), Record: id})
 }
 
 // errGrant is a submission for a person refused, with its status.
