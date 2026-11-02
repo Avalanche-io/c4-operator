@@ -70,10 +70,13 @@ func KeepKeys(ctx context.Context, c *Client, a KeepArgs) {
 	// a one-person farm whose owner has no touch key: its window, or that
 	// it has closed (PEOPLE-KEYS-2 3.3)
 	if until, err := time.Parse(time.RFC3339, cfg.TouchKeyUntil); err == nil && touchCertless(a.Store) {
+		if at, err := time.Parse(time.RFC3339, cfg.TouchKeyReopened); err == nil {
+			say("touch key the window to make your touch key was reopened at %s, with the installer token\n", at.Local().Format("Jan 2 15:04"))
+		}
 		if left := until.Sub(now); left > 0 {
 			say("touch key you have no touch key: run c4 farm touch-key at a terminal within %s\n", Span(left))
 		} else {
-			say("touch key you have no touch key, and its window closed at %s: the acts that need a touch can't be confirmed on this farm\n", until.Local().Format("Jan 2 15:04"))
+			say("touch key you have no touch key, and its window closed at %s: the acts that need a touch can't be confirmed on this farm; c4 farm touch-key --reopen, at a terminal, opens a fresh one\n", until.Local().Format("Jan 2 15:04"))
 		}
 	}
 	ns, err := NewDevices(ctx, c, a.Store, cfg)

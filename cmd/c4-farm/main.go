@@ -88,7 +88,7 @@ Agents
   agents                   the Claude Code sessions on this machine, read-only: each one's state, and what needs you (--all, --open for the HUD)
   enroll NODE CODE         make a machine yours with the code c4-agent enroll-offer prints on it: your host work runs there (--for PERSON adds them, on your sign-in)
   device approve DEVICE    let another machine act as you on a one-person farm: the device ID it shows, approved with your touch
-  touch-key                make your touch key on a one-person farm whose up ran with no one at the terminal
+  touch-key [--reopen]     make your touch key on a one-person farm whose up ran with no one at the terminal
   agents add [NAME]        make a Claude Code session an agent the farm can run, with c4-agent's hooks in its folder (asked first; no NAME lists the sessions to pick from)
   agents rm NAME           take out what agents add put in
   agents ls                your agents: busy, idle or stopped, and the last turn saved
@@ -429,6 +429,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		return toolCommand(ctx, fs, rest, stdout, isTerminal(stdin), connect)
 
 	case "touch-key":
+		reopen := fs.Bool("reopen", false, "once the window to make your first touch key has closed: rotate the farm's installer token and open one fresh 24-hour window, only while you have no touch key")
 		if _, err := parse(fs, rest); err != nil {
 			return err
 		}
@@ -438,13 +439,35 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		case !isTerminal(stdin):
 			return errors.New("a touch key asks for your touch: run c4 farm touch-key yourself, at a terminal")
 		}
-		name, _, err := cfg.Resolve(cm.farm)
+		name, f, err := cfg.Resolve(cm.farm)
 		if err != nil {
 			return err
 		}
 		c, _, _, _, err := connect()
 		if err != nil {
 			return err
+		}
+		if *reopen {
+			pc, err := farmcli.PeopleConfig(ctx, c)
+			switch {
+			case err != nil:
+				return err
+			case !f.Local || pc.Owner == "":
+				return errors.New("--reopen is for a local one-person farm, whose installer token is on this machine")
+			case pc.TouchKeyUntil == "":
+				return errors.New("you have a touch key at this farm already: a touch on it enrols another")
+			}
+			fmt.Fprintf(stdout, "rotating the farm's installer token; a browser signed in with the old one signs in again with c4 farm open\n")
+			tok, err := localfarm.RotateInstallerToken(ctx, name, f.HUD)
+			if err != nil {
+				return err
+			}
+			c.Installer = tok
+			until, err := farmcli.ReopenTouchWindow(ctx, c)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(stdout, "reopened  the window to make your touch key, until %s; making it now\n", until.Local().Format("Jan 2 15:04"))
 		}
 		fmt.Fprintf(stdout, "Your Mac asks for your touch next, to make the touch key.\n")
 		cert, err := farmcli.EnrolTouchKey(ctx, c, farmcli.KeysFor(name))

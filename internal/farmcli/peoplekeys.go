@@ -570,3 +570,15 @@ func EnrolTouchKey(ctx context.Context, c *Client, st keystore.Store) (*people.C
 	}
 	return &cert, nil
 }
+
+// ReopenTouchWindow is c4 farm touch-key --reopen's booking, sent with the
+// new installer token once it is rotated: one fresh window for the owner's
+// first touch key, only while the owner key has none. It answers when the
+// window ends.
+func ReopenTouchWindow(ctx context.Context, c *Client) (time.Time, error) {
+	var out people.TouchWindow
+	if err := c.Issuer(ctx, http.MethodPost, "/v1/people/owner/touch/reopen", struct{}{}, &out); err != nil {
+		return time.Time{}, fmt.Errorf("reopening the touch-key window: %w", err)
+	}
+	return time.Parse(time.RFC3339, out.Until)
+}

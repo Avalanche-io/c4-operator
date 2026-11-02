@@ -59,23 +59,35 @@ func InstallerToken(name string) (string, error) {
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return "", fmt.Errorf("the farm's installer token: %w", err)
 	}
+	t, err := newToken()
+	if err != nil {
+		return "", err
+	}
+	return t, writeToken(p, t)
+}
+
+func newToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	t := hex.EncodeToString(b)
+	return hex.EncodeToString(b), nil
+}
+
+// writeToken keeps a token at p, the person's alone.
+func writeToken(p, t string) error {
 	// a folder made here is the person's alone; one that is already there
 	// keeps its mode, and the file's own 0600 guards the token
 	if err := os.MkdirAll(filepath.Dir(filepath.Dir(p)), 0o700); err != nil {
-		return "", err
+		return err
 	}
 	if err := os.Mkdir(filepath.Dir(p), 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
-		return "", err
+		return err
 	}
 	if err := os.WriteFile(p, []byte(t+"\n"), 0o600); err != nil {
-		return "", fmt.Errorf("the farm's installer token: %w", err)
+		return fmt.Errorf("the farm's installer token: %w", err)
 	}
-	return t, nil
+	return nil
 }
 
 // RemoveInstallerToken takes farm name's token away with the farm.
