@@ -629,7 +629,7 @@ func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusServiceUnavailable, "the HUD is still reading the farm")
 		return
 	}
-	writeJSON(w, http.StatusOK, s.snapshot(m, v))
+	writeJSON(w, http.StatusOK, s.snapshot(m, s.withPartyRights(r, v)))
 }
 
 // handleEvents streams snapshots: at most one a second, only when the
@@ -646,6 +646,8 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
+	// what the viewer may do about the party list, as of the stream's start
+	v = s.withPartyRights(r, v)
 	var last []byte
 	idle := 0
 	t := time.NewTicker(time.Second)

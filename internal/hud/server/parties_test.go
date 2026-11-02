@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -804,5 +805,90 @@ func TestPartySignInsAgainstTheSecret(t *testing.T) {
 	p.s.StandInSignIns = people.StaticSignIns{"kai": {{Issuer: sso, Subject: "00u-kai"}}}
 	if code, out := p.call(t, http.MethodPut, "/api/v1/parties/lee/sign-ins", "ines", map[string]any{"signIns": ins(sso+" 00u-lee", sso+" 00u-kai")}, nil); code != http.StatusConflict {
 		t.Errorf("lee takes kai's Secret subject: %d %v", code, out)
+	}
+}
+
+// A farm without a farm book has no Parties: GET and HEAD /parties and GET
+// /parties/{name} answer 501, as the writes do, so the HUD shows no tab;
+// with a book they answer.
+func TestPartyReadsNeedTheBook(t *testing.T) {
+	p := newPartyRig(t)
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", kestrel(), nil); code != http.StatusOK {
+		t.Fatalf("make kestrel: %d %v", code, out)
+	}
+	read := func(method, path string) int {
+		r := httptest.NewRequest(method, path+"?as=maya", nil)
+		r.Header.Set(InstallerHeader, testInstallerToken)
+		w := httptest.NewRecorder()
+		p.s.Handler().ServeHTTP(w, r)
+		return w.Code
+	}
+	for _, c := range []struct{ method, path string }{{http.MethodGet, "/api/v1/parties"}, {http.MethodHead, "/api/v1/parties"}, {http.MethodGet, "/api/v1/parties/kestrel"}} {
+		if code := read(c.method, c.path); code != http.StatusOK {
+			t.Errorf("%s %s with a book: %d", c.method, c.path, code)
+		}
+	}
+	p.s.FarmBook, p.s.FarmBookReader = nil, nil
+	for _, c := range []struct{ method, path string }{{http.MethodGet, "/api/v1/parties"}, {http.MethodHead, "/api/v1/parties"}, {http.MethodGet, "/api/v1/parties/kestrel"}} {
+		if code := read(c.method, c.path); code != http.StatusNotImplemented {
+			t.Errorf("%s %s without a book: %d, want 501", c.method, c.path, code)
+		}
+	}
+}
+
+// The viewer says what it may do about the party list, by the rules the
+// routes take: makeParties is exactly whether POST /parties succeeds for
+// it; bindingOwner names the farm binding's owner; makeOwnParty holds for
+// that owner until their own Party exists.
+func TestPartyViewerRights(t *testing.T) {
+	p := newPartyRig(t)
+	ctx := context.Background()
+	if err := p.s.Client.Create(ctx, &c4v1.DeploymentBinding{ObjectMeta: metav1.ObjectMeta{Name: c4v1.FarmBindingName},
+		Spec: c4v1.DeploymentBindingSpec{Owner: "noor", To: "laptop-1/*", For: []string{"task/v1"}, By: "noor"}}); err != nil {
+		t.Fatal(err)
+	}
+	viewer := func(as string, headers map[string]string) api.Viewer {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/snapshot?as="+as, nil)
+		r.Header.Set(InstallerHeader, testInstallerToken)
+		for k, v := range headers {
+			r.Header.Set(k, v)
+		}
+		w := httptest.NewRecorder()
+		p.s.Handler().ServeHTTP(w, r)
+		var snap api.Snapshot
+		if err := json.Unmarshal(w.Body.Bytes(), &snap); err != nil || w.Code != http.StatusOK || snap.Viewer == nil {
+			t.Fatalf("snapshot as %s: %d %s", as, w.Code, w.Body)
+		}
+		return *snap.Viewer
+	}
+	for _, c := range []struct {
+		as      string
+		headers map[string]string
+	}{{"ines", nil}, {"maya", nil}, {"noor", nil}, {"ines", map[string]string{"X-C4-Client": "mcp"}}} {
+		v := viewer(c.as, c.headers)
+		code, _ := p.call(t, http.MethodPost, "/api/v1/parties", c.as, map[string]any{"name": "probe-" + c.as + strconv.Itoa(len(c.headers)), "kind": "organisation", "displayName": "Probe"}, c.headers)
+		if v.MakeParties != (code == http.StatusOK) {
+			t.Errorf("%s %v: makeParties %v, and POST /parties answers %d", c.as, c.headers, v.MakeParties, code)
+		}
+	}
+	if v := viewer("ines", nil); !v.MakeParties || v.BindingOwner || v.MakeOwnParty {
+		t.Errorf("ines, a farm admin: %+v", v)
+	}
+	if v := viewer("maya", nil); v.MakeParties || v.BindingOwner || v.MakeOwnParty {
+		t.Errorf("maya: %+v", v)
+	}
+	if v := viewer("noor", nil); v.MakeParties || !v.BindingOwner || !v.MakeOwnParty {
+		t.Errorf("noor, the binding's owner, before her Party: %+v", v)
+	}
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "noor", map[string]any{"name": "noor", "kind": "person", "displayName": "Noor"}, nil); code != http.StatusOK {
+		t.Fatalf("noor makes her Party: %d %v", code, out)
+	}
+	if v := viewer("noor", nil); !v.BindingOwner || v.MakeOwnParty {
+		t.Errorf("noor, after her Party: %+v", v)
+	}
+	p.s.FarmBook, p.s.FarmBookReader = nil, nil
+	if v := viewer("ines", nil); v.MakeParties || v.MakeOwnParty {
+		t.Errorf("rights on a farm with no book: %+v", v)
 	}
 }

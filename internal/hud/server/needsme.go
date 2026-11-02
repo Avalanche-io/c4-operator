@@ -22,6 +22,7 @@ func (s *Server) handleNeedsMe(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusServiceUnavailable, "the HUD is still reading the farm")
 		return
 	}
+	v = s.withPartyRights(r, v)
 	writeJSON(w, http.StatusOK, s.needsMe(r, v, s.snapshot(m, v)))
 }
 

@@ -34,6 +34,15 @@ type Viewer struct {
 	// Groups are the groups the viewer signed in with, kept so the jobs
 	// the HUD makes for them record them. Never sent.
 	Groups []string `json:"-"`
+	// MakeParties: the viewer may make a party (POST /parties), by the
+	// same guard and farm admin's right the route takes. BindingOwner:
+	// the viewer is the farm binding's owner. MakeOwnParty: that owner,
+	// while no Party of their name exists, may make their own person
+	// Party without the farm admin's right. Set on the snapshot's,
+	// events' and needs-me's viewer.
+	MakeParties  bool `json:"makeParties,omitempty"`
+	BindingOwner bool `json:"bindingOwner,omitempty"`
+	MakeOwnParty bool `json:"makeOwnParty,omitempty"`
 }
 
 // Hold is one reason a job's units are held back. Kind is grant, tools or

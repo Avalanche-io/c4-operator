@@ -527,12 +527,21 @@ func (s *Server) partyReader(w http.ResponseWriter, r *http.Request) *api.Viewer
 	if v == nil {
 		return nil
 	}
-	if v.Unit != nil {
+	switch {
+	case v.Unit != nil:
 		fail(w, http.StatusForbidden, "%s is a unit: the party list is read by people", v.User)
+		return nil
+	case s.FarmBookReader == nil:
+		// as the writes: a farm without a book has no Parties, and the HUD
+		// shows the tab only where HEAD /parties answers
+		fail(w, http.StatusNotImplemented, noBookParties)
 		return nil
 	}
 	return v
 }
+
+// noBookParties is why a farm without a farm book has no Parties.
+const noBookParties = "this farm keeps no farm book (its install names no --system-store), and an organisation's members are the book's: it has no parties"
 
 // partyWriter is the viewer of a party route that writes, after the
 // guard every party write passes: a person, signed in or on the
@@ -540,23 +549,63 @@ func (s *Server) partyReader(w http.ResponseWriter, r *http.Request) *api.Viewer
 // farm that keeps a farm book and signs.
 func (s *Server) partyWriter(w http.ResponseWriter, r *http.Request) *api.Viewer {
 	v := s.withViewer(w, r)
-	switch {
-	case v == nil:
+	if v == nil {
 		return nil
-	case v.Unit != nil:
-		fail(w, http.StatusForbidden, "%s is a unit: people keep the party list, and a unit is never a member", v.User)
-	case agentActs(r) || s.isSync(v):
-		fail(w, http.StatusForbidden, "an agent cannot change a party or its members: a person does, as themselves, and an agent is never a member")
-	case isDev(v) && !byInstaller(v):
-		fail(w, http.StatusForbidden, "without this machine's installer token, a development viewer is no one: sign in to change a party")
-	case s.FarmBook == nil || s.FarmBookReader == nil:
-		fail(w, http.StatusNotImplemented, "this farm keeps no farm book (its install names no --system-store), and an organisation's members are the book's: it has no parties")
-	case s.Signer == nil:
-		fail(w, http.StatusServiceUnavailable, "a party is a signed record, and this HUD has no signer")
-	default:
-		return v
 	}
-	return nil
+	if code, msg := s.partyWriteRefusal(r, v); code != 0 {
+		fail(w, code, "%s", msg)
+		return nil
+	}
+	return v
+}
+
+// partyWriteRefusal is why v may make no party write here, with its
+// status, or 0: the guard every write passes, and what the viewer's
+// makeParties and makeOwnParty say.
+func (s *Server) partyWriteRefusal(r *http.Request, v *api.Viewer) (int, string) {
+	switch {
+	case v.Unit != nil:
+		return http.StatusForbidden, v.User + " is a unit: people keep the party list, and a unit is never a member"
+	case agentActs(r) || s.isSync(v):
+		return http.StatusForbidden, "an agent cannot change a party or its members: a person does, as themselves, and an agent is never a member"
+	case isDev(v) && !byInstaller(v):
+		return http.StatusForbidden, "without this machine's installer token, a development viewer is no one: sign in to change a party"
+	case s.FarmBook == nil || s.FarmBookReader == nil:
+		return http.StatusNotImplemented, noBookParties
+	case s.Signer == nil:
+		return http.StatusServiceUnavailable, "a party is a signed record, and this HUD has no signer"
+	}
+	return 0, ""
+}
+
+// farmAdminMakes is the farm admin's right make-party takes (DESIGN D8):
+// create on parties, or for a development viewer the farm-admin role or
+// every role (devrights). name "" asks of any party.
+func (s *Server) farmAdminMakes(ctx context.Context, r *http.Request, v *api.Viewer, name string) error {
+	return s.authorize(ctx, r, v, "", "create", "parties", name)
+}
+
+// withPartyRights is v as the HUD serves it (snapshot, events, needs-me),
+// a copy, with what it may do about the party list: makeParties, by the
+// guard and right make-party takes; bindingOwner, the farm binding's
+// owner; and makeOwnParty, that owner while their own Party doesn't exist,
+// by ownerMakesOwn's rule.
+func (s *Server) withPartyRights(r *http.Request, v *api.Viewer) *api.Viewer {
+	out := *v
+	ctx := r.Context()
+	ps, err := s.parties(ctx)
+	if err != nil {
+		return &out
+	}
+	b, err := s.farmBinding(ctx)
+	person := s.partyPerson(ctx, v, ps)
+	out.BindingOwner = err == nil && b != nil && person != "" && person == b.Spec.Owner
+	if code, _ := s.partyWriteRefusal(r, v); code != 0 {
+		return &out
+	}
+	out.MakeParties = s.farmAdminMakes(ctx, r, v, "") == nil
+	out.MakeOwnParty = out.BindingOwner && s.ownerMakesOwn(ctx, ps, person, &api.PartyRequest{Name: person, Kind: c4v1.PartyPerson}, nil)
+	return &out
 }
 
 // validSignIns checks a list of sign-in subjects: each well formed, a
@@ -760,7 +809,7 @@ func (s *Server) handleMakeParty(w http.ResponseWriter, r *http.Request) {
 	}
 	person := s.partyPerson(ctx, v, ps)
 	authz := s.authorization(v, "create", "parties", "", body.Name)
-	if err := s.authorize(ctx, r, v, "", "create", "parties", body.Name); err != nil {
+	if err := s.farmAdminMakes(ctx, r, v, body.Name); err != nil {
 		if !s.ownerMakesOwn(ctx, ps, person, &body, signIns) {
 			fail(w, http.StatusForbidden, "a farm admin keeps the party list: %v", err)
 			return
