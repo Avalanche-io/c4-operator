@@ -181,6 +181,10 @@ type Runner struct {
 	refused map[types.UID]bool
 	// relays is each pod's safe-point relay.
 	relays map[types.UID]*relayState
+	// unitKeys are the host units' keys the runner holds, and unitKeyErr
+	// why one couldn't be had, said once (unitkeys.go).
+	unitKeys   map[types.UID]*heldKey
+	unitKeyErr map[types.UID]string
 	// parts are blocks' next parts, by pod, to wake them for; since is
 	// when a block's session was last woken in its attempt
 	parts map[types.UID]string
@@ -309,6 +313,8 @@ func (r *Runner) Tick(ctx context.Context) error {
 		r.seen = map[types.UID]bool{}
 		r.asked = map[types.UID]time.Time{}
 		r.relays = map[types.UID]*relayState{}
+		r.unitKeys = map[types.UID]*heldKey{}
+		r.unitKeyErr = map[types.UID]string{}
 		r.parts = map[types.UID]string{}
 		r.fetched = map[types.UID]bool{}
 		r.waited = map[types.UID]bool{}
@@ -771,6 +777,7 @@ func (r *Runner) finish(ctx context.Context, p *corev1.Pod, phase corev1.PodPhas
 		delete(r.blockEnvs, p.UID)
 	}
 	r.recordEnd(ctx, p)
+	r.dropUnitKey(p, UnitDirsAt(r.unitRoot(p)))
 	now := metav1.NewTime(r.now())
 	started := now
 	if p.Status.StartTime != nil {

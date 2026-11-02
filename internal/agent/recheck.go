@@ -25,6 +25,8 @@ func (r *Runner) recheckDone(ctx context.Context, p *corev1.Pod, m *Member, u Un
 	if !withdrawn {
 		return r.needsInformation(ctx, p, m, text)
 	}
+	text = strings.TrimSpace(text)
+	r.signHostReport(ctx, p, u, "withdraw", map[string]any{"why": text})
 	return r.finish(ctx, p, corev1.PodSucceeded, c4v1.Withdrawn, text, 0)
 }
 

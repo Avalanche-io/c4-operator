@@ -2401,7 +2401,12 @@ served only at the HUD's own origin, as `/issuer/v1/people/`, outside
 Service) stays the workloads'; the HUD serves it to host runners alone, at
 `POST /workload/v1/certificate`, since a machine outside the cluster reaches
 the farm only at the HUD's address, and it certifies there only a host
-runner's own account (`c4-hosts/<node>`, as `runner/<node>`). The web
+runner's own account (`c4-hosts/<node>`, as `runner/<node>`). A host runner
+also has each of its units' keys certified there, at `POST
+/workload/v1/unit-certificate` (`{publicKey, namespace, pod}`), on a request
+it signs as `runner/<node>` (`X-C4-Request`): only a live unit pod bound to
+that Node, of a job whose owner is among the Node's owners, for an hour,
+the leaf naming the runner (`urn:c4:runner:<node>`). The web
 app's key lives in the HUD's storage, so it enrols without leaving the
 origin. The HUD certifies nothing: it tells the issuer only whom a read is
 for, and where a request came from. The issuer runs only where the install names its store

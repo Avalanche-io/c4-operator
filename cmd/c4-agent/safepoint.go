@@ -100,7 +100,7 @@ func unitEnv(h *agent.Harness, input []byte) (env []string, out, control string,
 		return nil, "", "", false
 	}
 	u := agent.UnitDirsAt(dir)
-	return append(os.Environ(), "C4_OUTPUT="+u.Out, "C4_CONTROL="+u.Control, "C4_PODINFO="+u.PodInfo), u.Out, u.Control, true
+	return agent.UnitEnv(u), u.Out, u.Control, true // with the unit's key, where its runner holds one
 }
 
 // steerWaiting reports whether the unit has a message it has not seen:

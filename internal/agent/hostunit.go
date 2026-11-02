@@ -160,6 +160,8 @@ func (r *Runner) relay(ctx context.Context, p *corev1.Pod, u UnitDirs) error {
 	if err := writePodInfo(u.PodInfo, p.Annotations); err != nil {
 		return err
 	}
+	// the unit's own key, for what it reports (unitkeys.go)
+	r.holdUnitKey(ctx, p, u)
 	st := r.relays[p.UID]
 	if st == nil {
 		st = &relayState{}

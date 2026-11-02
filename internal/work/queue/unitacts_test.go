@@ -3,6 +3,7 @@ package queue
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/json"
 	"strings"
@@ -29,7 +30,7 @@ const (
 // unitActsFarm is a job owned by dana with unit 3's pod on its second
 // attempt, a queue that checks against the farm's roots, and a signer for
 // any unit identity.
-func unitActsFarm(t *testing.T) (*Queue, *view, *corev1.Pod, func(identity string, a provenance.UnitAct) json.RawMessage) {
+func unitActsFarm(t *testing.T) (*Queue, *view, *corev1.Pod, func(identity string, a provenance.UnitAct) json.RawMessage, *provenance.CA) {
 	t.Helper()
 	now := time.Now()
 	ca, err := provenance.NewCA(now)
@@ -69,7 +70,7 @@ func unitActsFarm(t *testing.T) (*Queue, *view, *corev1.Pod, func(identity strin
 		}
 		return b
 	}
-	return q, v, p, sign
+	return q, v, p, sign, ca
 }
 
 func setActs(p *corev1.Pod, acts ...json.RawMessage) {
@@ -83,7 +84,7 @@ func setActs(p *corev1.Pod, acts ...json.RawMessage) {
 // pod, or saying something else. Each refusal is reported on the job.
 func TestUnitControlsAgainstTheirActs(t *testing.T) {
 	ctx, now := context.Background(), time.Now()
-	q, v, p, sign := unitActsFarm(t)
+	q, v, p, sign, ca := unitActsFarm(t)
 	me := provenance.UnitIdentity("show-a", "sh040-comp", "3", actsJob, 2)
 	ask := map[string]any{"seq": 1, "to": "unit:plan", "ask": "Which module owns the tokenizer?"}
 	askAct := func(identity string, a provenance.UnitAct) json.RawMessage {
@@ -131,6 +132,32 @@ func TestUnitControlsAgainstTheirActs(t *testing.T) {
 		}
 	}
 
+	// a host unit's act names its runner: the one its pod runs on
+	held := func(node string) json.RawMessage {
+		pub, key, _ := ed25519.GenerateKey(nil)
+		leaf, err := ca.IssueHostUnit(pub, me, node, time.Hour, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := provenance.EncodeHeld(key, []*x509.Certificate{leaf, ca.Cert})
+		s, _ := provenance.HeldSigner(b)
+		act, err := provenance.SignUnitAct(ctx, s, provenance.UnitAct{Subject: provenance.ActSubject("pod", "show-a", "sh040-comp-u3", actsPodUID, strings.Repeat("ab", 32)),
+			Act: "ask", Params: json.RawMessage(`{"seq":1,"to":"unit:plan","ask":"Which module owns the tokenizer?"}`), Owner: "dana"}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return act
+	}
+	p.Spec.NodeName = "laptop-1"
+	for node, ok := range map[string]bool{"laptop-1": true, "laptop-2": false} {
+		v.mem = newMem()
+		setActs(p, held(node))
+		if r, err := q.unitControl(ctx, v, p, "ask", bySeq(1), ask, now); (err == nil) != ok || ok && r["custody"] != custodyUnitSigned {
+			t.Errorf("a host unit's act through runner %s: %v %v", node, r, err)
+		}
+	}
+	p.Spec.NodeName = ""
+
 	// an act that doesn't verify is reported, and holds up nothing else
 	v.mem = newMem()
 	setActs(p, json.RawMessage(`{"mediaType":"not a bundle"}`), askAct(me, provenance.UnitAct{}))
@@ -150,7 +177,7 @@ func TestUnitControlsAgainstTheirActs(t *testing.T) {
 // its own, a wait from its safe point; each held to its act.
 func TestUnitReportsFromThePod(t *testing.T) {
 	ctx, now := context.Background(), time.Now()
-	q, v, p, sign := unitActsFarm(t)
+	q, v, p, sign, _ := unitActsFarm(t)
 	me := provenance.UnitIdentity("show-a", "sh040-comp", "3", actsJob, 2)
 	p.Status = corev1.PodStatus{Phase: corev1.PodFailed, ContainerStatuses: []corev1.ContainerStatus{{State: corev1.ContainerState{
 		Terminated: &corev1.ContainerStateTerminated{ExitCode: c4v1.NeedsExitCode, Message: "the delivery frame rate\nwhy: the brief gives 24 and 25\nabout: unit:schema"}}}}}

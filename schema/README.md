@@ -138,7 +138,9 @@ report on the node's word, not an act.
   device record.
 - **The leaf** names its identity in a URI SAN, as every C4 leaf does, and a
   person's device or an agent's grant in a further one:
-  `urn:c4:device:<device ID>`, `urn:c4:grant:<grant ID>`.
+  `urn:c4:device:<device ID>`, `urn:c4:grant:<grant ID>`. A host unit's leaf
+  names the host runner its key was issued through and is held by,
+  `urn:c4:runner:<node>`: its acts are what that runner vouches for.
 - **A device key is ECDSA P-256.** Its signature is raw `r||s`, 64 bytes,
   with a low S, so a signature has exactly one form. Farm parts stay Ed25519.
 - **A confirmed act has two signatures over its one payload,** the device

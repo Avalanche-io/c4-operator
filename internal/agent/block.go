@@ -342,7 +342,7 @@ func openAnswerWait(ctx context.Context, bin string, u UnitDirs, a *Asking, ref 
 		args = append(args, "--checkpoint", ref)
 	}
 	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Env = append(os.Environ(), "C4_OUTPUT="+u.Out, "C4_CONTROL="+u.Control, "C4_PODINFO="+u.PodInfo)
+	cmd.Env = UnitEnv(u) // with the unit's key, where its runner holds one
 	err = cmd.Run()
 	var exit *exec.ExitError
 	switch {
@@ -361,6 +361,9 @@ func openAnswerWait(ctx context.Context, bin string, u UnitDirs, a *Asking, ref 
 // information is supplied. Its checkpoint and its session's view are where
 // that attempt resumes.
 func (r *Runner) needsInformation(ctx context.Context, p *corev1.Pod, m *Member, msg string) error {
+	// cut to fit, and signed as the unit before it is reported
+	msg, params := fitNeeds(msg)
+	r.signHostReport(ctx, p, UnitDirsAt(r.unitRoot(p)), "needs", params)
 	r.logf("%s: needs information: %s", m.Name, strings.ReplaceAll(msg, "\n", "; "))
 	if cp, err := r.Harness.Store.Last(m.Name); err == nil && cp != nil {
 		if err := r.annotate(ctx, p, map[string]string{c4v1.AnnotationOutputCheckpoint: point(m, cp)}); err != nil {

@@ -27,7 +27,7 @@ import (
 // relays to the farm, and the farm checks each control against its act.
 //
 // A unit on a farm with no issuer, or one the farm gave no key
-// ($C4_SIGNER unset, a host runner's unit until its runner keeps keys),
+// (neither $C4_SIGNER nor a key its host runner holds, $C4_UNIT_KEY),
 // signs nothing: its controls go as before, on its node's word, and the
 // farm books them unsigned.
 
@@ -60,7 +60,34 @@ func (u Unit) get(k string) string {
 }
 
 // Signs reports whether this unit has a key to sign with.
-func (u Unit) Signs() bool { return u.get("C4_SIGNER") != "" || u.Issue != nil }
+func (u Unit) Signs() bool {
+	return u.get("C4_SIGNER") != "" || u.get("C4_UNIT_KEY") != "" || u.Issue != nil
+}
+
+// signer is the unit's signer: the key its host runner holds for it
+// ($C4_UNIT_KEY), else a key made now and certified on the pod's own
+// token.
+func (u Unit) signer(ctx context.Context) (*provenance.Signer, error) {
+	if path := u.get("C4_UNIT_KEY"); path != "" && u.Issue == nil {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		return provenance.HeldSigner(b)
+	}
+	issue := u.Issue
+	if issue == nil {
+		file := u.get("C4_SIGNER_TOKEN_FILE")
+		issue = provenance.RemoteIssuer(u.get("C4_SIGNER"), func() (string, error) {
+			b, err := os.ReadFile(file)
+			if err != nil || strings.TrimSpace(string(b)) == "" {
+				return "", fmt.Errorf("no issuer token at %s", file)
+			}
+			return strings.TrimSpace(string(b)), nil
+		}, nil)
+	}
+	return provenance.NewSigner(ctx, issue)
+}
 
 // Sign signs act with params as this unit and appends it to the
 // unit's .c4/acts under out, returning its place there (from 1), or 0
@@ -88,20 +115,9 @@ func (u Unit) Sign(out, act string, params map[string]any) (int, error) {
 	if len(missing) > 0 {
 		return 0, fmt.Errorf("the unit cannot sign: %s not set", strings.Join(missing, ", "))
 	}
-	issue := u.Issue
-	if issue == nil {
-		file := u.get("C4_SIGNER_TOKEN_FILE")
-		issue = provenance.RemoteIssuer(u.get("C4_SIGNER"), func() (string, error) {
-			b, err := os.ReadFile(file)
-			if err != nil || strings.TrimSpace(string(b)) == "" {
-				return "", fmt.Errorf("no issuer token at %s", file)
-			}
-			return strings.TrimSpace(string(b)), nil
-		}, nil)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	s, err := provenance.NewSigner(ctx, issue)
+	s, err := u.signer(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("the unit's key: %w", err)
 	}

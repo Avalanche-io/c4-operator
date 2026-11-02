@@ -102,6 +102,9 @@ func (q *Queue) checkReport(v *view, p *corev1.Pod, b []byte, now time.Time) uni
 		r.err = fmt.Errorf("for %s, and the job's owner is %q", a.Predicate.Chain.For.Party, owner)
 	case len(vr.Subjects) != 1 || vr.Subjects[0].Name != on.Name || vr.Subjects[0].Digest["sha256"] != on.Digest["sha256"]:
 		r.err = fmt.Errorf("on another pod or spec, not %s", on.Name)
+	case vr.Runner != "" && vr.Runner != p.Spec.NodeName:
+		// a host unit's key is held by its runner: the one it runs under
+		r.err = fmt.Errorf("its key is held by runner %s, and pod %s runs on %q", vr.Runner, p.Name, p.Spec.NodeName)
 	}
 	return r
 }
