@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "path",
+  "errors": [
+    {
+      "path": "predicate.path",
+      "message": "\"https://hud.studio.example/api/v1/jobs/saltmarsh\" is not a request target",
+      "fix": "write the target exactly as sent, in origin form: /api/v1/jobs/show-a?state=running, never a full URL"
+    }
+  ]
+}

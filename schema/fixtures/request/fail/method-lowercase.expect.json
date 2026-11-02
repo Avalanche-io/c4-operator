@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "enum",
+  "errors": [
+    {
+      "path": "predicate.method",
+      "message": "\"get\" is not one of GET, HEAD, POST, PUT, PATCH, DELETE",
+      "fix": "did you mean \"GET\"?"
+    }
+  ]
+}

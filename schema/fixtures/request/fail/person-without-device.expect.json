@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "device",
+  "errors": [
+    {
+      "path": "predicate",
+      "message": "a person's request names the device that signed it",
+      "fix": "add device: the device key's ID, as its certificate names it"
+    }
+  ]
+}

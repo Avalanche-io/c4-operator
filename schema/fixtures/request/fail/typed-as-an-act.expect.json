@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "const",
+  "errors": [
+    {
+      "path": "predicateType",
+      "message": "predicateType must be https://cccc.io/provenance/request/v1",
+      "fix": "write predicateType: https://cccc.io/provenance/request/v1"
+    }
+  ]
+}

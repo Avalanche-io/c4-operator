@@ -1260,10 +1260,12 @@ func (s *Server) handleSchema(w http.ResponseWriter, r *http.Request) {
 		b = schema.ActSchema()
 	case "device":
 		b = schema.DeviceSchema()
+	case "request":
+		b = schema.RequestSchema()
 	case "book":
 		b = schema.BookSchema()
 	default:
-		fail(w, http.StatusNotFound, "no schema %s: there are submit, tool, lock, card, act, device and book", r.PathValue("format"))
+		fail(w, http.StatusNotFound, "no schema %s: there are submit, tool, lock, card, act, device, request and book", r.PathValue("format"))
 		return
 	}
 	w.Header().Set("Content-Type", "application/schema+json")

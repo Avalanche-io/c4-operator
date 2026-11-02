@@ -34,6 +34,9 @@ func TestParseFixtures(t *testing.T) {
 			case "book":
 				b, e := ParseBookSegment(c.Doc)
 				parsed, errs = b, e
+			case "request":
+				rq, e := ParseRequest(c.Doc)
+				parsed, errs = rq, e
 			default:
 				tl, e := ParseTool(c.Doc)
 				parsed, errs = tl, e
@@ -61,7 +64,7 @@ func TestParseFixtures(t *testing.T) {
 // validator accept and refuse the same fixtures.
 func TestParsersAgreeWithTheSchema(t *testing.T) {
 	for _, c := range cases(t) {
-		rs := resolve(t, map[string][]byte{"submit": SubmitSchema(), "tool": ToolSchema(), "chain": ChainSchema(), "card": CardSchema(), "act": ActSchema(), "device": DeviceSchema(), "book": BookSchema()}[c.Format])
+		rs := resolve(t, map[string][]byte{"submit": SubmitSchema(), "tool": ToolSchema(), "chain": ChainSchema(), "card": CardSchema(), "act": ActSchema(), "device": DeviceSchema(), "book": BookSchema(), "request": RequestSchema()}[c.Format])
 		validErr := rs.Validate(value(t, c.Doc))
 		var errs []Error
 		switch c.Format {
@@ -77,6 +80,8 @@ func TestParsersAgreeWithTheSchema(t *testing.T) {
 			_, errs = ParseDevice(c.Doc)
 		case "book":
 			_, errs = ParseBookSegment(c.Doc)
+		case "request":
+			_, errs = ParseRequest(c.Doc)
 		default:
 			_, errs = ParseTool(c.Doc)
 		}

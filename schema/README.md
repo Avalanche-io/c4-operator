@@ -12,30 +12,32 @@ wraps a tool writes Kubernetes objects:
   `affectsOutput`), what it reads and writes, what it needs, how its progress
   and errors are read, and a test.
 
-| file                                | what it is                                                                                                                                                                                                       |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `submit-1.schema.json`              | JSON Schema 2020-12 for a submission, served as `GET /schema/submit`                                                                                                                                             |
-| `tool-1.schema.json`                | JSON Schema 2020-12 for a tool, served as `GET /schema/tool`                                                                                                                                                     |
-| `fixtures/farm.yaml`                | the farm the fixtures are checked against: projects, milestones, people, roles, tools                                                                                                                            |
-| `fixtures/submit/pass/`             | every worked submission in the format's design, and every fragment wrapped whole                                                                                                                                 |
-| `fixtures/submit/slice1.yaml`       | the passing submissions slice 1 cannot lower yet, each with its exact refusals; the rest it runs                                                                                                                 |
-| `fixtures/submit/fail/`             | submissions that must be refused, each with `<case>.expect.json`                                                                                                                                                 |
-| `fixtures/tool/pass/<tool>/`        | every worked tool, the snippets wrapped whole, and the tools the submissions name                                                                                                                                |
-| `fixtures/tool/fail/`               | tools that must be refused, each with `<case>.expect.json`                                                                                                                                                       |
-| `chain-1.schema.json`               | JSON Schema for the accountability chain (`chain/1`) every signed record and book entry carries; `chain.go` has its type, `ParseChain` and `Line`, the chain read aloud                                          |
-| `fixtures/chain/`                   | chains that pass (each with its `.line.txt`, read with `names.yaml`) and chains refused, with their errors                                                                                                       |
-| `lock-1.schema.json`                | JSON Schema for `tool.lock` (`c4: lock/1`): each image a tool names, pinned by digest                                                                                                                            |
-| `card-1.schema.json`                | JSON Schema for a tree's card, `.c4/card.yaml` (`c4: card/1`): what the tree is, its source at a pinned commit or the job that made it, its licence; served as `GET /schema/card`                                |
-| `fixtures/card/`                    | cards that pass (a hub import, a job's output, an upload) and cards refused, with their errors                                                                                                                   |
-| `act-1.schema.json`                 | JSON Schema for an act statement (`act/v1`): one act, signed by its actor's own key, which the HUD's control record cites; served as `GET /schema/act`                                                           |
-| `device-1.schema.json`              | JSON Schema for a device record (`device/v1`): one of a person's device keys as the farm enrolled it; served as `GET /schema/device`                                                                             |
-| `fixtures/act/`, `fixtures/device/` | acts that pass (a person's, a confirmed one, an agent's, a unit's, a relayed one, a submission, a device removal) and device records (each with a real P-256 key and proof), and both refused, with their errors |
-| `book-1.schema.json`                | JSON Schema for a farm book segment (`book/v1`): one sealed run of the farm-wide log of farm-level acts, signed by the queue; served as `GET /schema/book`; `book.go` has its type and `ParseBookSegment`        |
-| `fixtures/book/`                    | segments that pass (grants with a flag, the people's index adopted, refusals only) and segments refused, with their errors                                                                                       |
-| `act.go`                            | `Act`, `Device`, `ParseAct`, `ParseDevice`, `ParamsID`, `DeviceID`, and `Canonical`, canonical JSON (RFC 8785)                                                                                                   |
-| `types.go`                          | `Submission`, `Tool`, `Lock`, `Card` and their parts, as the lowering, the runner and the CLI read them                                                                                                          |
-| `parse.go`                          | `ParseSubmission`, `ParseTool`, `ParseLock`, `ParseCard`, `ToJSON`: the shape checked, errors in the farm's words                                                                                                |
-| `schema.go`                         | the embedded schemas and fixtures: `SubmitSchema()`, `ToolSchema()`, `LockSchema()`, `CardSchema()`, `Fixtures()`, `Cases()`                                                                                     |
+| file                                | what it is                                                                                                                                                                                                                 |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `submit-1.schema.json`              | JSON Schema 2020-12 for a submission, served as `GET /schema/submit`                                                                                                                                                       |
+| `tool-1.schema.json`                | JSON Schema 2020-12 for a tool, served as `GET /schema/tool`                                                                                                                                                               |
+| `fixtures/farm.yaml`                | the farm the fixtures are checked against: projects, milestones, people, roles, tools                                                                                                                                      |
+| `fixtures/submit/pass/`             | every worked submission in the format's design, and every fragment wrapped whole                                                                                                                                           |
+| `fixtures/submit/slice1.yaml`       | the passing submissions slice 1 cannot lower yet, each with its exact refusals; the rest it runs                                                                                                                           |
+| `fixtures/submit/fail/`             | submissions that must be refused, each with `<case>.expect.json`                                                                                                                                                           |
+| `fixtures/tool/pass/<tool>/`        | every worked tool, the snippets wrapped whole, and the tools the submissions name                                                                                                                                          |
+| `fixtures/tool/fail/`               | tools that must be refused, each with `<case>.expect.json`                                                                                                                                                                 |
+| `chain-1.schema.json`               | JSON Schema for the accountability chain (`chain/1`) every signed record and book entry carries; `chain.go` has its type, `ParseChain` and `Line`, the chain read aloud                                                    |
+| `fixtures/chain/`                   | chains that pass (each with its `.line.txt`, read with `names.yaml`) and chains refused, with their errors                                                                                                                 |
+| `lock-1.schema.json`                | JSON Schema for `tool.lock` (`c4: lock/1`): each image a tool names, pinned by digest                                                                                                                                      |
+| `card-1.schema.json`                | JSON Schema for a tree's card, `.c4/card.yaml` (`c4: card/1`): what the tree is, its source at a pinned commit or the job that made it, its licence; served as `GET /schema/card`                                          |
+| `fixtures/card/`                    | cards that pass (a hub import, a job's output, an upload) and cards refused, with their errors                                                                                                                             |
+| `act-1.schema.json`                 | JSON Schema for an act statement (`act/v1`): one act, signed by its actor's own key, which the HUD's control record cites; served as `GET /schema/act`                                                                     |
+| `device-1.schema.json`              | JSON Schema for a device record (`device/v1`): one of a person's device keys as the farm enrolled it; served as `GET /schema/device`                                                                                       |
+| `fixtures/act/`, `fixtures/device/` | acts that pass (a person's, a confirmed one, an agent's, a unit's, a relayed one, a submission, a device removal) and device records (each with a real P-256 key and proof), and both refused, with their errors           |
+| `book-1.schema.json`                | JSON Schema for a farm book segment (`book/v1`): one sealed run of the farm-wide log of farm-level acts, signed by the queue; served as `GET /schema/book`; `book.go` has its type and `ParseBookSegment`                  |
+| `fixtures/book/`                    | segments that pass (grants with a flag, the people's index adopted, refusals only) and segments refused, with their errors                                                                                                 |
+| `request-1.schema.json`             | JSON Schema for a signed request (`request/v1`): one HTTP request signed by the client that sends it, never an act; served as `GET /schema/request`; `request.go` has its type, `ParseRequest`, `NewRequest` and `Matches` |
+| `fixtures/request/`                 | requests that pass (a person's CLI, an agent, a host runner, a unit) and requests refused, with their errors                                                                                                               |
+| `act.go`                            | `Act`, `Device`, `ParseAct`, `ParseDevice`, `ParamsID`, `DeviceID`, and `Canonical`, canonical JSON (RFC 8785)                                                                                                             |
+| `types.go`                          | `Submission`, `Tool`, `Lock`, `Card` and their parts, as the lowering, the runner and the CLI read them                                                                                                                    |
+| `parse.go`                          | `ParseSubmission`, `ParseTool`, `ParseLock`, `ParseCard`, `ToJSON`: the shape checked, errors in the farm's words                                                                                                          |
+| `schema.go`                         | the embedded schemas and fixtures: `SubmitSchema()`, `ToolSchema()`, `LockSchema()`, `CardSchema()`, `Fixtures()`, `Cases()`                                                                                               |
 
 ## Two checkers, one set of answers
 
@@ -163,6 +165,39 @@ the SHA-256 of `ProofMessage`. A renewal is a record of its own, naming the reco
 `proof` is the key's own signature over its enrolment request, the canonical
 JSON of `{farm, person, key, touchFor, nonce, requestedAt}`
 (`ProofMessage`); `go test ./schema` verifies every fixture's.
+
+## A signed request: request/v1
+
+Every client that isn't a browser signs each request it sends: a person's
+CLI, an agent's MCP server, a host runner, a unit. A browser rides the
+session its device key opens instead.
+- **What it proves:** who is calling, for this farm, now, and nothing more.
+- **Never an act:** a request that changes something carries its act beside
+  it (`X-C4-Act`), and neither stands in for the other. The signer policy
+  judges a request as its own kind.
+
+**The statement** (`https://cccc.io/provenance/request/v1`) is an in-toto
+statement in a DSSE envelope, sent base64 in the `X-C4-Request` header.
+- **Its one subject is the body:** `{name: body, digest: {sha256}}`, the
+  SHA-256 of the bytes as sent (`BodyDigest`). A request with no body signs
+  the empty body's.
+- **`farm`:** the farm's ID, as an act names it. A request signed for one
+  farm never verifies at another that trusts the same leaf.
+- **`method`:** in capitals.
+- **`path`:** the request target exactly as sent, in origin form: the escaped
+  path and, with a query, `?` and the raw query. It's compared byte for byte
+  with the request line (`http.Request.RequestURI`), so nothing is decoded
+  or re-encoded between. A proxy in front of the HUD must pass the target
+  through unchanged.
+- **`signer`:** the leaf's identity: `user/`, `agent/`, `unit/` or
+  `runner/`. A person's request also names its `device`, as an act does.
+  Nobody else's does.
+- **`nonce` and `signedAt`:** as an act's. The farm refuses a request more
+  than five minutes from its clock, and takes each once by the SHA-256 of
+  its payload.
+
+`Matches` holds a statement to the request it came with: the method, the
+target and the body. `NewRequest` makes the statement a client signs.
 
 ## The farm book: book/v1
 

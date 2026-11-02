@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "const",
+  "errors": [
+    {
+      "path": "subject[0].name",
+      "message": "a signed request is on its body",
+      "fix": "write subject: [{name: body, digest: {sha256: <the body's SHA-256>}}]"
+    }
+  ]
+}

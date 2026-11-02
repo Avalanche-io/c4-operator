@@ -310,6 +310,22 @@ func (k *Key) chain(a Act) schema.ActChain {
 	return c
 }
 
+// SignRequest signs one HTTP request as k (request/v1): its method, its
+// target exactly as sent, and its body, for the farm now. It returns the
+// value of the X-C4-Request header: the bundle, base64.
+func (f *Farm) SignRequest(t testing.TB, k *Key, method, target string, body []byte) string {
+	t.Helper()
+	nonce := make([]byte, 16)
+	rand.Read(nonce)
+	st := schema.NewRequest(schema.RequestPredicate{Farm: f.ID, Method: method, Path: target, Signer: k.Identity, Device: k.Device,
+		Nonce: base64.RawURLEncoding.EncodeToString(nonce), SignedAt: f.Now.UTC().Format(time.RFC3339Nano)}, body)
+	payload, err := json.Marshal(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base64.StdEncoding.EncodeToString(Sign(t, payload, k, false))
+}
+
 // SignAct signs the act as k: a bundle, confirmed with k's touch key
 // when a.Confirmed.
 func (f *Farm) SignAct(t testing.TB, k *Key, a Act) []byte {

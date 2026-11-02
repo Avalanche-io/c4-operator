@@ -167,7 +167,7 @@ var (
 func schemaFor(format string) (*jsonschema.Schema, error) {
 	resolvedOnce.Do(func() {
 		schemas = map[string]*jsonschema.Schema{}
-		for f, b := range map[string][]byte{"submit": submit, "tool": tool, "lock": lock, "card": card, "chain": chainSchema, "act": actSchema, "device": deviceSchema, "book": bookSchema} {
+		for f, b := range map[string][]byte{"submit": submit, "tool": tool, "lock": lock, "card": card, "chain": chainSchema, "act": actSchema, "device": deviceSchema, "book": bookSchema, "request": requestSchema} {
 			s := new(jsonschema.Schema)
 			if err := json.Unmarshal(b, s); err != nil {
 				resolveErr = fmt.Errorf("schema %s: %w", f, err)
@@ -228,7 +228,7 @@ func dedupe(errs []Error) []Error {
 	return out
 }
 
-var rootNoun = map[string]string{"submit": "a submission", "tool": "a tool", "lock": "a tool.lock", "card": "a card", "chain": "a chain", "act": "an act statement", "device": "a device record", "book": "a book segment"}
+var rootNoun = map[string]string{"submit": "a submission", "tool": "a tool", "lock": "a tool.lock", "card": "a card", "chain": "a chain", "act": "an act statement", "device": "a device record", "book": "a book segment", "request": "a signed request"}
 
 // nouns name the $defs in errors: "frame" is not a field of a job.
 var nouns = map[string]string{
@@ -861,6 +861,25 @@ func (c *checker) say(kind string, shape []string, path []elem, v any, ctx map[s
 		return fmt.Sprintf("%s is not a time in UTC", quote(v)), "write RFC 3339 in UTC, as 2026-10-31T21:40:00Z"
 	case "maxItems act subject", "maxItems device subject":
 		return "a record is on one subject", "keep one; an act on several things is several acts"
+	// A signed request.
+	case "pattern request predicate.path":
+		return fmt.Sprintf("%s is not a request target", quote(v)), "write the target exactly as sent, in origin form: /api/v1/jobs/show-a?state=running, never a full URL"
+	case "pattern request predicate.signer":
+		return fmt.Sprintf("%s does not sign requests", quote(v)), "a request is signed by its client: a person's CLI (user/), an agent (agent/), a unit (unit/) or a host runner (runner/)"
+	case "required request predicate":
+		if ctx["field"] == "device" {
+			return "a person's request names the device that signed it", "add device: the device key's ID, as its certificate names it"
+		}
+	case "forbidden request predicate.device":
+		return "only a person's own device signs with a device key", "remove device: an agent, a unit or a runner signs with its own certificate"
+	case "const request subject[].name":
+		return "a signed request is on its body", "write subject: [{name: body, digest: {sha256: <the body's SHA-256>}}]"
+	case "pattern request predicate.nonce":
+		return fmt.Sprintf("%s is not a nonce", quote(v)), "write 16 random bytes as base64url: 22 characters, no padding"
+	case "pattern request predicate.signedAt":
+		return fmt.Sprintf("%s is not a time in UTC", quote(v)), "write RFC 3339 in UTC, as 2026-10-31T21:40:00Z"
+	case "maxItems request subject":
+		return "a signed request is on one subject, its body", "keep the body's digest alone"
 	// A device record.
 	case "pattern device predicate.key":
 		return "the key is not a P-256 public key", "write its DER SubjectPublicKeyInfo, the point uncompressed (91 bytes), as base64url without padding"

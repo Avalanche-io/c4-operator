@@ -220,7 +220,7 @@ func TestPublishToolOffersOnlyWhatPassed(t *testing.T) {
 
 func TestSchemaEndpoints(t *testing.T) {
 	s := toolFarm(t)
-	for format, want := range map[string][]byte{"submit": schema.SubmitSchema(), "tool": schema.ToolSchema(), "act": schema.ActSchema(), "device": schema.DeviceSchema()} {
+	for format, want := range map[string][]byte{"submit": schema.SubmitSchema(), "tool": schema.ToolSchema(), "act": schema.ActSchema(), "device": schema.DeviceSchema(), "request": schema.RequestSchema(), "book": schema.BookSchema()} {
 		w := httptestGet(s, "/api/v1/schema/"+format+"?as=artist")
 		if w.Code != 200 || !bytes.Equal(w.Body.Bytes(), want) {
 			t.Fatalf("%s: %d", format, w.Code)

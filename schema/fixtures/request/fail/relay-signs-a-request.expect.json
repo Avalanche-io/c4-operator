@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "signer",
+  "errors": [
+    {
+      "path": "predicate.signer",
+      "message": "\"https://cccc.io/id/sa/saltmarsh/flow-sync\" does not sign requests",
+      "fix": "a request is signed by its client: a person's CLI (user/), an agent (agent/), a unit (unit/) or a host runner (runner/)"
+    }
+  ]
+}

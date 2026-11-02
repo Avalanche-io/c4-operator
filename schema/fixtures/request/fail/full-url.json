@@ -1,0 +1,21 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "body",
+      "digest": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  ],
+  "predicateType": "https://cccc.io/provenance/request/v1",
+  "predicate": {
+    "farm": "c44idf4JMNHVz2qxyvz7f6uEYWzv4JCZ9sAfgtubwd7WeHAXcGjbK4pUuZtQ5uoUoafSYNFdhgUWohqTkLtNMvYjBy",
+    "method": "GET",
+    "path": "https://hud.studio.example/api/v1/jobs/saltmarsh",
+    "signer": "https://cccc.io/id/user/noor",
+    "device": "c43uiYf8PZbmgeWb2HEWXAK5hcj1dvLTVxaUjEWhLUhU1wBvjQWaJYzTuoNrcwx7dSiwWDrnec9se3bsaqD2u8xefS",
+    "nonce": "efwcp4fZT8akBKMZl4AaDQ",
+    "signedAt": "2026-11-01T19:20:05Z"
+  }
+}

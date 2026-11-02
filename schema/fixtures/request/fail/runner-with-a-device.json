@@ -1,0 +1,21 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "body",
+      "digest": {
+        "sha256": "c4a0a34a3ea8866ffe73497be8d64596121807f9cf4c02b83b460b76f49c94bc"
+      }
+    }
+  ],
+  "predicateType": "https://cccc.io/provenance/request/v1",
+  "predicate": {
+    "farm": "c44idf4JMNHVz2qxyvz7f6uEYWzv4JCZ9sAfgtubwd7WeHAXcGjbK4pUuZtQ5uoUoafSYNFdhgUWohqTkLtNMvYjBy",
+    "method": "POST",
+    "path": "/api/v1/observed",
+    "signer": "https://cccc.io/id/runner/laptop-1",
+    "nonce": "_WzqghnfTF9HI4JAmSZxGg",
+    "signedAt": "2026-11-01T19:20:05Z",
+    "device": "c43uiYf8PZbmgeWb2HEWXAK5hcj1dvLTVxaUjEWhLUhU1wBvjQWaJYzTuoNrcwx7dSiwWDrnec9se3bsaqD2u8xefS"
+  }
+}

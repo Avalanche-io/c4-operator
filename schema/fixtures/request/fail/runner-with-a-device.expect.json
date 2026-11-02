@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "not",
+  "errors": [
+    {
+      "path": "predicate.device",
+      "message": "only a person's own device signs with a device key",
+      "fix": "remove device: an agent, a unit or a runner signs with its own certificate"
+    }
+  ]
+}

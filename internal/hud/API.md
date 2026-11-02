@@ -1931,6 +1931,8 @@ came from and its licence. `GET /schema/act` and `GET /schema/device` serve
 the records of personal keys: an act signed by its actor's own key, and a
 person's device key as the farm enrolled it (`schema/README.md`). `GET
 /schema/book` serves a farm book segment (`book/v1`, `GET /book/farm`).
+`GET /schema/request` serves a signed request (`request/v1`), which a
+client that isn't a browser sends in `X-C4-Request`.
 
 ### POST /tools/{project}
 

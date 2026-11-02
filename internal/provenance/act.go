@@ -20,6 +20,11 @@ const (
 	// PredicateDevice: one of a person's device keys, as the people's
 	// issuer enrolled it. Signed by the issuer.
 	PredicateDevice = schema.DevicePredicateType
+	// PredicateRequest: one HTTP request, signed by the client that sends
+	// it (a person's CLI, an agent, a unit or a host runner). It proves who
+	// is calling and nothing more: it is never an act, and CheckSigner
+	// judges it as its own kind.
+	PredicateRequest = schema.RequestPredicateType
 )
 
 // AgentIdentity is an agent's identity outside a job, acting under a

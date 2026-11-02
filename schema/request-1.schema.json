@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cccc.io/schema/request-1.schema.json",
+  "title": "C4 signed request (request/v1)",
+  "description": "One HTTP request, signed by the client that sends it, for every client that isn't a browser: the CLI, the MCP server, host runners and units. It proves who is calling, for this farm, now, and nothing more: it is never an act, and a request that changes something carries its act beside it. It is an in-toto statement in a DSSE envelope, as every C4 record is, sent base64 in the X-C4-Request header.",
+  "type": "object",
+  "required": [
+    "_type",
+    "subject",
+    "predicateType",
+    "predicate"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "_type": {
+      "const": "https://in-toto.io/Statement/v1"
+    },
+    "subject": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "$ref": "#/$defs/subject"
+      },
+      "description": "The request's body, exactly one."
+    },
+    "predicateType": {
+      "const": "https://cccc.io/provenance/request/v1"
+    },
+    "predicate": {
+      "$ref": "#/$defs/request"
+    }
+  },
+  "$defs": {
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "digest"
+      ],
+      "description": "The body, by the SHA-256 of its bytes as sent. A request with no body signs the empty body's (e3b0c442...).",
+      "properties": {
+        "name": {
+          "const": "body"
+        },
+        "digest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sha256"
+          ],
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "farm",
+        "method",
+        "path",
+        "signer",
+        "nonce",
+        "signedAt"
+      ],
+      "properties": {
+        "farm": {
+          "$ref": "#/$defs/id",
+          "description": "The farm's ID, as an act names it: a request signed for one farm never verifies at another that trusts the same leaf."
+        },
+        "method": {
+          "enum": [
+            "GET",
+            "HEAD",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/[^\\s#]*$",
+          "description": "The request target exactly as sent, in origin form: the escaped path and, with a query, ? and the raw query (/api/v1/jobs/show-a?state=running). The farm compares it byte for byte with the request line, so a client signs what it sends, and nothing is decoded or re-encoded between."
+        },
+        "signer": {
+          "type": "string",
+          "pattern": "^https://cccc\\.io/id/(user|agent|unit|runner)/\\S+$",
+          "description": "Who sends it: the identity in the leaf certificate. A person's CLI (user/), an agent's MCP server (agent/), a unit (unit/) or a host runner (runner/)."
+        },
+        "device": {
+          "$ref": "#/$defs/id",
+          "description": "A person's request: the device key that signed it, as the leaf's urn:c4:device: names it."
+        },
+        "nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{22}$",
+          "description": "16 random bytes the signer makes, base64url without padding."
+        },
+        "signedAt": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$",
+          "description": "When the client signed, by its own clock, RFC 3339 in UTC. The farm refuses a request more than five minutes from its own clock, and takes each once."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "signer": {
+                "pattern": "^https://cccc\\.io/id/user/"
+              }
+            },
+            "required": [
+              "signer"
+            ]
+          },
+          "then": {
+            "required": [
+              "device"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "device"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^c4[1-9A-HJ-NP-Za-km-z]{88}$",
+      "description": "A record's C4 ID."
+    }
+  }
+}
