@@ -350,3 +350,35 @@ func TestPlantedTouchKeyNotEnrolled(t *testing.T) {
 		t.Errorf("a planted touch key was enrolled: %v %+v", err, cert)
 	}
 }
+
+// Review probe P9: a new device's label, its own claim, reaches the
+// terminal as printable text only: no escape sequence, no clipboard write.
+func TestNoticeLabelIsPrintable(t *testing.T) {
+	o := newOwnerIssuer(t)
+	ctx := context.Background()
+	st := keystore.Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
+	if _, err := EnrolOwner(ctx, o.client, st, "noor"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := PeopleConfig(ctx, o.client)
+	NewDevices(ctx, o.client, st, cfg)
+	code, err := BookBrowserCode(ctx, o.client, st, o.scratch.ID, "noor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	k, _ := keystore.Store{Dir: filepath.Join(t.TempDir(), "b"), FileOnly: true}.Key(keystore.Device)
+	e, _ := enrolment(k, o.scratch.ID, "noor", "")
+	e.Kind, e.Protection, e.Code = "browser", schema.ProtectionBrowser, code
+	e.Label = "Safari on your Mac\x1b[2K\r\x1b]52;c;ZXZpbA==\x07‮"
+	if err := o.client.Issuer(ctx, http.MethodPost, "/v1/people/browser", e, nil); err != nil {
+		t.Fatal(err)
+	}
+	ns, err := NewDevices(ctx, o.client, st, cfg)
+	if err != nil || len(ns) != 1 {
+		t.Fatalf("notices %v %+v", err, ns)
+	}
+	s := ns[0].String()
+	if strings.ContainsAny(s, "\x1b\r\x07‮") || !strings.Contains(s, `calls itself "Safari on your Mac[2K]52;c;ZXZpbA=="`) {
+		t.Errorf("notice %q", s)
+	}
+}

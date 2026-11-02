@@ -173,7 +173,7 @@ func TestNewDevicesAreToldFromTheIndex(t *testing.T) {
 	if err != nil || len(ns) != 1 || ns[0].Device != d.ID || ns[0].Problem != "" || ns[0].Kind != "browser" {
 		t.Fatalf("the new device: %v %+v", err, ns)
 	}
-	if !strings.Contains(ns[0].String(), "a new device signed in as you: dana's browser (browser)") {
+	if !strings.Contains(ns[0].String(), `a new device signed in as you: browser that calls itself "dana's browser"`) {
 		t.Errorf("said: %s", ns[0])
 	}
 	if again, err := NewDevices(ctx, c, st, cfg); err != nil || len(again) != 0 {

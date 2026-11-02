@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/Avalanche-io/c4-operator/internal/keystore"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
@@ -69,17 +70,44 @@ type DeviceNotice struct {
 	Problem string
 }
 
-// String is the notice as the CLI says it.
+// String is the notice as the CLI says it. Its label is the device's own
+// claim, and every field is printable text only: a device names itself,
+// and a name must not move the cursor or write the clipboard.
 func (n DeviceNotice) String() string {
-	what := n.Kind
+	what := Printable(n.Kind)
 	if n.Label != "" {
-		what = n.Label + " (" + n.Kind + ")"
+		what = Printable(n.Kind) + ` that calls itself "` + Printable(n.Label) + `"`
 	}
-	s := fmt.Sprintf("a new device signed in as you: %s, %s, on %s", what, n.At, n.Evidence)
+	s := fmt.Sprintf("a new device signed in as you: %s (%s), %s, on %s", what, ShortDevice(n.Device), Printable(n.At), Printable(n.Evidence))
 	if n.Problem != "" {
-		s += "; it doesn't check: " + n.Problem
+		s += "; it doesn't check: " + Printable(n.Problem)
 	}
 	return s + ". If it wasn't you, remove it from another of your devices"
+}
+
+// Printable is s with nothing a terminal acts on: no control characters
+// (C0, DEL, C1, so no escape sequence), no bidirectional overrides, and at
+// most 80 characters.
+func Printable(s string) string {
+	var b strings.Builder
+	n := 0
+	for _, r := range s {
+		switch {
+		case r < 0x20 || r == 0x7f || r >= 0x80 && r <= 0x9f:
+			continue
+		case r >= 0x202a && r <= 0x202e || r >= 0x2066 && r <= 0x2069 || r == 0x200e || r == 0x200f || r == 0x061c:
+			continue
+		case unicode.Is(unicode.Cc, r) || unicode.Is(unicode.Cf, r):
+			continue
+		}
+		if n == 80 {
+			b.WriteString("…")
+			break
+		}
+		b.WriteRune(r)
+		n++
+	}
+	return b.String()
 }
 
 // errNoHead is a page of the index without the head the issuer signed.
