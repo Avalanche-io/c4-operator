@@ -61,6 +61,17 @@ func newActBook(t *testing.T) *actBook {
 // would: a device entry pending, citing the record it stores.
 func (a *actBook) enrol(t *testing.T, k *provtest.Key, person, kind, label, protection string) {
 	t.Helper()
+	a.enrolKey(t, k, "", person, kind, label, protection)
+}
+
+// enrolTouch books k's touch key's device record, a touch key for k.
+func (a *actBook) enrolTouch(t *testing.T, k *provtest.Key, person string) {
+	t.Helper()
+	a.enrolKey(t, k.Touch, k.Device, person, "mac", "", schema.ProtectionHardware)
+}
+
+func (a *actBook) enrolKey(t *testing.T, k *provtest.Key, touchFor, person, kind, label, protection string) {
+	t.Helper()
 	ctx := context.Background()
 	spki, err := x509.MarshalPKIXPublicKey(&k.P256.PublicKey)
 	if err != nil {
@@ -69,7 +80,7 @@ func (a *actBook) enrol(t *testing.T, k *provtest.Key, person, kind, label, prot
 	nonce := make([]byte, 16)
 	rand.Read(nonce)
 	p := schema.DevicePredicate{Farm: a.farm, Person: person, Key: base64.RawURLEncoding.EncodeToString(spki), Protection: protection,
-		Kind: kind, Label: label, Evidence: schema.EvidenceInstaller, Nonce: base64.RawURLEncoding.EncodeToString(nonce),
+		Kind: kind, Label: label, TouchFor: touchFor, Evidence: schema.EvidenceInstaller, Nonce: base64.RawURLEncoding.EncodeToString(nonce),
 		RequestedAt: time.Now().UTC().Format(time.RFC3339)}
 	proof, err := provenance.SignP256(k.P256, p.ProofMessage())
 	if err != nil {
@@ -164,6 +175,7 @@ func TestBookEntriesShowTheirAct(t *testing.T) {
 	s := a.s
 	noor := a.g.f.Person(t, "noor", true)
 	a.enrol(t, noor, "noor", "mac", "noor's laptop", schema.ProtectionHardware)
+	a.enrolTouch(t, noor, "noor")
 	a.seal(t)
 
 	on := projectActOn(t, s, "noor", "show-a")
@@ -219,6 +231,33 @@ func TestBookEntriesShowTheirAct(t *testing.T) {
 	}
 }
 
+// A confirmed act is shown confirmed only if its touch key was in force
+// for its device at the entry's position, by the rule the HUD's live check
+// applies (CheckTouchKey): a touch key never enrolled shows the act signed.
+func TestBookActConfirmedOnlyWithItsTouchKeyInForce(t *testing.T) {
+	a := newActBook(t)
+	s := a.s
+	noor := a.g.f.Person(t, "noor", true)
+	a.enrol(t, noor, "noor", "mac", "noor's laptop", schema.ProtectionHardware)
+	a.seal(t)
+
+	on := projectActOn(t, s, "noor", "show-a")
+	req := api.GrantRequest{Project: "show-a", Tracker: "github", Pools: []string{"cpu"}, Until: "7d"}
+	code, out, _ := a.g.send(t, http.MethodPost, "/api/v1/grants?as=noor", req, a.signed(t, noor, on, "grant", req, true, ""), "show-a", nil)
+	if code != http.StatusOK {
+		t.Fatalf("grant: %d %v", code, out)
+	}
+	a.seal(t)
+	signed := api.Act{Grade: schema.GradeSigned, Kind: "mac", Label: "noor's laptop", Protection: schema.ProtectionHardware}
+	gs := grants(t, s, "?as=noor")
+	if len(gs) != 1 || !sameAct(gs[0].Act, signed) {
+		t.Fatalf("a confirmed act whose touch key isn't enrolled: %+v", gs)
+	}
+	if got := a.acts(t, "noor")["grant submitgrant:show-a/"+gs[0].Name]; !sameAct(got, signed) {
+		t.Errorf("its book entry shows %+v, want %+v", got, signed)
+	}
+}
+
 // With no device record in force for the device that signed, at the
 // entry's position, the entry shows no act rather than a guess: a key
 // never enrolled, and one removed before the act was booked.
@@ -227,6 +266,7 @@ func TestBookActLeftOutWithoutItsDevice(t *testing.T) {
 	s := a.s
 	noor := a.g.f.Person(t, "noor", true)
 	a.enrol(t, noor, "noor", "mac", "noor's laptop", schema.ProtectionHardware)
+	a.enrolTouch(t, noor, "noor")
 	stranger := a.g.f.Person(t, "noor", true) // certified, no device record
 	on := projectActOn(t, s, "noor", "show-a")
 	req := api.GrantRequest{Project: "show-a", Tracker: "github", Until: "7d"}
@@ -260,6 +300,7 @@ func TestWithheldEntryShowsNoAct(t *testing.T) {
 	noor := a.g.f.Person(t, "noor", true)
 	laptop := a.g.f.Person(t, "noor", true)
 	a.enrol(t, noor, "noor", "mac", "noor's laptop", schema.ProtectionHardware)
+	a.enrolTouch(t, noor, "noor")
 	a.enrol(t, laptop, "noor", "linux", "noor's workstation", schema.ProtectionFile)
 	a.seal(t)
 	act := a.g.f.SignAct(t, noor, provtest.Act{Subject: provenance.Subject{Name: "device:" + laptop.Device, Digest: map[string]string{"c4": laptop.Device}},
@@ -301,6 +342,7 @@ func TestConfirmationShowsItsAct(t *testing.T) {
 	s, ctx := a.s, context.Background()
 	noor := a.g.f.Person(t, "noor", true)
 	a.enrol(t, noor, "noor", "mac", "noor's laptop", schema.ProtectionHardware)
+	a.enrolTouch(t, noor, "noor")
 	var tr c4v1.Tracker
 	if err := s.Client.Get(ctx, client.ObjectKey{Namespace: "show-a", Name: "github"}, &tr); err != nil {
 		t.Fatal(err)

@@ -3,6 +3,7 @@ package farmbook
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
@@ -76,10 +77,27 @@ func (r *Reader) Act(ctx context.Context, v *View, pos int64) *api.Act {
 		return nil
 	}
 	grade := schema.GradeSigned
-	if act.Confirmed() {
+	if act.Confirmed() && r.touchInForce(ctx, v, act, pos, s.Time) {
 		grade = schema.GradeConfirmed
 	}
 	return &api.Act{Grade: grade, Kind: d.Kind, Label: d.Label, Protection: d.Protection, As: a.Predicate.As}
+}
+
+// touchInForce reports whether a confirmed act's touch key was in force
+// for its device at pos, judged as the device is (the entries before pos,
+// at the time pos counts from) and held to its record by CheckTouchKey,
+// the rule the HUD's live check applied when it took the act. A touch key
+// not in force leaves the act shown as signed.
+func (r *Reader) touchInForce(ctx context.Context, v *View, act *provenance.Verified, pos int64, at time.Time) bool {
+	in, err := v.InForceAt(ForceDevice, act.TouchDevice, pos-1, at)
+	if err != nil || in == nil {
+		return false
+	}
+	d := r.device(ctx, in.Entry.Record)
+	if d == nil {
+		return false
+	}
+	return provenance.CheckTouchKey(act, []*schema.Device{{Predicate: *d}}) == nil
 }
 
 // verified is the record with this C4 ID from the store, verified against
