@@ -227,9 +227,16 @@ func applyDecides(j *c4v1.WorkJob, m *jobMem, now time.Time) {
 		if at.IsZero() {
 			at = now
 		}
+		// A decision lands only on a wait for whom it was made: the HUD
+		// checked its waitsFor against the wait it saw, and the wait here
+		// must still be that one. A request from before waitsFor names none.
+		forOther := func(server string) bool { return r.WaitsFor != "" && r.WaitsFor != server }
 		switch {
 		case m.blockOpen(i) && !m.done(i) && !m.failed[i]:
 			w := ws.recs[i]
+			if forOther(w.server) {
+				continue
+			}
 			if len(w.choices) > 0 && r.Do != "fail" && !contains(w.choices, r.Do) {
 				continue
 			}
@@ -244,6 +251,9 @@ func applyDecides(j *c4v1.WorkJob, m *jobMem, now time.Time) {
 			}
 		case isWait(plan, i) && !m.done(i) && !m.failed[i]:
 			w := ws.recs[i]
+			if w != nil && forOther(w.server) || w == nil && forOther(plan.Units[i].Wait.Server) {
+				continue
+			}
 			if w == nil {
 				// decided before it opened: it opens and closes at once
 				w = &waitRec{since: at, server: plan.Units[i].Wait.Server}
@@ -268,6 +278,9 @@ func applyDecides(j *c4v1.WorkJob, m *jobMem, now time.Time) {
 			}
 		case m.flagged(i):
 			w := ws.recs[i]
+			if forOther("person:" + m.reviews[i].To) {
+				continue
+			}
 			if w == nil {
 				w = &waitRec{since: at, escalated: true, server: "person:" + m.reviews[i].To}
 				ws.recs[i] = w

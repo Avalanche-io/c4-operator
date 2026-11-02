@@ -1654,6 +1654,11 @@ type WorkDecideRequest struct {
 	// for one: the wait unit's output, which the units it holds up mount.
 	// +optional
 	View string `json:"view,omitempty"`
+	// WaitsFor is whom the decision was made for, the wait's server as the
+	// HUD checked it (person:<id>, agent:<name>, ...): the queue carries it
+	// out only on a wait for the same.
+	// +optional
+	WaitsFor string `json:"waitsFor,omitempty"`
 }
 
 // NeedsInformation is the reason of a unit attempt that stopped because

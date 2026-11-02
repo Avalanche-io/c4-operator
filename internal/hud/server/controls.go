@@ -1020,7 +1020,7 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 	var reqs []c4v1.WorkDecideRequest
 	_ = json.Unmarshal([]byte(j.Annotations[c4v1.AnnotationDecide]), &reqs)
 	reqs = append(reqs, c4v1.WorkDecideRequest{Token: token, Unit: unit, Do: body.Do,
-		Note: body.Note, Actor: actor, At: metav1.Time{Time: now.UTC().Truncate(time.Second)}, Record: id, View: reply})
+		Note: body.Note, Actor: actor, At: metav1.Time{Time: now.UTC().Truncate(time.Second)}, Record: id, View: reply, WaitsFor: wait.Server})
 	if len(reqs) > 16 {
 		reqs = reqs[len(reqs)-16:]
 	}

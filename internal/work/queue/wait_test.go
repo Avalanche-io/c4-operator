@@ -27,6 +27,13 @@ func decide(t *testing.T, ns, name, unit, do string, at time.Time) {
 // decideReply is decide with the decision's reply, a view.
 func decideReply(t *testing.T, ns, name, unit, do, view string, at time.Time) {
 	t.Helper()
+	decideFor(t, ns, name, unit, do, view, "", at)
+}
+
+// decideFor is decideReply naming whom the decision was made for
+// (waitsFor), as the HUD does.
+func decideFor(t *testing.T, ns, name, unit, do, view, waitsFor string, at time.Time) {
+	t.Helper()
 	j := get(t, ns, name)
 	var reqs []c4v1.WorkDecideRequest
 	if a := j.Annotations[c4v1.AnnotationDecide]; a != "" {
@@ -35,7 +42,7 @@ func decideReply(t *testing.T, ns, name, unit, do, view string, at time.Time) {
 		}
 	}
 	reqs = append(reqs, c4v1.WorkDecideRequest{Token: strconv.FormatInt(at.UnixNano(), 36), Unit: unit, Do: do,
-		Actor: "owner", Note: "ruled", At: metav1.Time{Time: at}, View: view})
+		Actor: "owner", Note: "ruled", At: metav1.Time{Time: at}, View: view, WaitsFor: waitsFor})
 	b, _ := json.Marshal(reqs)
 	if j.Annotations == nil {
 		j.Annotations = map[string]string{}
@@ -124,6 +131,34 @@ func TestWaitForAPerson(t *testing.T) {
 	}
 	if c := meta.FindStatusCondition(got.Status.Conditions, c4v1.ConditionNeedsPerson); c != nil {
 		t.Fatalf("still needs a person: %+v", c)
+	}
+}
+
+// A decision made for another wait than the one it lands on (its
+// waitsFor names agent:assistant, the unit waits for person:owner) is not
+// carried out; one made for the wait is.
+func TestDecisionForAnotherWaitNotCarriedOut(t *testing.T) {
+	ns, q, now := graphJob(t, "ruled-for", func(time.Time) string {
+		return `{"name": "lane", "label": "lane"},
+		{"name": "ruling", "after": ["lane"], "wait": {"server": "person:owner", "ask": "split the chapter?"}},
+		{"name": "next", "after": ["ruling"]}`
+	}, 72*time.Hour)
+	finishUnit(t, now, ns, "ruled-for", 1, nil)
+	tick(t, q)
+	*now = now.Add(time.Hour)
+	decideFor(t, ns, "ruled-for", "ruling", "approve", "", "agent:assistant", *now)
+	tick(t, q)
+	tick(t, q)
+	got := get(t, ns, "ruled-for")
+	if slices.Contains(states(t, got, "succeeded"), 2) || hasPod(t, ns, "ruled-for", 3) {
+		t.Fatalf("a decision for agent:assistant decided person:owner's wait: states %v", got.Status.UnitStates)
+	}
+	*now = now.Add(time.Minute)
+	decideFor(t, ns, "ruled-for", "ruling", "approve", "", "person:owner", *now)
+	tick(t, q)
+	tick(t, q)
+	if got := get(t, ns, "ruled-for"); !slices.Contains(states(t, got, "succeeded"), 2) {
+		t.Fatalf("the decision for person:owner: states %v", got.Status.UnitStates)
 	}
 }
 

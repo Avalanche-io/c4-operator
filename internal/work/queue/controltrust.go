@@ -49,7 +49,7 @@ var controlKinds = []controlKind{
 	{key: c4v1.AnnotationAcks, action: func(r map[string]any) string { s, _ := r["kind"].(string); return s },
 		fields: []string{"units", "kind"}, last: func(m *jobMem) string { return m.acked }},
 	{key: c4v1.AnnotationDecide, action: func(map[string]any) string { return "decide" },
-		fields: []string{"unit", "do"}, last: func(m *jobMem) string { return m.waitRecs().decided }},
+		fields: []string{"unit", "do", "waitsFor"}, last: func(m *jobMem) string { return m.waitRecs().decided }},
 	{key: c4v1.AnnotationSteer, action: func(map[string]any) string { return "steer" },
 		fields: []string{"unit", "text"}, last: func(m *jobMem) string { return m.steered }},
 	{key: c4v1.AnnotationSupply, action: func(map[string]any) string { return "supply" },

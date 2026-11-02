@@ -65,18 +65,20 @@ func TestControlsNeedTheirRecord(t *testing.T) {
 	byAgent := sign(hud, "decide", "dana", map[string]any{"unit": "ruling", "do": "approve", "token": "t6"})
 	byQueue := sign(queueSigner, "decide", "dana", map[string]any{"unit": "ruling", "do": "approve", "token": "t7"})
 	approveT4 := sign(hud, "decide", "dana", map[string]any{"unit": "ruling", "do": "approve", "token": "t4"})
+	forDana := sign(hud, "decide", "dana", map[string]any{"unit": "ruling", "do": "approve", "token": "t9", "waitsFor": "person:dana"})
 	steer := sign(hud, "steer", "dana", map[string]any{"unit": "2", "text": "warmer", "token": "s1"})
 	steerS2 := sign(hud, "steer", "dana", map[string]any{"unit": "2", "text": "warmer", "token": "s2"})
 	notStored := c4.Identify(strings.NewReader("never stored")).String()
 	decide := []c4v1.WorkDecideRequest{
-		{Token: "t1", Unit: "ruling", Do: "approve", Actor: "dana", Record: approve},                        // vouched for
-		{Token: "t2", Unit: "ruling", Do: "approve", Actor: "mallory", Record: approve},                     // someone else's record
-		{Token: "t3", Unit: "ruling", Do: "approve", Actor: "dana"},                                         // no record
-		{Token: "t4", Unit: "ruling", Do: "fail", Actor: "dana", Record: approveT4},                         // other content
-		{Token: "t5", Unit: "ruling", Do: "approve", Actor: "dana", Record: notStored},                      // not in the store
-		{Token: "t6", Unit: "ruling", Do: "approve", Actor: "agent/wrangler-bot for dana", Record: byAgent}, // an agent for dana
-		{Token: "t7", Unit: "ruling", Do: "approve", Actor: "dana", Record: byQueue},                        // not the HUD's
-		{Token: "t8", Unit: "ruling", Do: "approve", Actor: "dana", Record: approve},                        // another request's
+		{Token: "t1", Unit: "ruling", Do: "approve", Actor: "dana", Record: approve},                              // vouched for
+		{Token: "t2", Unit: "ruling", Do: "approve", Actor: "mallory", Record: approve},                           // someone else's record
+		{Token: "t3", Unit: "ruling", Do: "approve", Actor: "dana"},                                               // no record
+		{Token: "t4", Unit: "ruling", Do: "fail", Actor: "dana", Record: approveT4},                               // other content
+		{Token: "t5", Unit: "ruling", Do: "approve", Actor: "dana", Record: notStored},                            // not in the store
+		{Token: "t6", Unit: "ruling", Do: "approve", Actor: "agent/wrangler-bot for dana", Record: byAgent},       // an agent for dana
+		{Token: "t7", Unit: "ruling", Do: "approve", Actor: "dana", Record: byQueue},                              // not the HUD's
+		{Token: "t8", Unit: "ruling", Do: "approve", Actor: "dana", Record: approve},                              // another request's
+		{Token: "t9", Unit: "ruling", Do: "approve", Actor: "dana", Record: forDana, WaitsFor: "agent:assistant"}, // for another wait
 	}
 	steers := []c4v1.WorkSteerRequest{{Token: "s1", Unit: "2", Text: "warmer", Actor: "dana", Record: steer},
 		{Token: "s2", Unit: "2", Text: "cooler", Actor: "dana", Record: steerS2}}
@@ -115,7 +117,7 @@ func TestControlsNeedTheirRecord(t *testing.T) {
 			t.Fatalf("steers carried out: %s, want s1", got)
 		}
 	}
-	if tokens(j, c4v1.AnnotationDecide) != "t1,t2,t3,t4,t5,t6,t7,t8" {
+	if tokens(j, c4v1.AnnotationDecide) != "t1,t2,t3,t4,t5,t6,t7,t8,t9" {
 		t.Fatal("the job's own annotation changed")
 	}
 	var evs corev1.EventList
@@ -123,7 +125,8 @@ func TestControlsNeedTheirRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]string{"t2": "is by dana, not mallory", "t3": "names no signed record", "t4": `says do "approve", the request "fail"`,
-		"t5": "is not in project show's store", "t7": "the policy wants", "t8": "for another request", "s2": `says text "warmer"`}
+		"t5": "is not in project show's store", "t7": "the policy wants", "t8": "for another request", "s2": `says text "warmer"`,
+		"t9": `says waitsFor "person:dana", the request "agent:assistant"`}
 	if len(evs.Items) != len(want) {
 		t.Fatalf("%d events, want %d: %+v", len(evs.Items), len(want), evs.Items)
 	}
