@@ -217,6 +217,27 @@ func runManager(args []string) error {
 		if iss != nil {
 			sig.people = iss
 		}
+		if iss != nil && book != nil {
+			// An agent's grant that has gone unused for 90 days is booked as
+			// lapsed (PEOPLE-KEYS-2 10.4 item 14), once, by the leader; the
+			// issuer also books one as it refuses it.
+			if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+				t := time.NewTicker(time.Hour)
+				defer t.Stop()
+				for {
+					if _, err := iss.BookLapses(ctx); err != nil && ctx.Err() == nil {
+						log.Error(err, "book agents' lapsed grants")
+					}
+					select {
+					case <-ctx.Done():
+						return nil
+					case <-t.C:
+					}
+				}
+			})); err != nil {
+				return err
+			}
+		}
 	}
 	reg := &project.Registry{Cache: mgr.GetClient(), Secrets: mgr.GetAPIReader(), Namespace: *namespace}
 	if err := (&controller.ProjectReconciler{Client: mgr.GetClient(), Projects: reg}).SetupWithManager(mgr); err != nil {
@@ -519,6 +540,9 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		if iss.Index != nil {
 			srv.PeopleIndex = iss.Index
 		}
+		// The HUD takes an agent's own act under its grant, which the
+		// issuer books (PEOPLE-KEYS-2 5.2).
+		srv.AgentGrants = iss
 	}
 	if sandbox != "" {
 		if srv.DevViewers == nil {

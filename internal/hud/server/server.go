@@ -190,6 +190,9 @@ type Server struct {
 	// (farmbook.go); nil where the install names no system store.
 	FarmBook       *farmbook.Writer
 	FarmBookReader *farmbook.Reader
+	// AgentGrants judges an agent's grant, the people's issuer's, so the
+	// HUD takes an agent's own act (agentacts.go); nil takes none.
+	AgentGrants AgentGrants
 
 	mu      sync.RWMutex
 	m       *model

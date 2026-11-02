@@ -833,6 +833,10 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 		// by a tracker user its Tracker's people map names
 		// (internal/hud/API.md, Relayed decisions).
 		Via *api.Relay `json:"via"`
+		// WaitsFor, when the request says it, is whom it decides for: the
+		// wait's server as the client read it. An agent's act says it, as
+		// agent:<name>, to decide its own wait.
+		WaitsFor string `json:"waitsFor"`
 	}
 	if err := decodeBody(r, &body); err != nil {
 		fail(w, http.StatusBadRequest, "body: %v", err)
@@ -856,6 +860,12 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 	}
 	if wait == nil {
 		fail(w, http.StatusConflict, "nothing open waits for a decision as unit %q", ref)
+		return
+	}
+	if body.WaitsFor != "" && body.WaitsFor != wait.Server {
+		// Checked before the act is taken: a decision signed for one wait
+		// is never carried out on another.
+		fail(w, http.StatusConflict, "waitsFor: the request decides for %s, and unit %s waits for %s; refused", body.WaitsFor, ref, waitsWhom(wait.Server))
 		return
 	}
 	switch {
@@ -897,6 +907,11 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 		// tracker maps instead.
 		var err error
 		d := deciderOf(r, v)
+		if ag := actAgent(r); ag != "" && v.Unit == nil {
+			// An agent's signed act decides as that agent, header or not;
+			// citeAct refuses the act if it isn't the agent's.
+			d.Agent = ag
+		}
 		d.OwnJob = v.Unit != nil && v.Unit.Namespace == rec.job.Namespace && v.Unit.Job == rec.job.Name
 		d.EveryRole = s.everyRole(ctx, v)
 		if standFor, err = s.mayDecide(rec.project, wait.Server, d); err != nil {

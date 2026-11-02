@@ -64,6 +64,8 @@ type citedAct struct {
 	on provenance.Subject
 	// bundle is the act as signed, which the record cites by its C4 ID.
 	bundle []byte
+	// agent and grant: an agent's act, under that grant (agentacts.go).
+	agent, grant string
 }
 
 // citeAct verifies the act a request carries, if it carries one, against
@@ -127,10 +129,11 @@ func (s *Server) citeAct(ctx context.Context, r *http.Request, v *api.Viewer, su
 		// login, unattributed for one no person has confirmed.
 		return &citedAct{cite: &schema.ActCitation{Payload: provenance.PayloadHash(vr.Payload), Record: c4.Identify(bytes.NewReader(data)).String()},
 			params: p.Params, grade: rc.grade, on: subject}, nil
+	case p.Chain.By.Agent != "":
+		// An agent's act, under its grant (agentacts.go).
+		return s.citeAgentAct(ctx, r, v, data, vr, a, subject, action)
 	case p.Chain.By.Person == "":
-		// An agent's act is taken under a grant in force for the viewer
-		// (K5). Until it has its caller's check, it is refused.
-		return nil, fmt.Errorf("%w is not a person's, a unit's or a relay's: an agent's act is not taken here yet", errAct)
+		return nil, fmt.Errorf("%w is not a person's, a unit's, an agent's or a relay's", errAct)
 	case vr.Identity != provenance.UserIdentity(p.Chain.By.Person):
 		return nil, fmt.Errorf("%w names %s and is signed by %s, not by a device of theirs", errAct, p.Chain.By.Person, vr.Identity)
 	case v == nil:
@@ -190,6 +193,7 @@ func onAct(act *citedAct, subject provenance.Subject, pred *controlPredicate) pr
 		return subject
 	}
 	pred.Act, pred.Params, pred.Custody, pred.actBundle = act.cite, act.params, act.grade, act.bundle
+	act.agentOnRecord(pred)
 	return act.on
 }
 

@@ -44,7 +44,8 @@ type controlPredicate struct {
 	// c4-farm or c4-sync, as the client says (X-C4-Client).
 	Via string `json:"via"`
 	// Agent is the agent the client says acts (X-C4-Agent), and
-	// AgentGrade how far that is evidenced: claimed, the client's word.
+	// AgentGrade how far that is evidenced: claimed, the client's word, or
+	// signed, the agent's own act under its grant (agentacts.go).
 	Agent         string `json:"agent,omitempty"`
 	AgentGrade    string `json:"agentGrade,omitempty"`
 	Authorization string `json:"authorization"`
@@ -188,7 +189,7 @@ func (s *Server) signControl(ctx context.Context, projects []string, subject pro
 	if s.Signer == nil || s.Stores == nil || len(projects) == 0 {
 		return "", nil
 	}
-	if pred.Agent != "" {
+	if pred.Agent != "" && pred.AgentGrade == "" {
 		pred.AgentGrade = CustodyClaimed
 	}
 	rec, err := provenance.SignStatement(ctx, s.Signer, provenance.PredicateControl, []provenance.Subject{subject}, pred, time.Now())
