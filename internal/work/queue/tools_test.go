@@ -696,6 +696,19 @@ func TestEveryUnitHasItsKeyAndStaysSealed(t *testing.T) {
 	if !audiences[c4v1.SignerAudience] || envOf(p.Spec.Containers[0], "C4_SIGNER") != "http://c4-signer."+farmNS+".svc:80" || p.Labels[c4v1.LabelTool] != "" {
 		t.Fatalf("a unit with no tool has no key: %v %v", p.Spec.Volumes, p.Spec.Containers[0].Env)
 	}
+	// what its acts on itself name: its pod by UID, and the job's spec as
+	// it was when the pod was made
+	j := get(t, ns, "plain")
+	podRef := map[string]string{}
+	for _, e := range p.Spec.Containers[0].Env {
+		if e.ValueFrom != nil && e.ValueFrom.FieldRef != nil {
+			podRef[e.Name] = e.ValueFrom.FieldRef.FieldPath
+		}
+	}
+	if spec := SpecDigest(j); spec == "" || p.Annotations[c4v1.AnnotationUnitSpec] != spec || envOf(p.Spec.Containers[0], "C4_SPEC") != spec ||
+		envOf(p.Spec.Containers[0], "C4_JOB_UID") != string(j.UID) || podRef["C4_POD"] != "metadata.name" || podRef["C4_POD_UID"] != "metadata.uid" {
+		t.Fatalf("the unit's own subject: annotation %q, env %v", p.Annotations[c4v1.AnnotationUnitSpec], p.Spec.Containers[0].Env)
+	}
 
 	var np networkingv1.NetworkPolicy
 	if err := k8s.Get(ctx, types.NamespacedName{Namespace: ns, Name: UnitsPolicyName}, &np); err != nil {

@@ -157,3 +157,24 @@ func TestIssuerCertifiesAUnitAsItself(t *testing.T) {
 		t.Errorf("a pod that is no unit's: %q (err %v)", got, err)
 	}
 }
+
+// The issuer takes a unit's whole allowance of signed controls from one
+// pod at once, then one every podEvery; another pod has its own.
+func TestIssuerLimitsEachPod(t *testing.T) {
+	var q podLimits
+	now := time.Now()
+	for i := range podBurst {
+		if ok, _ := q.allow("pod-a", now); !ok {
+			t.Fatalf("certificate %d of a unit's allowance refused", i+1)
+		}
+	}
+	if ok, wait := q.allow("pod-a", now); ok || wait <= 0 || wait > podEvery {
+		t.Fatalf("past the allowance: %v, wait %v", ok, wait)
+	}
+	if ok, _ := q.allow("pod-b", now); !ok {
+		t.Fatal("another pod shares the first's allowance")
+	}
+	if ok, _ := q.allow("pod-a", now.Add(podEvery)); !ok {
+		t.Fatal("refused after waiting")
+	}
+}

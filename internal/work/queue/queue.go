@@ -2026,9 +2026,19 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 	if bad := avoidFor(v, idx, p); len(bad) > 0 {
 		pod.Spec.Affinity = notOnNodes(pod.Spec.Affinity, bad)
 	}
+	// The unit's acts on itself name its pod, by UID, and the job's spec
+	// as it was when the pod was made (AnnotationUnitSpec).
+	spec := specDigest(j)
+	if pod.Annotations == nil {
+		pod.Annotations = map[string]string{}
+	}
+	pod.Annotations[c4v1.AnnotationUnitSpec] = spec
 	env := append([]corev1.EnvVar{
 		{Name: "C4_JOB", Value: j.Name}, {Name: "C4_NAMESPACE", Value: j.Namespace}, {Name: "C4_UNIT", Value: strconv.Itoa(idx)},
 		{Name: "C4_ATTEMPT", Value: strconv.Itoa(attempt)}, {Name: "C4_UNIT_LABEL", Value: u.Label},
+		{Name: "C4_JOB_UID", Value: string(j.UID)}, {Name: "C4_SPEC", Value: spec},
+		{Name: "C4_POD", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}}},
+		{Name: "C4_POD_UID", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.uid"}}},
 	}, u.Env...)
 	// Every unit sees its pod's annotations, so any unit that announces
 	// safe points (c4-unit safepoint) sees a soft stop.

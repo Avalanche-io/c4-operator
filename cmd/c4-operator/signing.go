@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -160,6 +162,7 @@ func issuerRunnable(s *signing, kube kubernetes.Interface, projects client.Reade
 // (if given) lets that account through.
 func workloadIssuer(s *signing, kube kubernetes.Interface, projects client.Reader, namespace string, only func(*auth.Identity) error) *provenance.Issuer {
 	rev := &auth.Reviewer{Client: kube, Tier: "signer"}
+	pods := &podLimits{}
 	return &provenance.Issuer{CA: s.ca, Identify: func(ctx context.Context, token string) (string, time.Duration, error) {
 		id, err := rev.Review(ctx, token, AudienceSigner)
 		if err != nil {
@@ -170,8 +173,67 @@ func workloadIssuer(s *signing, kube kubernetes.Interface, projects client.Reade
 				return "", 0, err
 			}
 		}
+		if id.PodUID != "" {
+			if ok, wait := pods.allow(id.PodUID, time.Now()); !ok {
+				return "", 0, provenance.TooMany{Who: "pod " + id.Namespace + "/" + id.PodName, Wait: wait}
+			}
+		}
 		return signerIdentity(ctx, projects, id, namespace)
 	}}
+}
+
+// A unit has a key made and certified for each control it signs (an ask,
+// an answer, its needs), and may sign at most unitActsMax in an attempt.
+// So the issuer takes that many from one pod at once, then one every
+// podEvery: enough for any honest unit, and a narrow channel for one that
+// asks for nothing but certificates.
+const (
+	podBurst = 48
+	podEvery = 10 * time.Second
+	// podsKept bounds the pods remembered; past it, those quiet for
+	// podQuiet are forgotten.
+	podsKept = 8192
+	podQuiet = time.Hour
+)
+
+// podLimits are the issuer's token buckets, one per pod (by UID).
+type podLimits struct {
+	mu   sync.Mutex
+	pods map[string]*podLimit
+}
+
+type podLimit struct {
+	l    *rate.Limiter
+	seen time.Time
+}
+
+// allow reports whether pod uid may have a certificate now, else how long
+// until it may.
+func (q *podLimits) allow(uid string, now time.Time) (bool, time.Duration) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.pods == nil {
+		q.pods = map[string]*podLimit{}
+	}
+	p := q.pods[uid]
+	if p == nil {
+		if len(q.pods) >= podsKept {
+			for k, o := range q.pods {
+				if now.Sub(o.seen) > podQuiet {
+					delete(q.pods, k)
+				}
+			}
+		}
+		p = &podLimit{l: rate.NewLimiter(rate.Every(podEvery), podBurst)}
+		q.pods[uid] = p
+	}
+	p.seen = now
+	r := p.l.ReserveN(now, 1)
+	if d := r.DelayFrom(now); !r.OK() || d > 0 {
+		r.CancelAt(now)
+		return false, d
+	}
+	return true, 0
 }
 
 // hostIssuer is the workload issuer as the HUD serves it to host runners,

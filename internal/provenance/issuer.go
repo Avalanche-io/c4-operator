@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -28,6 +29,17 @@ type Issuer struct {
 	CA       *CA
 	Identify IdentifyFunc
 	Now      func() time.Time
+}
+
+// TooMany is an Identify refusal for asking too often, answered 429 with
+// Retry-After: Wait from now.
+type TooMany struct {
+	Who  string
+	Wait time.Duration
+}
+
+func (e TooMany) Error() string {
+	return fmt.Sprintf("%s asks for certificates too often: ask again in %s", e.Who, e.Wait.Round(time.Second))
 }
 
 type certRequest struct {
@@ -51,7 +63,13 @@ func (i *Issuer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity, ttl, err := i.Identify(r.Context(), tok)
-	if err != nil {
+	var many TooMany
+	switch {
+	case errors.As(err, &many):
+		w.Header().Set("Retry-After", strconv.Itoa(int(many.Wait/time.Second)+1))
+		http.Error(w, err.Error(), http.StatusTooManyRequests)
+		return
+	case err != nil:
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}

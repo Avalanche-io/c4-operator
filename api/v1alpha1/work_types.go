@@ -199,6 +199,16 @@ const (
 	// each to the unit it is for, as a steering message.
 	AnnotationAsks    = "c4.avalanche.io/asks"
 	AnnotationAnswers = "c4.avalanche.io/answers"
+	// AnnotationUnitActs on a unit pod is the acts its unit signed as
+	// itself (PEOPLE-KEYS 5.1) for what it asked, answered, needed,
+	// withdrew or waited on: a JSON list of act/v1 bundles relayed by the
+	// node daemon (or the host runner) from the unit's .c4/acts. The queue
+	// checks each control against its act.
+	AnnotationUnitActs = "c4.avalanche.io/unit-acts"
+	// AnnotationUnitSpec on a unit pod is the digest of its job's spec
+	// when the queue made the pod ($C4_SPEC): what a unit's act on itself
+	// names as its subject's digest, stable while appends change the job.
+	AnnotationUnitSpec = "c4.avalanche.io/unit-spec"
 	// AnnotationWake on a unit pod says it is an extra attempt of a unit
 	// that had finished, woken only to answer these questions (comma-
 	// separated ids; $C4_ANSWER_ONLY). Its end changes nothing about the
