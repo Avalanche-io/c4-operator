@@ -154,11 +154,18 @@ func (i *Issuer) handleOwner(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// TouchKeyWindow is how long after the owner's enrolment the installer
+// token still enrols their first touch key. A one-person farm can't attest
+// that a touch key asks for a touch, so the route doesn't stay open for
+// the farm's life.
+const TouchKeyWindow = 24 * time.Hour
+
 // handleOwnerTouch enrols a one-person farm owner's first touch key on the
 // installer token (evidence installer), for a farm up made with no one at
-// the terminal to give the touch (c4 farm touch-key): only while no touch
-// key was ever enrolled for the owner's key, which then answers 409, as
-// the owner route does. A later touch key comes from a touch on this one.
+// the terminal to give the touch (c4 farm touch-key): within
+// TouchKeyWindow of the owner's enrolment, and only while no touch key was
+// ever enrolled for the owner's key; after either, 409. A later touch key
+// comes from a touch on this one.
 func (i *Issuer) handleOwnerTouch(w http.ResponseWriter, r *http.Request) {
 	ctx, now := r.Context(), i.now()
 	owner := i.owner(ctx)
@@ -209,6 +216,9 @@ func (i *Issuer) handleOwnerTouch(w http.ResponseWriter, r *http.Request) {
 			return nil, refuse(http.StatusForbidden, "the owner's key %.16s is not in force: a removed key gets no touch key", oe.Device)
 		case x.touchKeyFor(oe.Device):
 			return nil, refuse(http.StatusConflict, "the owner's key has a touch key already: the installer token enrols the first one only, and a touch on it enrols another")
+		case !now.Before(touchKeyUntil(oe)):
+			return nil, refuse(http.StatusConflict, "the installer token enrols the owner's first touch key only within %s of the owner's enrolment, which ended at %s: acts that need a touch can't be confirmed on this farm",
+				TouchKeyWindow, touchKeyUntil(oe).UTC().Format(time.RFC3339))
 		}
 		if err := x.unseen(device); err != nil {
 			return nil, err
@@ -242,6 +252,16 @@ func (x *Index) ownerEntry() *Entry {
 		}
 	}
 	return nil
+}
+
+// touchKeyUntil is when the owner's first-touch-key window ends: a time in
+// the past when the owner entry's time can't be read.
+func touchKeyUntil(oe *Entry) time.Time {
+	at, err := time.Parse(time.RFC3339, oe.At)
+	if err != nil {
+		return time.Time{}
+	}
+	return at.Add(TouchKeyWindow)
 }
 
 // touchKeyFor reports whether a touch key was ever enrolled for device.

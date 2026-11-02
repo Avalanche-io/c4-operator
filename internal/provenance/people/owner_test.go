@@ -210,6 +210,11 @@ func TestOwnersFirstTouchKey(t *testing.T) {
 	if code, body, _ := r.up(cli, nil); code != http.StatusOK {
 		t.Fatalf("up: %d %s", code, body)
 	}
+	var cfg people.Config
+	r.call("GET", "/v1/people/config", "", nil, &cfg)
+	if until, err := time.Parse(time.RFC3339, cfg.TouchKeyUntil); err != nil || !until.Equal(r.now.Add(people.TouchKeyWindow)) {
+		t.Errorf("the window's end: %q, want %s", cfg.TouchKeyUntil, r.now.Add(people.TouchKeyWindow))
+	}
 	tk := newDev(t)
 	for name, c := range map[string]func() int{
 		"from another machine": func() int { code, _, _ := touch(tk, cli.id, "", installerToken); return code },
@@ -229,6 +234,28 @@ func TestOwnersFirstTouchKey(t *testing.T) {
 	}
 	if code, body, _ := touch(newDev(t), cli.id, local, installerToken); code != http.StatusConflict || !strings.Contains(body, "touch key already") {
 		t.Errorf("a second: %d %s", code, body)
+	}
+	cfg = people.Config{}
+	r.call("GET", "/v1/people/config", "", nil, &cfg)
+	if cfg.TouchKeyUntil != "" {
+		t.Errorf("a window with a touch key: %q", cfg.TouchKeyUntil)
+	}
+}
+
+// The installer token enrols the owner's first touch key only within
+// TouchKeyWindow of the owner's enrolment; after that, 409, with why.
+func TestTouchKeyWindowCloses(t *testing.T) {
+	r := onePerson(t)
+	cli := newDev(t)
+	r.up(cli, nil)
+	r.now = r.now.Add(people.TouchKeyWindow)
+	// the owner's key stays in force: renewed on its own proof
+	if code, body := r.call("POST", "/v1/people/renew", "", r.enrolment(cli, "noor", "", "mac"), nil); code != http.StatusOK {
+		t.Fatalf("renewing: %d %s", code, body)
+	}
+	code, body := r.call("POST", "/v1/people/owner/touch", local, r.enrolment(newDev(t), "noor", cli.id, "mac"), nil, people.InstallerHeader, installerToken)
+	if code != http.StatusConflict || !strings.Contains(body, "can't be confirmed on this farm") {
+		t.Errorf("after the window: %d %s", code, body)
 	}
 }
 

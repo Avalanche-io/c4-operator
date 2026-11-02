@@ -301,6 +301,10 @@ type Config struct {
 	// installer path has been used (it is then refused).
 	Owner         string `json:"owner,omitempty"`
 	OwnerEnrolled bool   `json:"ownerEnrolled"`
+	// TouchKeyUntil, on a one-person farm whose owner key has no touch key,
+	// is when the installer token stops enrolling its first one (c4 farm
+	// touch-key, RFC 3339): in the past once the window has closed.
+	TouchKeyUntil string `json:"touchKeyUntil,omitempty"`
 	LeafTTL       string `json:"leafTTL"`
 	Lapse         string `json:"lapse"`
 	// SoftwareTouchKeys says this farm takes a touch key that states a
@@ -340,11 +344,15 @@ func (i *Issuer) handleConfig(w http.ResponseWriter, r *http.Request) {
 	x := i.Index
 	x.mu.Lock()
 	pos, enrolled := x.pos, x.ownerRecord() != nil
+	until := ""
+	if oe := x.ownerEntry(); oe != nil && !x.touchKeyFor(oe.Device) && i.owner(r.Context()) != "" {
+		until = touchKeyUntil(oe).UTC().Format(time.RFC3339)
+	}
 	x.mu.Unlock()
 	writeJSON(w, http.StatusOK, Config{Farm: i.Farm(), Order: x.Order(), Position: pos, Provider: set, WebAuthn: i.WebAuthn,
 		Nonce:  "the device ID: the C4 ID of the key's DER SubjectPublicKeyInfo, as a string (c4...)",
 		StepUp: StepUpConfig{MaxAge: age.String(), ACR: append(append([]string{}, DefaultStepUpACR...), i.StepUp.ACR...), AMR: "mfa, or factors of two kinds (RFC 8176): known (pwd, pin, kba), held (otp, sms, tel, hwk, swk, sc, pop), being (fpt, face, iris, retina, vbm)"},
-		Owner:  i.owner(r.Context()), OwnerEnrolled: enrolled, LeafTTL: LeafTTL.String(), Lapse: Lapse.String(), SoftwareTouchKeys: i.SoftwareTouchKeys})
+		Owner:  i.owner(r.Context()), OwnerEnrolled: enrolled, TouchKeyUntil: until, LeafTTL: LeafTTL.String(), Lapse: Lapse.String(), SoftwareTouchKeys: i.SoftwareTouchKeys})
 }
 
 // Reads need a caller (PEOPLE-KEYS-2 7): the person the HUD signed in,
