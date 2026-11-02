@@ -2,6 +2,7 @@ package people_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -68,5 +69,29 @@ func TestWhoamiNamesTheTokensPerson(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusConflict {
 		t.Errorf("enrolling on a subject two people hold: %d", resp.StatusCode)
+	}
+}
+
+// ProveSignIn checks a token as whoami does, for the HUD's proof that a
+// provider subject is the caller's before it goes on their Party: a fresh
+// token for the farm's client proves its subject, in its issuer's one
+// spelling; one for another client, an old one, or a forged one proves
+// nothing.
+func TestProveSignIn(t *testing.T) {
+	f := peopletest.Studio(t)
+	ctx := context.Background()
+	now := time.Now()
+	got, err := f.Issuer.ProveSignIn(ctx, f.SSO.Token(now, "00u-anyone", "", nil))
+	if err != nil || got != (people.SignIn{Issuer: people.CanonicalIssuer(peopletest.Issuer), Subject: "00u-anyone"}) {
+		t.Errorf("a fresh token: %+v %v", got, err)
+	}
+	for what, tok := range map[string]string{
+		"another client's": f.SSO.Token(now, peopletest.DanaSub, "", map[string]any{"aud": "another-client"}),
+		"an hour old":      f.SSO.Token(now.Add(-time.Hour), peopletest.DanaSub, "", nil),
+		"not a token":      "eyJhbGciOiJub25lIn0.e30.",
+	} {
+		if got, err := f.Issuer.ProveSignIn(ctx, tok); err == nil {
+			t.Errorf("%s token proves %+v", what, got)
+		}
 	}
 }

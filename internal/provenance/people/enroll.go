@@ -337,6 +337,27 @@ func (i *Issuer) handleWhoami(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, WhoamiAnswer{Person: who})
 }
 
+// ProveSignIn checks raw as whoami does (the provider in force, the
+// farm's audience and azp, its freshness and signature) and answers the
+// sign-in it proves, its issuer in its one spelling: what the HUD takes
+// as a person's proof that a provider subject is theirs before it goes on
+// their Party (PEOPLE-KEYS-2 10.4 item 27 R2). It certifies nothing, so
+// it takes no nonce.
+func (i *Issuer) ProveSignIn(ctx context.Context, raw string) (SignIn, error) {
+	set, err := i.setting(ctx)
+	if err != nil {
+		return SignIn{}, err
+	}
+	if set == nil {
+		set = &Setting{}
+	}
+	in, err := i.checkToken(ctx, set.Provider, raw, "", false, false)
+	if err != nil {
+		return SignIn{}, err
+	}
+	return SignIn{Issuer: CanonicalIssuer(in.issuer), Subject: in.subject}, nil
+}
+
 // enrollApproved certifies a device on a confirmed approve-machine act
 // the index booked: a touch from another of the person's devices, naming
 // this one, unexpired and not used before.
