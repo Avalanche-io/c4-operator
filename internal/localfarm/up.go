@@ -197,8 +197,10 @@ func Up(ctx context.Context, o UpOptions) error {
 	// the install's people's store Secret is empty; Farm's carries the
 	// store's credentials, and applying the empty one after it, as a run
 	// of up again does, would take them away from a manager starting then
-	if install, err = withoutObject(install, "Secret", "c4-signing", "c4-people-store"); err != nil {
-		return err
+	for _, sec := range []string{"c4-people-store", "c4-system-store"} {
+		if install, err = withoutObject(install, "Secret", "c4-signing", sec); err != nil {
+			return err
+		}
 	}
 	if err := applyAll(ctx, c, install); err != nil {
 		return fmt.Errorf("installing the operator: %w", err)

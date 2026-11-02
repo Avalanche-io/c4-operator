@@ -294,6 +294,9 @@ func Farm(o Options) []obj {
 		// reads, in the signing namespace
 		{"apiVersion": "v1", "kind": "Secret", "metadata": meta("c4-people-store", "namespace", "c4-signing"),
 			"stringData": obj{"AWS_ACCESS_KEY_ID": quickstart.StoreKey, "AWS_SECRET_ACCESS_KEY": quickstart.StoreSecret}},
+		// the farm book's store credentials, beside them
+		{"apiVersion": "v1", "kind": "Secret", "metadata": meta("c4-system-store", "namespace", "c4-signing"),
+			"stringData": obj{"AWS_ACCESS_KEY_ID": quickstart.StoreKey, "AWS_SECRET_ACCESS_KEY": quickstart.StoreSecret}},
 	}
 	out = append(out, ProjectObjects(ProjectSpec{Name: Project, Title: "Saltmarsh (feature), Petrel & Finch"})...)
 	for _, p := range Pools {
@@ -343,8 +346,15 @@ func ManagerArgs(o Options) []string {
 	if o.SoftwareTouchKeys {
 		args = append(args, "--software-touch-keys")
 	}
+	// the farm book (S2a), which an agent's grant needs (K5): kept in the
+	// same bucket, under system/
+	args = append(args, "--system-store="+SystemStore)
 	return args
 }
+
+// SystemStore is where the farm book is kept: the farm's Garage bucket,
+// under system/.
+const SystemStore = "s3://quickstart/system/?endpoint=http://garage-s3.c4-store:3900"
 
 // PeopleStore is where the people's issuer keeps device records and its
 // index: the farm's Garage bucket, under people/.
@@ -362,7 +372,7 @@ func ManagerPatch(o Options, args []string) []byte {
 	for _, a := range args {
 		drop := false
 		for _, f := range []string{"--hud-dev-viewers=", "--capacity-provider=", "--hud-sites=", "--tz=", "--hud-plain-registries=", "--single-person-farm=",
-			"--hud-image-registry=", "--hud-image-tag=", "--hud-sandbox=", "--hud-installer-token-file=", "--people-store=", "--software-touch-keys="} {
+			"--hud-image-registry=", "--hud-image-tag=", "--hud-sandbox=", "--hud-installer-token-file=", "--people-store=", "--software-touch-keys=", "--system-store="} {
 			if strings.HasPrefix(a, f) {
 				drop = true
 			}

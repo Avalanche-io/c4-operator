@@ -94,6 +94,9 @@ func TestInstallerTokenReachesTheManager(t *testing.T) {
 // empty one is left out, so a run of up again never blanks them.
 func TestPeopleIssuerComesUpWithTheFarm(t *testing.T) {
 	o := Options{Owner: "noor"}
+	if !slices.Contains(ManagerArgs(o), "--system-store="+SystemStore) || !strings.Contains(string(YAML(Farm(o))), "name: c4-system-store\n  namespace: c4-signing") {
+		t.Errorf("no farm book: %v", ManagerArgs(o))
+	}
 	if !slices.Contains(ManagerArgs(o), "--people-store="+PeopleStore) {
 		t.Fatalf("args %v", ManagerArgs(o))
 	}
