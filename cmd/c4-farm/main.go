@@ -472,8 +472,11 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			}
 			fmt.Fprintf(stdout, "reopened  the window to make your touch key, until %s; making it now\n", until.Local().Format("Jan 2 15:04"))
 		}
-		fmt.Fprintf(stdout, "Your Mac asks for your touch next, to make the touch key.\n")
-		cert, err := farmcli.EnrolTouchKey(ctx, c, farmcli.KeysFor(name))
+		keys := farmcli.KeysFor(name)
+		if runtime.GOOS == "darwin" && !keys.FileOnly {
+			fmt.Fprintf(stdout, "Your Mac asks for your touch next, to make the touch key.\n")
+		}
+		cert, err := farmcli.EnrolTouchKey(ctx, c, keys)
 		if err != nil {
 			return err
 		}
