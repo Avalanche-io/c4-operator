@@ -60,7 +60,7 @@ func start(t *testing.T) (*rest.Config, client.Client) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := []string{"node-writes.yaml", "workjob-owner.yaml", "workjob-controls.yaml", "host-runner.yaml", "lease-mounts.yaml", "submit-grants.yaml", "tracker-people.yaml", "tracker-sync.yaml", "host-pods.yaml", "deployment-bindings.yaml", "telemetry-setting.yaml", "reserved-tools.yaml", "../rbac/host-runner.yaml"}
+	files := []string{"node-writes.yaml", "workjob-owner.yaml", "workjob-controls.yaml", "host-runner.yaml", "lease-mounts.yaml", "submit-grants.yaml", "tracker-people.yaml", "tracker-sync.yaml", "host-pods.yaml", "deployment-bindings.yaml", "parties.yaml", "telemetry-setting.yaml", "reserved-tools.yaml", "../rbac/host-runner.yaml"}
 	if v := os.Getenv("POLICY_FILES"); v != "" {
 		files = strings.Split(v, ",")
 	}
@@ -889,6 +889,64 @@ func TestBindingsOnlyFromTheHUD(t *testing.T) {
 	back.Ended = nil
 	if err := hud.Update(ctx, back); err == nil || !strings.Contains(err.Error(), "never taken back") {
 		t.Errorf("the HUD took a binding's end back: %v", err)
+	}
+}
+
+// Only the HUD (the manager's account) makes and changes a Party: an
+// admin cannot make one, change one or delete one, and nobody deletes
+// one, the manager included, so a party's name is never reused. A
+// party's kind never changes, and only a person has sign-ins.
+func TestPartiesOnlyFromTheHUD(t *testing.T) {
+	cfg, admin := start(t)
+	ctx := context.Background()
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin"},
+		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: "c4-manager", Namespace: "c4-system"}}})
+	mc := rest.CopyConfig(cfg)
+	mc.Impersonate = rest.ImpersonationConfig{UserName: "system:serviceaccount:c4-system:c4-manager",
+		Groups: []string{"system:serviceaccounts", "system:serviceaccounts:c4-system", "system:authenticated"}}
+	s := runtime.NewScheme()
+	c4v1.AddToScheme(s)
+	hud, err := client.New(mc, client.Options{Scheme: s})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := func(name, kind string) *c4v1.Party {
+		return &c4v1.Party{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: c4v1.PartySpec{Kind: kind, DisplayName: "Kestrel Productions",
+			Made: c4v1.PartyAct{By: "ines", At: metav1.NewTime(time.Now().Truncate(time.Second))}}}
+	}
+	enforced(t, "c4-parties", func(try int) error {
+		return admin.Create(ctx, mk(fmt.Sprintf("probe-%d", try), c4v1.PartyOrganisation))
+	})
+	p := mk("kestrel", c4v1.PartyOrganisation)
+	if err := hud.Create(ctx, p); err != nil {
+		t.Fatalf("the HUD makes a party: %v", err)
+	}
+	renamed := p.DeepCopy()
+	renamed.Spec.DisplayName = "Mallory Films"
+	if err := admin.Update(ctx, renamed); err == nil {
+		t.Error("an admin changed a party")
+	}
+	if err := hud.Update(ctx, renamed); err != nil {
+		t.Errorf("the HUD changes a party's display name: %v", err)
+	}
+	if err := hud.Get(ctx, client.ObjectKeyFromObject(p), p); err != nil {
+		t.Fatal(err)
+	}
+	person := p.DeepCopy()
+	person.Spec.Kind = c4v1.PartyPerson
+	if err := hud.Update(ctx, person); err == nil || !strings.Contains(err.Error(), "a party's kind never changes") {
+		t.Errorf("the HUD changed a party's kind: %v", err)
+	}
+	signIns := p.DeepCopy()
+	signIns.Spec.SignIns = []string{"mallory"}
+	if err := hud.Update(ctx, signIns); err == nil || !strings.Contains(err.Error(), "only a person has sign-ins") {
+		t.Errorf("an organisation got sign-ins: %v", err)
+	}
+	for who, c := range map[string]client.Client{"an admin": admin, "the HUD": hud} {
+		if err := c.Delete(ctx, p); err == nil || !strings.Contains(err.Error(), "never deleted") {
+			t.Errorf("%s deleted a party: %v", who, err)
+		}
 	}
 }
 

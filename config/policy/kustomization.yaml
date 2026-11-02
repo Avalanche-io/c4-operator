@@ -11,3 +11,4 @@ resources:
 - deployment-bindings.yaml
 - telemetry-setting.yaml
 - reserved-tools.yaml
+- parties.yaml

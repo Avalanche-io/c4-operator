@@ -1,0 +1,34 @@
+# A Party (accountability ORGANIZATION 1) is one of the farm's parties: a
+# person or an organisation, the names every record's for: and owner
+# refer to. Only the HUD makes or changes one, for a farm admin or the
+# party's own admin, with its signed control record booked in the farm book
+# (internal/hud/server/parties.go). Nobody else creates or changes one, so
+# no one can make a party, rename it, or give a person another's sign-in
+# around the HUD; and nobody deletes one, the HUD included, so a party's
+# name is never reused and the records made for it keep a party to name.
+# Its members are not in the object: they are the farm book's.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: c4-parties
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: [c4.avalanche.io]
+      apiVersions: ["*"]
+      operations: [CREATE, UPDATE, DELETE]
+      resources: [parties]
+  validations:
+  - expression: request.operation != 'DELETE'
+    message: a party is never deleted, so its name is never reused
+  - expression: request.userInfo.username == 'system:serviceaccount:c4-system:c4-manager'
+    message: a party is made and changed in the HUD (POST and PATCH /api/v1/parties), never written directly
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: c4-parties
+spec:
+  policyName: c4-parties
+  validationActions: [Deny]

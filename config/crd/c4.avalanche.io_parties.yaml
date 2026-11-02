@@ -1,0 +1,157 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.23.0
+  name: parties.c4.avalanche.io
+spec:
+  group: c4.avalanche.io
+  names:
+    kind: Party
+    listKind: PartyList
+    plural: parties
+    singular: party
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.kind
+      name: Kind
+      type: string
+    - jsonPath: .spec.displayName
+      name: Display name
+      type: string
+    - jsonPath: .spec.made.at
+      name: Made
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          A Party is one of the farm's parties (accountability ORGANIZATION 1): a
+          person or an organisation, by the bare name records use (for: {party:
+          kestrel}). Nothing else is a party: an agent, a unit, a tracker and a
+          deployment never are.
+
+          People never write one. The HUD makes and changes it (POST and PATCH
+          /api/v1/parties), each change a signed control record booked in the
+          farm book, and is its only writer (the c4-parties policy). A party is
+          never deleted, so its name is never reused. Who may act for an
+          organisation (its members, by name or by the studio's own groups, and
+          the purposes each holds) is not kept here: it is the farm book's, by its
+          one rule of what is in force (farmbook.InForceAt, ForceMembership).
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: PartySpec is who the party is.
+            properties:
+              changed:
+                description: Changed is the party's last change, if any.
+                properties:
+                  at:
+                    format: date-time
+                    type: string
+                  by:
+                    type: string
+                  record:
+                    description: Record is the C4 ID of its signed control record.
+                    type: string
+                required:
+                - at
+                - by
+                type: object
+              displayName:
+                description: |-
+                  DisplayName is how the HUD and the record reader show the party
+                  ("Kestrel Productions").
+                maxLength: 200
+                minLength: 1
+                type: string
+              document:
+                description: |-
+                  Document is the C4 ID of the party's founding document (ownership
+                  MODEL 3.1), once it has made one (ORGANIZATION 7). Not set yet.
+                type: string
+              kind:
+                description: Kind is person or organisation, and never changes.
+                enum:
+                - person
+                - organisation
+                type: string
+              legalName:
+                description: |-
+                  LegalName, for an organisation, is the name a contract or an
+                  invoice carries, which the farm CA names (ORGANIZATION 4, O5).
+                maxLength: 200
+                type: string
+              made:
+                description: Made is who made the party, when, and the make-party
+                  record.
+                properties:
+                  at:
+                    format: date-time
+                    type: string
+                  by:
+                    type: string
+                  record:
+                    description: Record is the C4 ID of its signed control record.
+                    type: string
+                required:
+                - at
+                - by
+                type: object
+              perPersonViews:
+                description: |-
+                  PerPersonViews, for an organisation, is its policy on per-person
+                  spend views (SPEND 5): off, the default, leaves the view-people
+                  purpose held but not in effect.
+                type: boolean
+              signIns:
+                description: |-
+                  SignIns, for a person, are the sign-in subjects that are this
+                  person: a token username, an SSO subject, a development name. One
+                  subject is one party's at most.
+                items:
+                  type: string
+                maxItems: 32
+                type: array
+                x-kubernetes-list-type: set
+            required:
+            - displayName
+            - kind
+            - made
+            type: object
+            x-kubernetes-validations:
+            - message: a party's kind never changes
+              rule: self.kind == oldSelf.kind
+            - message: who made a party never changes
+              rule: self.made == oldSelf.made
+            - message: only a person has sign-ins
+              rule: '!has(self.signIns) || self.kind == ''person'''
+            - message: only an organisation has a legal name
+              rule: '!has(self.legalName) || self.kind == ''organisation'''
+            - message: only an organisation sets per-person views
+              rule: '!has(self.perPersonViews) || !self.perPersonViews || self.kind
+                == ''organisation'''
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources: {}
