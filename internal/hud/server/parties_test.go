@@ -1263,15 +1263,16 @@ func TestPartyMembershipChangedWhileActing(t *testing.T) {
 func TestPartyMemoFollowsTheBook(t *testing.T) {
 	p := newPartyRig(t)
 	ctx := context.Background()
-	p.people(t, "ines", "noor")
 	key := farmbook.MemberKey("kestrel", "noor")
 	before, err := p.s.partyBook(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// the first view this HUD reads anything at
 	if p.s.inForce(before, farmbook.ForceMembership, key) != nil {
 		t.Fatal("noor is a member before kestrel is made")
 	}
+	p.people(t, "ines", "noor")
 	p.org(t, "kestrel", "noor", "noor")
 	after, err := p.s.partyBook(ctx)
 	if err != nil {
