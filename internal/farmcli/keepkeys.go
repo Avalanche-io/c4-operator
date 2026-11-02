@@ -67,6 +67,15 @@ func KeepKeys(ctx context.Context, c *Client, a KeepArgs) {
 			say("key       this machine's key ends at %s and did not renew: %v\n", mine.Expires.Local().Format("Jan 2 15:04"), err)
 		}
 	}
+	// a one-person farm whose owner has no touch key: its window, or that
+	// it has closed (PEOPLE-KEYS-2 3.3)
+	if until, err := time.Parse(time.RFC3339, cfg.TouchKeyUntil); err == nil && touchCertless(a.Store) {
+		if left := until.Sub(now); left > 0 {
+			say("touch key you have no touch key: run c4 farm touch-key at a terminal within %s\n", Span(left))
+		} else {
+			say("touch key you have no touch key, and its window closed at %s: the acts that need a touch can't be confirmed on this farm\n", until.Local().Format("Jan 2 15:04"))
+		}
+	}
 	ns, err := NewDevices(ctx, c, a.Store, cfg)
 	if errors.Is(err, ErrIndexRollback) {
 		say("devices   %v: the farm may be hiding a device of yours; ask its admin, and trust no new device until it is explained\n", err)
@@ -75,4 +84,10 @@ func KeepKeys(ctx context.Context, c *Client, a KeepArgs) {
 	for _, n := range ns {
 		say("devices   %s\n", n)
 	}
+}
+
+// touchCertless reports whether this machine has no certified touch key.
+func touchCertless(st keystore.Store) bool {
+	tc, err := LoadCert(st, keystore.Touch)
+	return err == nil && tc == nil
 }

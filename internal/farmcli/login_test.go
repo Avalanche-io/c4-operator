@@ -257,8 +257,17 @@ func TestEachRunKeepsTheKeys(t *testing.T) {
 	var said strings.Builder
 	say := func(f string, v ...any) { fmt.Fprintf(&said, f, v...) }
 	KeepKeys(ctx, o.client, KeepArgs{Store: ost, Say: say, Now: first.Owner.Expires.Add(-time.Hour)})
-	if kept, _ := LoadCert(ost, keystore.Device); kept.Record == first.Owner.Record || said.Len() != 0 {
-		t.Errorf("near its end: renewed %v, said %q", kept.Record != first.Owner.Record, said.String())
+	if kept, _ := LoadCert(ost, keystore.Device); kept.Record == first.Owner.Record {
+		t.Error("near its end: not renewed")
+	}
+	// up made no touch key here: the window to make one, then its close
+	if !strings.Contains(said.String(), "run c4 farm touch-key at a terminal within") || strings.Contains(said.String(), "renew") {
+		t.Errorf("said %q", said.String())
+	}
+	said.Reset()
+	KeepKeys(ctx, o.client, KeepArgs{Store: ost, Say: say, Now: time.Now().Add(people.TouchKeyWindow + time.Minute)})
+	if !strings.Contains(said.String(), "window closed") {
+		t.Errorf("after the window: %q", said.String())
 	}
 
 	f := peopletest.Studio(t)
