@@ -443,6 +443,9 @@ type View struct {
 	pending []*Sealed
 }
 
+// All are the sealed entries and those pending the seal, in book order.
+func (v *View) All() []*Sealed { return append(v.Book.Entries(0), v.pending...) }
+
 // Pending are the entries waiting for the seal, at provisional positions.
 func (v *View) Pending() []*Sealed { return append([]*Sealed(nil), v.pending...) }
 
@@ -469,10 +472,13 @@ const (
 	//     people-confirm, closed by people-revoke;
 	//   - a Party's member, by name (MemberKey) or by a group of the
 	//     studio's own (GroupKey): opened by add-member, opened again with
-	//     other purposes by set-purposes, closed by end-member. An
-	//     organisation's make-party opens its first admin's (ORGANIZATION
-	//     2), but only the party's first make-party: a name is never
-	//     reused. The purposes are the opening record's change.
+	//     other purposes by set-purposes, closed by end-member. Making a
+	//     Party opens no one's: an organisation's first make-party names
+	//     its first admin, whose membership opens only with their own
+	//     accept-admin, the party's first, of that person (ORGANIZATION 2,
+	//     PEOPLE-KEYS-2 10.4 item 27 R4). A name is never reused, so a
+	//     second make-party names no one. The purposes are the opening
+	//     record's change.
 	ForceMembership = "membership"
 	// ForceParty is a Party, by PartyKey: opened by its first make-party.
 	// A party never ends.
@@ -531,6 +537,35 @@ var (
 func PartyKey(party string) string          { return "party:" + party }
 func MemberKey(party, person string) string { return PartyKey(party) + "/person:" + person }
 func GroupKey(party, group string) string   { return PartyKey(party) + "/group:" + group }
+
+// memberOf reads a member's key: the party and the person.
+func memberOf(subject string) (string, string, bool) {
+	rest, ok := strings.CutPrefix(subject, "party:")
+	p, person, found := strings.Cut(rest, "/person:")
+	if !ok || !found || strings.Contains(p, "/") || person == "" {
+		return "", "", false
+	}
+	return p, person, true
+}
+
+// AdminAccepted is the entry by which party's first admin accepted, among
+// es in book order, or nil: the first accept-admin, after the party's
+// first make-party, of the person it named, as the in-force rule takes it.
+func AdminAccepted(es []*Sealed, party string) *Sealed {
+	person, made := "", false
+	for _, s := range es {
+		e := s.Entry
+		switch {
+		case e.Kind != KindControl:
+		case e.Act == "make-party" && e.Subject == PartyKey(party) && !made:
+			made, person = true, e.Person
+		case e.Act == "accept-admin" && person != "" && e.Subject == MemberKey(party, person) && e.Person == person:
+			return s
+		}
+	}
+	return nil
+}
+
 func partyOf(subject string) (string, bool) {
 	p, ok := strings.CutPrefix(subject, "party:")
 	return p, ok && !strings.Contains(p, "/")
@@ -598,7 +633,8 @@ func InForceAt(es []*Sealed, kind, key string, at time.Time) (*Sealed, error) {
 		return nil, fmt.Errorf("in force is asked of %s, %s, %s, %s, %s or %s, not %q", ForceGrant, ForceBinding, ForceMembership, ForceParty, ForceDevice, ForceAgentGrant, kind)
 	}
 	var on *Sealed
-	made := map[string]bool{}
+	firstAdmin := map[string]string{} // party -> the person its first make-party names
+	made, accepted := map[string]bool{}, map[string]bool{}
 	for _, s := range es {
 		e := s.Entry
 		if kind == ForceBinding && e.Kind == KindControl && e.Act == "bind" && e.Ends == key {
@@ -613,14 +649,26 @@ func InForceAt(es []*Sealed, kind, key string, at time.Time) (*Sealed, error) {
 			// Only a party's first make-party counts: a name is never
 			// reused, so a second can neither make it again nor name
 			// another first admin.
-			first := !made[e.Subject]
-			made[e.Subject] = true
 			p, isParty := partyOf(e.Subject)
-			switch {
-			case !first || !isParty:
-			case kind == ForceParty && e.Subject == key:
+			if made[e.Subject] || !isParty {
+				continue
+			}
+			made[e.Subject] = true
+			firstAdmin[p] = e.Person
+			if kind == ForceParty && e.Subject == key {
 				on = s
-			case kind == ForceMembership && e.Person != "" && MemberKey(p, e.Person) == key:
+			}
+			continue
+		}
+		if e.Act == "accept-admin" {
+			// The first admin's own acceptance, once: of the person the
+			// party's first make-party named.
+			p, person, ok := memberOf(e.Subject)
+			if !ok || accepted[p] || firstAdmin[p] == "" || firstAdmin[p] != person || e.Person != person {
+				continue
+			}
+			accepted[p] = true
+			if kind == ForceMembership && e.Subject == key {
 				on = s
 			}
 			continue

@@ -58,7 +58,8 @@ var actNeeds = map[string]ActNeed{
 	"extend-grant":    touched,
 	"add-member":      touched, // memberships
 	"set-purposes":    touched, // and purposes
-	"make-party":      touched, // a Party, with an organisation's first admin
+	"make-party":      touched, // a Party, naming an organisation's first admin
+	"accept-admin":    touched, // the first admin accepts, as themselves
 	"bind":            touched, // DESIGN 6: accept a deployment binding
 	"people-confirm":  touched, // a tracker login may speak for the person (6.1)
 	"stand-in-policy": touched, // decide.by

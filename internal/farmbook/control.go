@@ -25,7 +25,8 @@ import (
 //   - disable and enable: a node taken out of scheduling and put back;
 //   - make-party, change-party and set-sign-ins: a Party made, its names
 //     or policy changed, and a person's sign-in subjects set
-//     (ORGANIZATION 1); make-party names an organisation's first admin;
+//     (ORGANIZATION 1); make-party names an organisation's first admin,
+//     who accepts with accept-admin, their own touched act;
 //   - add-member, set-purposes and end-member: a membership of a Party,
 //     by a person's name or by a group of the studio's own, its purposes
 //     changed, and ended (ORGANIZATION 2). A group's record names no
@@ -45,7 +46,8 @@ var ControlActs = map[string]string{
 	"enroll":         "for",
 	"disable":        "",
 	"enable":         "",
-	"make-party":     "member",
+	"make-party":     "firstAdmin",
+	"accept-admin":   "member",
 	"change-party":   "",
 	"set-sign-ins":   "",
 	"add-member":     "member",
