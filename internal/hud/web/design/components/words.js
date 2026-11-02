@@ -191,15 +191,27 @@ export function fromTracker(j) {
 // HUD for dana". Anything else is its actor and signer as before.
 const KEY_KIND = { hardware: 'hardware key', 'software-browser': 'software key', 'software-file': 'key in a file' };
 const DEVICE_KIND = { browser: 'a browser', mac: 'a Mac', windows: 'a Windows PC', linux: 'a Linux machine' };
+// where: the device an act was signed with: in a browser ("in Safari on
+// macOS"), on a machine ("on noor's laptop", "on a Mac")
+const where = (a) => `${a.kind === 'browser' ? 'in' : 'on'} ${a.label || DEVICE_KIND[a.kind] || a.kind}`;
 export function actBy(e) {
   if (!e) return '';
   const a = e.act;
   if (a) {
     const who = a.as ? `${e.actor} as ${a.as}` : e.actor;
-    const how = [`signed in ${a.label || DEVICE_KIND[a.kind] || a.kind}`, KEY_KIND[a.protection] || a.protection];
+    const how = [`signed ${where(a)}`, KEY_KIND[a.protection] || a.protection];
     if (a.grade === 'confirmed') how.push('confirmed with a touch');
     return `${who}, ${how.join(', ')}`;
   }
   if (e.signer === 'hud' && e.actor) return `signed by the HUD for ${e.actor}`;
   return `${e.actor || ''}${e.signer ? ' · ' + e.signer : ''}`;
+}
+
+// howSigned: how a person's own act was signed, for a sentence on their
+// page ("You granted it in Safari on macOS, with a software key."), or ''
+// when the record cites no act of theirs
+export function howSigned(a) {
+  if (!a) return '';
+  const k = KEY_KIND[a.protection] || a.protection;
+  return `${where(a)}, with ${/^[aeiou]/.test(k) ? 'an' : 'a'} ${k}${a.grade === 'confirmed' ? ', and confirmed it with a touch' : ''}${a.as ? `, as ${a.as}` : ''}`;
 }

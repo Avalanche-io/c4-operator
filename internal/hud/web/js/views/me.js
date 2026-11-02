@@ -40,6 +40,7 @@ import * as f from '../fmt.js';
 import { get } from '../api.js';
 import { c4idEl } from '../../design/components/c4id.js';
 import { heldSection } from './held.js';
+import { howSigned } from '../../design/components/words.js';
 import * as enrol from '../enrol.js';
 import * as touch from '../touch.js';
 
@@ -226,6 +227,7 @@ function loginRow(ctx, e) {
       h('div', { class: 'gmain' },
         h('b', null, e.login), h('span', { class: 'dim' }, ` in ${e.tracker} · ${e.project}`),
         h('div', { class: 'gline' }, `Confirmed as ${e.person === ctx.snap.viewer.user ? 'you' : personName(e.person)}${e.confirmed ? ` on ${day(e.confirmed.at)}` : ''}: ${e.lets}.`),
+        ctx.level >= 2 && e.confirmed ? signedLine(e.confirmed.act, e.revoked, 'confirmed') : null,
         ctx.level >= 3 && e.confirmed && e.confirmed.record ? h('div', { class: 'gline dim' }, 'signed record ', c4idEl(e.confirmed.record, { tail: 4, label: 'confirmation record' })) : null),
       h('button', { class: 'btn small', 'data-action': 'people-revoke', 'data-name': `${e.namespace}/${e.name}`, title: 'Take it back now. Decisions this login makes are no longer relayed as yours.' }, 'Revoke'));
   }
@@ -239,6 +241,15 @@ function loginRow(ctx, e) {
 }
 
 const day = (iso) => f.when(iso);
+
+// signedLine: how your grant or confirmation, and its revocation, were
+// signed (the farm reads it from each act's own record); one the HUD
+// signed for you, before your device signed your acts, says so
+function signedLine(act, revoked, did) {
+  const made = act ? `You ${did} it ${howSigned(act)}.` : 'Signed by the HUD for you.';
+  const back = revoked && revoked.act ? ` You took it back ${howSigned(revoked.act)}.` : '';
+  return h('div', { class: 'gline dim' }, made + back);
+}
 const KIND = { github: 'GitHub', flow: 'Flow Production Tracking', jira: 'Jira', linear: 'Linear' };
 // KIND_OF: a tracker's site in words, from its name when the list is not read yet
 function KIND_OF(name) {
@@ -257,6 +268,7 @@ function grantRow(ctx, g) {
     h('div', { class: 'gmain' },
       h('b', null, g.tracker), h('span', { class: 'dim' }, ` · ${g.project}`),
       h('div', { class: 'gline' }, g.active ? `It can submit ${scope(g)} for you until ${day(g.until)}.` : `It cannot submit work for you: ${g.why}.`),
+      ctx.level >= 2 ? signedLine(g.act, g.revoked, 'granted') : null,
       ctx.level >= 3 && g.record ? h('div', { class: 'gline dim' }, 'signed record ', c4idEl(g.record, { tail: 4, label: 'grant record' })) : null),
     g.active ? h('button', { class: 'btn small', 'data-action': 'revoke', 'data-grant': `${g.namespace}/${g.name}`, title: 'Take it back now. A unit running under it finishes its attempt; nothing new starts for you.' }, 'Revoke') : null);
 }

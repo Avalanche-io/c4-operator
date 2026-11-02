@@ -126,7 +126,9 @@ export function readPage(page) {
     const withheld = pe.entry == null || (pe.redacted || []).includes('entry');
     if (!withheld && (pe.redacted || []).includes('private')) notes.push('its addresses left out');
     return {
-      seq: pe.position, id: pe.id, at: e.at, kind: f ? 'late' : e.kind, open: pending,
+      // act: how the person's act an entry books was signed, which the
+      // farm reads from the act's own record (actBy, words.js)
+      seq: pe.position, id: pe.id, at: e.at, kind: f ? 'late' : e.kind, open: pending, act: pe.act,
       // the HUD writes control records; the people's issuer the rest
       signer: e.kind === 'control' ? 'hud' : 'issuer', day: true, record: e.record || pe.id,
       message: withheld ? 'an entry withheld from you: only its person and the farm’s admins read it' + (notes.length ? ` (${notes.join('; ')})` : '')
