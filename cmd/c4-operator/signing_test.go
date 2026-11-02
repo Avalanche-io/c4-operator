@@ -117,6 +117,12 @@ func TestIssuerCertifiesAUnitAsItself(t *testing.T) {
 		unitPod("noattempt", "pod-na", func(p *corev1.Pod) { delete(p.Annotations, c4v1.AnnotationAttempt) }),
 		unitPod("loose", "pod-loose", func(p *corev1.Pod) { p.OwnerReferences = nil }),
 		unitPod("plain", "pod-plain", func(p *corev1.Pod) { p.Labels = nil }),
+		unitPod("placed", "pod-placed", func(p *corev1.Pod) { p.Spec.NodeName = "w1" }),
+		unitPod("onhost", "pod-onhost", func(p *corev1.Pod) { p.Spec.NodeName = "laptop-1" }),
+		unitPod("tainted", "pod-tainted", func(p *corev1.Pod) { p.Spec.NodeName = "laptop-2" }),
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "w1"}},
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "laptop-1", Labels: map[string]string{c4v1.LabelHost: "laptop-1"}}},
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "laptop-2"}, Spec: corev1.NodeSpec{Taints: []corev1.Taint{{Key: c4v1.TaintHostRunner, Value: "true", Effect: corev1.TaintEffectNoSchedule}}}},
 	).Build()
 	pod := func(name, uid string) *auth.Identity {
 		return &auth.Identity{User: "system:serviceaccount:show-a:default", Namespace: "show-a", Account: "default", PodName: name, PodUID: uid}
@@ -135,10 +141,16 @@ func TestIssuerCertifiesAUnitAsItself(t *testing.T) {
 		"no attempt":          {pod("noattempt", "pod-na"), "names no attempt"},
 		"no controlling job":  {pod("loose", "pod-loose"), "is not a unit of job"},
 		"a pod that is gone":  {pod("gone", "pod-gone"), "is gone"},
+		// a host runner's unit gets its certificate through its runner
+		"a host runner's unit, by label": {pod("onhost", "pod-onhost"), "runs on host runner laptop-1"},
+		"a host runner's unit, by taint": {pod("tainted", "pod-tainted"), "runs on host runner laptop-2"},
 	} {
 		if got, _, err := signerIdentity(ctx, r, c.id, "c4-system"); err == nil || !strings.Contains(err.Error(), c.err) {
 			t.Errorf("%s: certified as %q (err %v), want refused with %q", name, got, err, c.err)
 		}
+	}
+	if got, _, err := signerIdentity(ctx, r, pod("placed", "pod-placed"), "c4-system"); err != nil || got != provenance.UnitIdentity("show-a", "sh040-comp", "3", "9c1d2e7f-0000-4000-8000-000000000001", 2) {
+		t.Errorf("a unit placed on a farm Node: %q (err %v)", got, err)
 	}
 	// a pod that is no unit's is judged as its account: here an importer
 	if got, _, err := signerIdentity(ctx, r, pod("plain", "pod-plain"), "c4-system"); err != nil || got != provenance.ServiceAccountIdentity("show-a", "default") {

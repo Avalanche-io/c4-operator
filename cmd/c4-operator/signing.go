@@ -240,7 +240,38 @@ func unitIdentity(ctx context.Context, r client.Reader, id *auth.Identity) (stri
 	case pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed || pod.DeletionTimestamp != nil:
 		return "", true, fmt.Errorf("unit %s/%s's attempt %d has ended", job, pod.Labels[c4v1.LabelUnit], attempt)
 	}
+	// a host runner's unit is certified only through its runner, which
+	// asks for units bound to its own Node, of its owners' jobs
+	if host, err := hostNode(ctx, r, pod.Spec.NodeName); err != nil {
+		return "", true, err
+	} else if host {
+		return "", true, fmt.Errorf("pod %s/%s runs on host runner %s: its certificate comes through that runner", id.Namespace, id.PodName, pod.Spec.NodeName)
+	}
 	return provenance.UnitIdentity(id.Namespace, job, pod.Labels[c4v1.LabelUnit], string(ref.UID), attempt), true, nil
+}
+
+// hostNode reports whether Node name is a host runner's machine: its
+// taint or its host label says so. A pod bound to no Node is on none.
+func hostNode(ctx context.Context, r client.Reader, name string) (bool, error) {
+	if name == "" {
+		return false, nil
+	}
+	var n corev1.Node
+	if err := r.Get(ctx, types.NamespacedName{Name: name}, &n); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, fmt.Errorf("node %s is gone", name)
+		}
+		return false, fmt.Errorf("reading node %s: %w", name, err)
+	}
+	if n.Labels[c4v1.LabelHost] != "" {
+		return true, nil
+	}
+	for _, t := range n.Spec.Taints {
+		if t.Key == c4v1.TaintHostRunner {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // everyReplica runs on every manager replica, leader or not: the issuer
