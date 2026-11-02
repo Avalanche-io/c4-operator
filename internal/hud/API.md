@@ -2237,7 +2237,11 @@ request body as its params, `chain.by` the tracker and user, `chain.for`
 the person (or the party) `people` names, `chain.under` the person's
 confirmation of the login (`people-map`, its record) when there is one,
 and `signer` the sync's own `sa/<ns>/<account>` identity, which the
-farm's issuer certifies only while a Tracker names that account. The HUD
+farm's issuer certifies only while a Tracker names that account, its leaf
+naming each such Tracker (`urn:c4:sync:<namespace>/<tracker>`): a relayed
+act is refused unless its leaf names the act's Tracker, and such a leaf
+signs no import or ingest. Only a cluster admin or the manager sets a
+Tracker's `sync` (an admission policy). The HUD
 takes it only with the relayed decision (`via`), only signed by the
 account the Tracker names, sent by that account, and naming the same
 tracker, user, person and confirmation; otherwise `403`. The control

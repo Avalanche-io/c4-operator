@@ -6,6 +6,7 @@ resources:
 - lease-mounts.yaml
 - submit-grants.yaml
 - tracker-people.yaml
+- tracker-sync.yaml
 - host-pods.yaml
 - deployment-bindings.yaml
 - telemetry-setting.yaml

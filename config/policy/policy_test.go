@@ -60,7 +60,7 @@ func start(t *testing.T) (*rest.Config, client.Client) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := []string{"node-writes.yaml", "workjob-owner.yaml", "workjob-controls.yaml", "host-runner.yaml", "lease-mounts.yaml", "submit-grants.yaml", "tracker-people.yaml", "host-pods.yaml", "deployment-bindings.yaml", "telemetry-setting.yaml", "reserved-tools.yaml", "../rbac/host-runner.yaml"}
+	files := []string{"node-writes.yaml", "workjob-owner.yaml", "workjob-controls.yaml", "host-runner.yaml", "lease-mounts.yaml", "submit-grants.yaml", "tracker-people.yaml", "tracker-sync.yaml", "host-pods.yaml", "deployment-bindings.yaml", "telemetry-setting.yaml", "reserved-tools.yaml", "../rbac/host-runner.yaml"}
 	if v := os.Getenv("POLICY_FILES"); v != "" {
 		files = strings.Split(v, ",")
 	}
@@ -1006,5 +1006,74 @@ func TestReservedToolNamesMatchTheFarm(t *testing.T) {
 	want := "['" + strings.Join(c4v1.FarmTools, "', '") + "']"
 	if !strings.Contains(string(data), `expression: "`+want+`"`) {
 		t.Fatalf("reserved-tools.yaml does not reserve %s", want)
+	}
+}
+
+// A Tracker's sync is named only at install or by the manager: it hands
+// that account a relay's signing certificate. A project editor who may
+// change a Tracker cannot set, change or clear it, and its account is in
+// the Tracker's namespace or c4-system, whoever names it.
+func TestTrackerSyncOnlyAtInstall(t *testing.T) {
+	cfg, admin := start(t)
+	ctx := context.Background()
+	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "widgets"}})
+	admin.Create(ctx, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "tracker-editor"},
+		Rules: []rbacv1.PolicyRule{{APIGroups: []string{"c4.avalanche.io"}, Resources: []string{"trackers"}, Verbs: []string{"get", "create", "update", "patch"}}}})
+	admin.Create(ctx, &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Namespace: "widgets", Name: "lee-trackers"},
+		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "tracker-editor"},
+		Subjects: []rbacv1.Subject{{Kind: "User", Name: "lee"}}})
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin"},
+		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: "c4-manager", Namespace: "c4-system"}}})
+	as := func(user string, groups ...string) client.Client {
+		c := rest.CopyConfig(cfg)
+		c.Impersonate = rest.ImpersonationConfig{UserName: user, Groups: append(groups, "system:authenticated")}
+		s := runtime.NewScheme()
+		c4v1.AddToScheme(s)
+		cl, err := client.New(c, client.Options{Scheme: s})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cl
+	}
+	lee := as("lee")
+	manager := as("system:serviceaccount:c4-system:c4-manager", "system:serviceaccounts", "system:serviceaccounts:c4-system")
+	sync := &c4v1.TrackerSync{Namespace: "c4-system", ServiceAccount: "c4-sync"}
+	tracker := func(name string, s *c4v1.TrackerSync) *c4v1.Tracker {
+		return &c4v1.Tracker{ObjectMeta: metav1.ObjectMeta{Namespace: "widgets", Name: name},
+			Spec: c4v1.TrackerSpec{Kind: "github", Endpoint: "https://api.github.example", Credential: c4v1.TrackerCredential{Secret: c4v1.TrackerSecretKey{Name: "gh", Key: "token"}}, Sync: s}}
+	}
+	enforced(t, "c4-tracker-sync", func(try int) error {
+		return lee.Create(ctx, tracker(fmt.Sprintf("probe-%d", try), sync))
+	})
+	plain := tracker("github", nil)
+	if err := lee.Create(ctx, plain); err != nil {
+		t.Fatalf("a project editor makes a Tracker with no sync: %v", err)
+	}
+	if err := lee.Patch(ctx, plain, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"people":{"dana":"dana"}}}`))); err != nil {
+		t.Errorf("a project editor changes the people map: %v", err)
+	}
+	if err := lee.Patch(ctx, plain, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"sync":{"namespace":"widgets","serviceAccount":"mine"}}}`))); err == nil {
+		t.Error("a project editor named a sync")
+	}
+	installed := tracker("flow", sync)
+	if err := admin.Create(ctx, installed); err != nil {
+		t.Fatalf("a cluster admin names the sync at install: %v", err)
+	}
+	if err := lee.Patch(ctx, installed, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"sync":{"namespace":"widgets","serviceAccount":"mine"}}}`))); err == nil {
+		t.Error("a project editor changed the sync")
+	}
+	if err := lee.Patch(ctx, installed, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"sync":null}}`))); err == nil {
+		t.Error("a project editor cleared the sync")
+	}
+	if err := lee.Patch(ctx, installed, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"people":{"dana":"dana"}}}`))); err != nil {
+		t.Errorf("a project editor changes the rest of a Tracker with a sync: %v", err)
+	}
+	if err := manager.Create(ctx, tracker("kitsu", &c4v1.TrackerSync{Namespace: "widgets", ServiceAccount: "kitsu-sync"})); err != nil {
+		t.Errorf("the manager names a sync in the Tracker's namespace: %v", err)
+	}
+	if err := admin.Create(ctx, tracker("linear", &c4v1.TrackerSync{Namespace: "show-b", ServiceAccount: "c4-sync"})); err == nil ||
+		!strings.Contains(err.Error(), "own namespace or the farm") {
+		t.Errorf("a sync in another project's namespace: %v", err)
 	}
 }
