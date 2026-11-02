@@ -723,6 +723,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 
 	case "mcp":
 		agent := fs.String("agent", "", "the agent's name; the book records its actions as agent/NAME for you")
+		keyDir := fs.String("key-dir", "", "where the agent's own key is kept (default ~/.c4/FARM/keys, which the agent's sandbox denies it)")
 		if _, err := parse(fs, rest); err != nil {
 			return err
 		}
@@ -730,8 +731,19 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if err != nil {
 			return err
 		}
+		mc := &mcpserver.Client{Base: c.Base, Token: c.Token, As: c.As, Installer: c.Installer, Agent: *agent}
+		if *agent != "" {
+			// The server's own key, under the agent's name: certified while
+			// a person's grant of it is in force (c4 farm integrate).
+			dir := *keyDir
+			if dir == "" {
+				name, _, _ := cfg.Resolve(cm.farm)
+				dir = filepath.Join(filepath.Dir(farmcli.ConfigPath()), name, "keys")
+			}
+			mc.Keys = mcpserver.KeyFiles{Dir: dir}
+		}
 		mcpserver.Version = version
-		return mcpserver.Serve(ctx, &mcpserver.Client{Base: c.Base, Token: c.Token, As: c.As, Installer: c.Installer, Agent: *agent}, &mcp.StdioTransport{})
+		return mcpserver.Serve(ctx, mc, &mcp.StdioTransport{})
 
 	case "samples":
 		from := fs.String("from", "", "a local sample archive instead of the release's")

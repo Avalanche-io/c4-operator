@@ -8,6 +8,7 @@ package mcpserver
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -42,6 +43,12 @@ type Client struct {
 	// controls as "agent/NAME for USER" (X-C4-Agent).
 	Agent string
 	HTTP  *http.Client
+	// Keys keeps the agent's own key (agentkey.go): with it, and a grant
+	// in force, the server signs its controls as the agent. nil signs none.
+	Keys AgentKeys
+
+	idMu sync.Mutex
+	id   *agentID
 
 	// The run tools on the server this client serves (runtools.go):
 	// syncMu guards added, each tool's fingerprint.
@@ -90,6 +97,10 @@ func agentOf(ctx context.Context, def string) string {
 	return def
 }
 
+// actKey carries, in a call's context, the signed act its request
+// carries (X-C4-Act).
+type actKey struct{}
+
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
 	var rd io.Reader
 	if body != nil {
@@ -111,6 +122,9 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	}
 	if a := agentOf(ctx, c.Agent); a != "" {
 		req.Header.Set("X-C4-Agent", a)
+	}
+	if act, _ := ctx.Value(actKey{}).([]byte); act != nil {
+		req.Header.Set("X-C4-Act", base64.StdEncoding.EncodeToString(act))
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")

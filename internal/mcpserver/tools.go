@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/url"
@@ -62,6 +63,12 @@ func New(c *Client) *mcp.Server {
 // the session runs appears without the client asking.
 func Serve(ctx context.Context, c *Client, t mcp.Transport) error {
 	s := New(c)
+	if c != nil && c.Keys != nil {
+		// The first connection makes the agent's key and asks for its
+		// certificate; a farm with no grant for it yet is asked again
+		// when the agent next acts.
+		go c.Connect(ctx)
+	}
 	if c != nil && c.Base != "" {
 		go func() {
 			tick := time.NewTicker(runEvery)
@@ -662,6 +669,17 @@ type Done struct {
 func (c *Client) control(ctx context.Context, path string, body any) (*mcp.CallToolResult, Done, error) {
 	var r struct {
 		Message string `json:"message"`
+	}
+	if m, ok := body.(map[string]any); ok && c.Keys != nil {
+		// Signed as the agent's own act where it has a grant in force
+		// (agentkey.go); the body sent is exactly what it signed.
+		raw, act, err := c.signControl(ctx, path, m)
+		if err != nil {
+			return nil, Done{}, err
+		}
+		if act != nil {
+			ctx, body = context.WithValue(ctx, actKey{}, act), json.RawMessage(raw)
+		}
 	}
 	if err := c.do(ctx, "POST", path, body, &r); err != nil {
 		return nil, Done{}, err
