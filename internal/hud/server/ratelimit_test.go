@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -71,5 +72,23 @@ func TestIssuerRoutesAreLimited(t *testing.T) {
 	}
 	if w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") == "" || people >= 2*peopleBudget.burst {
 		t.Fatalf("the people's issuer past its burst: %d, Retry-After %q, %d reached it", w.Code, w.Header().Get("Retry-After"), people)
+	}
+	// a read past the budget, from another address, says when to come back
+	// too, so a poller waits and goes on rather than failing
+	refused := 0
+	for range peopleBudget.burst + 1 {
+		r := httptest.NewRequest(http.MethodGet, "/issuer/v1/people/index?from=0", nil)
+		r.RemoteAddr = "198.51.100.7:4711"
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code == http.StatusTooManyRequests {
+			refused++
+			if secs, err := strconv.Atoi(w.Header().Get("Retry-After")); err != nil || secs < 1 {
+				t.Fatalf("a refused read's Retry-After: %q", w.Header().Get("Retry-After"))
+			}
+		}
+	}
+	if refused == 0 {
+		t.Fatal("reads past the budget were all taken")
 	}
 }
