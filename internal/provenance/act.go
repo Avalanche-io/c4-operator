@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/Avalanche-io/c4-operator/schema"
@@ -35,6 +36,31 @@ func AgentIdentity(agent string) string { return IdentityBase + "agent/" + url.P
 // UID, so a job made again under the name is another.
 func UnitIdentity(namespace, job, unit, jobUID string, attempt int) string {
 	return fmt.Sprintf("%sunit/%s/%s/%s@%s/%d", IdentityBase, namespace, job, unit, jobUID, attempt)
+}
+
+// UnitOf is a unit's identity read back: ok is false for any other, or a
+// malformed one (an attempt that is not a positive number).
+type UnitOf struct {
+	Namespace, Job, Unit, JobUID string
+	Attempt                      int
+}
+
+// ParseUnitIdentity reads unit/<ns>/<job>/<unit>@<job UID>/<attempt>.
+func ParseUnitIdentity(id string) (UnitOf, bool) {
+	rest, ok := strings.CutPrefix(id, IdentityBase+"unit/")
+	if !ok {
+		return UnitOf{}, false
+	}
+	parts := strings.Split(rest, "/")
+	if len(parts) != 4 {
+		return UnitOf{}, false
+	}
+	unit, uid, ok := strings.Cut(parts[2], "@")
+	attempt, err := strconv.Atoi(parts[3])
+	if !ok || err != nil || attempt < 1 || parts[0] == "" || parts[1] == "" || unit == "" || uid == "" {
+		return UnitOf{}, false
+	}
+	return UnitOf{Namespace: parts[0], Job: parts[1], Unit: unit, JobUID: uid, Attempt: attempt}, true
 }
 
 // A leaf certificate names a person's device, or the grant an agent or CI

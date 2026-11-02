@@ -256,6 +256,16 @@ func (s *Signer) renew(ctx context.Context) error {
 }
 
 // Identity is the identity this signer signs as.
+// Farm is the ID of the farm s's certificate is from: the C4 ID of its
+// chain's root, the farm's CA (FarmID), which an act names.
+func (s *Signer) Farm(ctx context.Context, now time.Time) (string, error) {
+	_, chain, err := s.current(ctx, now)
+	if err != nil {
+		return "", err
+	}
+	return FarmID(chain[len(chain)-1]), nil
+}
+
 func (s *Signer) Identity() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -228,15 +228,13 @@ func checkAct(v *Verified) (*schema.Act, error) {
 var ErrNeedsTouch = errors.New("needs the person's touch")
 
 // unitSigns reports whether a unit's identity,
-// unit/<ns>/<job>/<unit>@<uid>/<attempt>, is the unit a chain names,
-// <ns>/<job>@<uid>/<unit> (schema.UnitRef).
+// unit/<ns>/<job>/<unit>@<uid>/<attempt>, well formed, is the unit a
+// chain names, <ns>/<job>@<uid>/<unit> (schema.UnitRef, which keeps the
+// UID's first characters: the HUD pins the whole UID and the attempt
+// against the caller, citeUnitAct).
 func unitSigns(signer, ref string) bool {
-	parts := strings.Split(strings.TrimPrefix(signer, IdentityBase+"unit/"), "/")
-	if len(parts) != 4 || !strings.HasPrefix(signer, IdentityBase+"unit/") {
-		return false
-	}
-	unit, uid, ok := strings.Cut(parts[2], "@")
-	return ok && schema.UnitRef(parts[0], parts[1], uid, unit) == ref
+	u, ok := ParseUnitIdentity(signer)
+	return ok && schema.UnitRef(u.Namespace, u.Job, u.JobUID, u.Unit) == ref
 }
 
 func underGrant(under []schema.Delegation, grant string) bool {
