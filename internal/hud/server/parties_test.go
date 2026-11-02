@@ -1411,6 +1411,10 @@ func TestPartyProviderSubjectFromTheToken(t *testing.T) {
 	if code, out := put(map[string]any{"signIns": append(keep, api.SignIn{Issuer: sso, Subject: "00u-noor-laptop"})}); code != http.StatusForbidden || !says(out, "fresh ID token") {
 		t.Errorf("a subject with no token: %d %v", code, out)
 	}
+	// a farm admin's own token adds nothing to noor's Party
+	if code, out := p.call(t, http.MethodPut, "/api/v1/parties/noor/sign-ins", "ines", map[string]any{"signIns": keep, "idToken": p.token("00u-ines")}, nil); code != http.StatusForbidden || !says(out, "the person adds their own") {
+		t.Errorf("a farm admin adds her token's subject to noor's Party: %d %v", code, out)
+	}
 	if code, out := put(map[string]any{"signIns": keep, "idToken": p.token("00u-noor-laptop")}); code != http.StatusOK {
 		t.Fatalf("noor adds a subject on its token alone: %d %v", code, out)
 	}
