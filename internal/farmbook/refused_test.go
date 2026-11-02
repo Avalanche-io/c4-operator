@@ -249,12 +249,38 @@ func TestCheckPageChecksAnEntryMarkedRedacted(t *testing.T) {
 			t.Errorf("a rewritten entry marked redacted %v: %v", red, err)
 		}
 	}
-	// Withheld whole, it is taken as withheld: no content to believe.
-	p := r.page(0)
-	p.Entries[0].Entry, p.Entries[0].Redacted = nil, []string{farmbook.RedactedEntry}
-	if _, err := farmbook.CheckPage(r.farm.ID, r.farm.Roots, farmbook.LastHead{}, p); err != nil {
-		t.Errorf("an entry withheld whole: %v", err)
+}
+
+// Only an adopted entry may be withheld whole. A later one withheld whole,
+// a revoke a compromised HUD hides, is refused, so the grant it ended
+// can't stay in force for the reader.
+func TestOnlyAnAdoptedEntryMayBeWithheldWhole(t *testing.T) {
+	r := newRig(t)
+	e := farmbook.Entry{Farm: r.farm.ID, Position: 1, Order: farmbook.OrderIssuer, At: r.now.Format(time.RFC3339Nano),
+		Kind: "device", Device: provtest.ID("a device"), Person: "dana"}
+	b, _ := json.Marshal(&e)
+	adopted, _ := schema.Canonical(b)
+	r.sealer.Adopt = func(context.Context) (*farmbook.Adoption, error) {
+		return &farmbook.Adoption{Head: provtest.ID(string(adopted)), Position: 1, Entries: [][]byte{adopted}}, nil
 	}
+	r.seal()
+	r.book(r.control(r.hud, "revoke", "submitgrant:saltmarsh/dana-flow", map[string]any{"person": "dana"}, r.now), nil)
+	r.seal()
+	withhold := func(k int) *farmbook.Page {
+		p := r.page(0)
+		if len(p.Entries) != 2 {
+			t.Fatalf("page holds %d entries, want the adopted one and the revoke", len(p.Entries))
+		}
+		p.Entries[k].Entry, p.Entries[k].Redacted = nil, []string{farmbook.RedactedEntry}
+		return p
+	}
+	if _, err := farmbook.CheckPage(r.farm.ID, r.farm.Roots, farmbook.LastHead{}, withhold(0)); err != nil {
+		t.Errorf("the adopted entry withheld whole: %v", err)
+	}
+	if _, err := farmbook.CheckPage(r.farm.ID, r.farm.Roots, farmbook.LastHead{}, withhold(1)); !errors.Is(err, farmbook.ErrBook) {
+		t.Errorf("the revoke withheld whole: %v", err)
+	}
+	p := withhold(0)
 	p.Entries[0].Entry = json.RawMessage(`{"act":"grant"}`)
 	if _, err := farmbook.CheckPage(r.farm.ID, r.farm.Roots, farmbook.LastHead{}, p); err == nil {
 		t.Error("an entry withheld and given")

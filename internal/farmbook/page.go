@@ -167,10 +167,16 @@ func CheckPage(farm string, roots *x509.CertPool, last LastHead, p *Page) (LastH
 }
 
 // checkPageEntry checks one entry of a page: whole unless withheld whole,
-// its private part the one it names.
+// its private part the one it names. Only an adopted entry, which keeps
+// its address in the hashed entry, may be withheld whole; a later one is
+// given with its private part withheld, so a withheld removal or revoke
+// can't hide in force what the book ended.
 func checkPageEntry(farm string, e PageEntry, before string, adopted bool) error {
 	withheld := slices.Contains(e.Redacted, RedactedEntry)
 	if withheld {
+		if !adopted {
+			return fmt.Errorf("%w: entry %d is withheld whole, and only an adopted entry may be", ErrBook, e.Position)
+		}
 		if len(e.Entry) > 0 && string(e.Entry) != "null" {
 			return fmt.Errorf("%w: entry %d is withheld and given", ErrBook, e.Position)
 		}
