@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,8 +26,12 @@ import (
 type Client struct {
 	// Base is the HUD's address, for example http://c4-hud.c4-system.
 	Base string
-	// Token is the caller's bearer token; empty sends none.
-	Token string
+	// Token is the caller's bearer token; empty sends none. TokenFile,
+	// when set, is read again at each call for it, so a projected token
+	// (a unit's, which the kubelet rotates within the hour) stays current;
+	// Token is sent while the file can't be read.
+	Token     string
+	TokenFile string
 	// As selects a development viewer (?as=) on HUDs started with
 	// --hud-dev-viewers. Never used in production.
 	As string
@@ -110,8 +115,8 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
+	if t := c.token(); t != "" {
+		req.Header.Set("Authorization", "Bearer "+t)
 	}
 	hc := c.HTTP
 	if hc == nil {
@@ -205,4 +210,15 @@ func toInt(v any) int {
 		return n
 	}
 	return 0
+}
+
+// token is the bearer token to send now: TokenFile's, read afresh, else
+// Token.
+func (c *Client) token() string {
+	if c.TokenFile != "" {
+		if b, err := os.ReadFile(c.TokenFile); err == nil && strings.TrimSpace(string(b)) != "" {
+			return strings.TrimSpace(string(b))
+		}
+	}
+	return c.Token
 }

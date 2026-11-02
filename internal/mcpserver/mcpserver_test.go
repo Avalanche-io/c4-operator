@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -969,5 +970,29 @@ func TestRunBundle(t *testing.T) {
 	defer hud.mu.Unlock()
 	if last := hud.posts[len(hud.posts)-1]; !strings.Contains(last, "/api/v1/bundles/show-a/agents/suspend") || !strings.Contains(last, `"suspend":true`) {
 		t.Fatalf("hold posted %s", last)
+	}
+}
+
+// A client with a token file reads it at each call, so a unit's projected
+// token, which the kubelet rotates, never goes stale; while the file can't
+// be read it sends the token it started with.
+func TestClientRereadsItsTokenFile(t *testing.T) {
+	var got []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Header.Get("Authorization"))
+		w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+	file := t.TempDir() + "/token"
+	os.WriteFile(file, []byte("first\n"), 0o600)
+	c := &Client{Base: ts.URL, Token: "first", TokenFile: file}
+	ctx := context.Background()
+	c.do(ctx, http.MethodGet, "/api/v1/snapshot", nil, nil)
+	os.WriteFile(file, []byte("rotated\n"), 0o600)
+	c.do(ctx, http.MethodGet, "/api/v1/snapshot", nil, nil)
+	os.Remove(file)
+	c.do(ctx, http.MethodGet, "/api/v1/snapshot", nil, nil)
+	if want := []string{"Bearer first", "Bearer rotated", "Bearer first"}; !slices.Equal(got, want) {
+		t.Fatalf("sent %q, want %q", got, want)
 	}
 }
