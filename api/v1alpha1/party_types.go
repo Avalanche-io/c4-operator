@@ -55,12 +55,14 @@ type PartySpec struct {
 	// +optional
 	LegalName string `json:"legalName,omitempty"`
 	// SignIns, for a person, are the sign-in subjects that are this
-	// person: a token username, an SSO subject, a development name. One
-	// subject is one party's at most.
+	// person: a provider's subject ID, which the people's issuer
+	// certifies their device keys on, and the names the HUD signs them in
+	// as (a token username, an SSO header's value, a development name).
+	// One subject is one person's at most, across every Party.
 	// +kubebuilder:validation:MaxItems=32
-	// +listType=set
+	// +listType=atomic
 	// +optional
-	SignIns []string `json:"signIns,omitempty"`
+	SignIns []PartySignIn `json:"signIns,omitempty"`
 	// PerPersonViews, for an organisation, is its policy on per-person
 	// spend views (SPEND 5): off, the default, leaves the view-people
 	// purpose held but not in effect.
@@ -75,6 +77,20 @@ type PartySpec struct {
 	// Changed is the party's last change, if any.
 	// +optional
 	Changed *PartyAct `json:"changed,omitempty"`
+}
+
+// PartySignIn is one sign-in subject that is a person.
+type PartySignIn struct {
+	// Issuer is the sign-in provider's issuer URL, for a provider's
+	// subject ID: the people's issuer matches an ID token's iss and sub
+	// against it (PEOPLE-KEYS-2 3.1), never the email. Empty for a name
+	// the HUD signs the person in as.
+	// +kubebuilder:validation:MaxLength=253
+	// +optional
+	Issuer string `json:"issuer,omitempty"`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	Subject string `json:"subject"`
 }
 
 // PartyAct is one signed change to a party.

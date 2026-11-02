@@ -939,7 +939,7 @@ func TestPartiesOnlyFromTheHUD(t *testing.T) {
 		t.Errorf("the HUD changed a party's kind: %v", err)
 	}
 	signIns := p.DeepCopy()
-	signIns.Spec.SignIns = []string{"mallory"}
+	signIns.Spec.SignIns = []c4v1.PartySignIn{{Subject: "mallory"}}
 	if err := hud.Update(ctx, signIns); err == nil || !strings.Contains(err.Error(), "only a person has sign-ins") {
 		t.Errorf("an organisation got sign-ins: %v", err)
 	}

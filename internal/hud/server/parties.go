@@ -26,10 +26,10 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -136,12 +136,20 @@ func (s *Server) partyPerson(ctx context.Context, v *api.Viewer, ps []c4v1.Party
 	if v == nil || v.Unit != nil || v.User == "" {
 		return ""
 	}
+	var held []string
 	for i := range ps {
-		if ps[i].Spec.Kind == c4v1.PartyPerson && slices.Contains(ps[i].Spec.SignIns, v.User) {
-			return ps[i].Name
+		if ps[i].Spec.Kind == c4v1.PartyPerson && slices.Contains(ps[i].Spec.SignIns, c4v1.PartySignIn{Subject: v.User}) {
+			held = append(held, ps[i].Name)
 		}
 	}
-	return s.ownerFor(ctx, v)
+	switch len(held) {
+	case 0:
+		return s.ownerFor(ctx, v)
+	case 1:
+		return held[0]
+	}
+	// one sign-in is one person's: in two people's, it is no one
+	return ""
 }
 
 // partyBook is the farm book as a Party's members are judged by: the
@@ -164,31 +172,7 @@ func inForce(view *farmbook.View, kind, key string) *farmbook.Sealed {
 // saying what its entry says, since an entry pending the seal is not yet
 // checked by the queue.
 func (s *Server) purposesOf(ctx context.Context, on *farmbook.Sealed) ([]string, error) {
-	rec, err := s.FarmBookReader.Store.Get(ctx, on.Entry.Record)
-	if err != nil {
-		return nil, err
-	}
-	vr, err := provenance.VerifyBundle(rec, s.trust(ctx).roots)
-	if err != nil {
-		return nil, fmt.Errorf("record %s does not verify: %v", shortID(on.Entry.Record), err)
-	}
-	if err := provenance.CheckSigner(vr); err != nil || vr.PredicateType != provenance.PredicateControl {
-		return nil, fmt.Errorf("record %s is not the HUD's control record: %v", shortID(on.Entry.Record), err)
-	}
-	var p struct {
-		Action string `json:"action"`
-		Target string `json:"target"`
-		Change struct {
-			Purposes []string `json:"purposes"`
-		} `json:"change"`
-	}
-	if err := json.Unmarshal(vr.Predicate, &p); err != nil {
-		return nil, err
-	}
-	if p.Action != on.Entry.Act || p.Target != on.Entry.Subject {
-		return nil, fmt.Errorf("record %s is %s on %s, and its entry %s on %s", shortID(on.Entry.Record), p.Action, p.Target, on.Entry.Act, on.Entry.Subject)
-	}
-	return p.Change.Purposes, nil
+	return farmbook.MemberPurposes(ctx, s.FarmBookReader.Store, s.trust(ctx).roots, s.FarmBookReader.Farm, on)
 }
 
 // inEffect are the purposes of a membership of p that hold now.
@@ -435,7 +419,9 @@ func (s *Server) partyView(ctx context.Context, p *c4v1.Party, view *farmbook.Vi
 		out.Changed = &a
 	}
 	if signIns {
-		out.SignIns = p.Spec.SignIns
+		for _, x := range p.Spec.SignIns {
+			out.SignIns = append(out.SignIns, api.SignIn{Issuer: x.Issuer, Subject: x.Subject})
+		}
 	}
 	for _, x := range Purposes {
 		if st != nil && st.holds(p.Name, x) {
@@ -573,24 +559,41 @@ func (s *Server) partyWriter(w http.ResponseWriter, r *http.Request) *api.Viewer
 	return nil
 }
 
-// validSignIns checks a list of sign-in subjects: each well formed, none
-// twice. It returns them sorted.
-func validSignIns(in []string) ([]string, error) {
+// validSignIns checks a list of sign-in subjects: each well formed, a
+// provider's at an http(s) issuer URL, none twice. It returns them sorted
+// by issuer, then subject.
+func validSignIns(in []api.SignIn) ([]c4v1.PartySignIn, error) {
 	if len(in) > 32 {
 		return nil, errors.New("signIns: at most 32")
 	}
-	out := []string{}
+	out := []c4v1.PartySignIn{}
 	for _, x := range in {
-		x = strings.TrimSpace(x)
-		if !subjectName.MatchString(x) {
-			return nil, fmt.Errorf("signIns: %q is not a sign-in subject (no spaces or commas, at most 253 characters)", x)
+		y := c4v1.PartySignIn{Issuer: strings.TrimSpace(x.Issuer), Subject: strings.TrimSpace(x.Subject)}
+		if !subjectName.MatchString(y.Subject) {
+			return nil, fmt.Errorf("signIns: %q is not a sign-in subject (no spaces or commas, at most 253 characters)", y.Subject)
 		}
-		if !slices.Contains(out, x) {
-			out = append(out, x)
+		if u, err := url.Parse(y.Issuer); y.Issuer != "" && (err != nil || len(y.Issuer) > 253 || u.Host == "" || u.Scheme != "https" && u.Scheme != "http") {
+			return nil, fmt.Errorf("signIns: %q is not a sign-in provider's issuer URL", y.Issuer)
+		}
+		if !slices.Contains(out, y) {
+			out = append(out, y)
 		}
 	}
-	slices.Sort(out)
+	slices.SortFunc(out, func(a, b c4v1.PartySignIn) int {
+		if c := strings.Compare(a.Issuer, b.Issuer); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Subject, b.Subject)
+	})
 	return out, nil
+}
+
+// signInWords is a sign-in in the farm's words.
+func signInWords(x c4v1.PartySignIn) string {
+	if x.Issuer == "" {
+		return x.Subject
+	}
+	return x.Subject + " at " + x.Issuer
 }
 
 // validPurposes checks a membership's purposes: some, each known, none
@@ -615,14 +618,14 @@ func validPurposes(in []string) ([]string, error) {
 
 // claimed is the person Party other than except that already has one of
 // subjects among its sign-ins, and that subject.
-func claimed(ps []c4v1.Party, except string, subjects []string) (string, string) {
+func claimed(ps []c4v1.Party, except string, subjects []c4v1.PartySignIn) (string, string) {
 	for i := range ps {
 		if ps[i].Name == except || ps[i].Spec.Kind != c4v1.PartyPerson {
 			continue
 		}
 		for _, x := range subjects {
 			if slices.Contains(ps[i].Spec.SignIns, x) {
-				return ps[i].Name, x
+				return ps[i].Name, signInWords(x)
 			}
 		}
 	}
@@ -780,10 +783,10 @@ func (s *Server) handleMakeParty(w http.ResponseWriter, r *http.Request) {
 // made again by its maker is an answer, and books its record if the book
 // did not take it; anything else is refused, since a name is never
 // reused.
-func (s *Server) partyExists(w http.ResponseWriter, r *http.Request, v *api.Viewer, old *c4v1.Party, body *api.PartyRequest, signIns []string) {
+func (s *Server) partyExists(w http.ResponseWriter, r *http.Request, v *api.Viewer, old *c4v1.Party, body *api.PartyRequest, signIns []c4v1.PartySignIn) {
 	ctx := r.Context()
 	same := old.Spec.Kind == body.Kind && old.Spec.DisplayName == body.DisplayName && old.Spec.LegalName == body.LegalName &&
-		slices.Equal(old.Spec.SignIns, signIns) && old.Spec.Made.By == v.User
+		(slices.Equal(old.Spec.SignIns, signIns) || len(old.Spec.SignIns)+len(signIns) == 0) && old.Spec.Made.By == v.User
 	if !same {
 		fail(w, http.StatusConflict, "party %s is the %s %s since %s (made by %s, record %s): a party's name is never reused",
 			old.Name, old.Spec.Kind, old.Spec.DisplayName, old.Spec.Made.At.UTC().Format(time.RFC3339), old.Spec.Made.By, shortID(old.Spec.Made.Record))
@@ -940,8 +943,8 @@ func (s *Server) handleSignIns(w http.ResponseWriter, r *http.Request) {
 	if !s.farmAdmin(r.Context(), r, v, p.Name) {
 		// the person themselves
 		for _, x := range signIns {
-			if x != v.User && !slices.Contains(p.Spec.SignIns, x) {
-				fail(w, http.StatusForbidden, "signIns: %s adds only the sign-in they are using (%s); sign in as %s to add it, or ask a farm admin", v.User, v.User, x)
+			if x != (c4v1.PartySignIn{Subject: v.User}) && !slices.Contains(p.Spec.SignIns, x) {
+				fail(w, http.StatusForbidden, "signIns: %s adds only the sign-in they are using (%s); a farm admin adds %s", v.User, v.User, signInWords(x))
 				return
 			}
 		}

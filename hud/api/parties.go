@@ -18,7 +18,15 @@ type PartyRequest struct {
 	// LegalName, for an organisation, is the name a contract carries.
 	LegalName string `json:"legalName,omitempty"`
 	// SignIns, for a person, are the sign-in subjects that are them.
-	SignIns []string `json:"signIns,omitempty"`
+	SignIns []SignIn `json:"signIns,omitempty"`
+}
+
+// SignIn is one sign-in subject that is a person: a provider's subject ID
+// at its issuer URL, which the people's issuer certifies their devices on,
+// or, without an issuer, a name the HUD signs them in as.
+type SignIn struct {
+	Issuer  string `json:"issuer,omitempty"`
+	Subject string `json:"subject"`
 }
 
 // PartyChange is PATCH /api/v1/parties/{name}: a party's names, and an
@@ -32,7 +40,7 @@ type PartyChange struct {
 // SignInsRequest is PUT /api/v1/parties/{name}/sign-ins: a person's
 // sign-in subjects, all of them.
 type SignInsRequest struct {
-	SignIns []string `json:"signIns"`
+	SignIns []SignIn `json:"signIns"`
 }
 
 // MemberRequest is a membership's add, change or end: a person by name,
@@ -51,7 +59,7 @@ type Party struct {
 	DisplayName string `json:"displayName"`
 	LegalName   string `json:"legalName,omitempty"`
 	// SignIns go only to the person and to farm admins.
-	SignIns []string `json:"signIns,omitempty"`
+	SignIns []SignIn `json:"signIns,omitempty"`
 	// PerPersonViews: the organisation's policy turns per-person spend
 	// views on, and view-people with it.
 	PerPersonViews bool      `json:"perPersonViews,omitempty"`

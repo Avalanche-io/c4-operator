@@ -484,22 +484,23 @@ func TestPartyWaitsTakeMembers(t *testing.T) {
 // and a sign-in of theirs decides their waits. Sign-ins go only to the
 // person and to farm admins.
 func TestPartySignIns(t *testing.T) {
+	const sso = "https://sso.studio.example"
 	p := newPartyRig(t)
 	ctx := context.Background()
-	noor := map[string]any{"name": "noor", "kind": "person", "displayName": "Noor", "signIns": []string{"noor@studio.example", "noor"}}
+	noor := map[string]any{"name": "noor", "kind": "person", "displayName": "Noor", "signIns": ins("noor@studio.example", "noor")}
 	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", noor, nil); code != http.StatusOK {
 		t.Fatalf("make noor: %d %v", code, out)
 	}
-	lee := map[string]any{"name": "lee", "kind": "person", "displayName": "Lee", "signIns": []string{"noor@studio.example"}}
+	lee := map[string]any{"name": "lee", "kind": "person", "displayName": "Lee", "signIns": ins("noor@studio.example")}
 	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", lee, nil); code != http.StatusConflict || !says(out, "one sign-in is one person's") {
 		t.Errorf("lee takes noor's sign-in: %d %v", code, out)
 	}
-	org := map[string]any{"name": "saltmarsh", "kind": "organisation", "displayName": "Saltmarsh", "signIns": []string{"x"}}
+	org := map[string]any{"name": "saltmarsh", "kind": "organisation", "displayName": "Saltmarsh", "signIns": ins("x")}
 	if code, _ := p.call(t, http.MethodPost, "/api/v1/parties", "ines", org, nil); code != http.StatusBadRequest {
 		t.Errorf("an organisation with sign-ins: %d", code)
 	}
-	r, sso := p.viewer("noor-sso")
-	d := p.s.decider(r, sso)
+	r, noorSSO := p.viewer("noor-sso")
+	d := p.s.decider(r, noorSSO)
 	if MayControl("decide", "person:noor", d) != nil || MayControl("decide", "party:noor", d) != nil {
 		t.Errorf("noor's sign-in does not decide noor's waits: %+v", d)
 	}
@@ -514,7 +515,7 @@ func TestPartySignIns(t *testing.T) {
 		t.Errorf("noor does not see her sign-ins: %v", got)
 	}
 	signIns := func(as string, list ...string) (int, map[string]any) {
-		return p.call(t, http.MethodPut, "/api/v1/parties/noor/sign-ins", as, map[string]any{"signIns": list}, nil)
+		return p.call(t, http.MethodPut, "/api/v1/parties/noor/sign-ins", as, map[string]any{"signIns": ins(list...)}, nil)
 	}
 	if code, out := signIns("noor-sso", "noor@studio.example", "noor", "maya"); code != http.StatusForbidden || !says(out, "adds only the sign-in they are using") {
 		t.Errorf("noor adds maya's sign-in: %d %v", code, out)
@@ -522,15 +523,30 @@ func TestPartySignIns(t *testing.T) {
 	if code, out := signIns("maya", "noor@studio.example"); code != http.StatusForbidden {
 		t.Errorf("maya changes noor's sign-ins: %d %v", code, out)
 	}
+	// a provider's subject is a farm admin's to add: the HUD can't see it
+	if code, out := signIns("noor-sso", "noor@studio.example", "noor", sso+" 00u-noor"); code != http.StatusForbidden || !says(out, "a farm admin adds 00u-noor at "+sso) {
+		t.Errorf("noor adds a provider subject: %d %v", code, out)
+	}
+	if code, _ := signIns("ines", "noor@studio.example", "ftp://sso.studio.example 00u-noor"); code != http.StatusBadRequest {
+		t.Errorf("an issuer that is no URL: %d", code)
+	}
 	if code, out := signIns("noor-sso", "noor@studio.example"); code != http.StatusOK {
 		t.Errorf("noor drops a sign-in: %d %v", code, out)
 	}
-	if code, out := signIns("ines", "noor@studio.example", "noor-laptop"); code != http.StatusOK {
+	if code, out := signIns("ines", "noor@studio.example", "noor-laptop", sso+" 00u-noor"); code != http.StatusOK {
 		t.Errorf("a farm admin sets noor's sign-ins: %d %v", code, out)
 	}
 	pt, err := p.s.parties(ctx)
-	if err != nil || !slices.Equal(findParty(pt, "noor").Spec.SignIns, []string{"noor-laptop", "noor@studio.example"}) || findParty(pt, "noor").Spec.Changed == nil {
+	if err != nil || !slices.Equal(findParty(pt, "noor").Spec.SignIns, []c4v1.PartySignIn{{Subject: "noor-laptop"}, {Subject: "noor@studio.example"}, {Issuer: sso, Subject: "00u-noor"}}) || findParty(pt, "noor").Spec.Changed == nil {
 		t.Errorf("noor's sign-ins: %+v %v", findParty(pt, "noor"), err)
+	}
+	// a sign-in two Parties hold, written around the HUD, is no one's
+	if err := p.s.Client.Create(ctx, &c4v1.Party{ObjectMeta: metav1.ObjectMeta{Name: "lee"}, Spec: c4v1.PartySpec{Kind: c4v1.PartyPerson,
+		DisplayName: "Lee", SignIns: []c4v1.PartySignIn{{Subject: "noor@studio.example"}}, Made: c4v1.PartyAct{By: "ines", At: metav1.Now()}}}); err != nil {
+		t.Fatal(err)
+	}
+	if d := p.s.decider(r, noorSSO); MayControl("decide", "party:noor", d) == nil || MayControl("decide", "party:lee", d) == nil {
+		t.Errorf("a sign-in in two people's Parties decides for one: %+v", d)
 	}
 	p.seal(t)
 }
@@ -709,4 +725,18 @@ func TestPartyWaitsWhenPartiesUnreadable(t *testing.T) {
 	if err := MayControl("decide", "party:kestrel", p.s.decider(r, kim)); err == nil {
 		t.Error("the c4:party: group decides while the farm's Parties can't be read")
 	}
+}
+
+// ins are sign-ins: a bare subject the HUD signs a person in as, or
+// "<issuer URL> <subject>" for a provider's.
+func ins(list ...string) []api.SignIn {
+	out := []api.SignIn{}
+	for _, x := range list {
+		if iss, sub, ok := strings.Cut(x, " "); ok {
+			out = append(out, api.SignIn{Issuer: iss, Subject: sub})
+			continue
+		}
+		out = append(out, api.SignIn{Subject: x})
+	}
+	return out
 }
