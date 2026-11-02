@@ -73,3 +73,18 @@ func TestToolsetHoldsNoPersonsAct(t *testing.T) {
 		t.Error("the server's instructions name a tool that is now a plan")
 	}
 }
+
+// Approving paid capacity is planned for the person, never sent.
+func TestCapacityApprovalOnlyPlanned(t *testing.T) {
+	hud := &fakeHUD{}
+	cs := session(t, hud, "tok-maya")
+	res, out := call(t, cs, "c4_plan_approve_capacity", map[string]any{"pool": "burst-gpu"})
+	if res.IsError || out["performed"] != false || !strings.Contains(out["where"].(string), "pool burst-gpu") {
+		t.Fatalf("plan: %v %q", out, text(res))
+	}
+	hud.mu.Lock()
+	defer hud.mu.Unlock()
+	if len(hud.posts) != 0 {
+		t.Errorf("the plan sent %v", hud.posts)
+	}
+}
