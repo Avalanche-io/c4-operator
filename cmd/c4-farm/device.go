@@ -32,12 +32,16 @@ func deviceCommand(ctx context.Context, fs *flag.FlagSet, args []string, stdout 
 	case !terminal:
 		return errors.New("approving a machine takes your touch: run it yourself, at a terminal")
 	}
-	c, _, _, _, err := connect()
+	c, f, _, _, err := connect()
 	if err != nil {
 		return err
 	}
 	cfg, err := farmcli.PeopleConfig(ctx, c)
 	if err != nil {
+		return err
+	}
+	// the farm's owner key is the one up pinned, by the farm's own index
+	if err := farmcli.CheckOwner(ctx, c, keys, cfg, f.OwnerKey); err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "Approve only if the other screen shows: %s\n", farmcli.ShortDevice(pos[0]))

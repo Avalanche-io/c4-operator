@@ -196,12 +196,12 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		present := isTerminal(stdin) && !farmcli.InsideAgent()
 		if !kept && present {
 			kept = true
-			farmcli.KeepKeys(ctx, c, farmcli.KeepArgs{Store: farmcli.KeysFor(name), Open: openURL,
+			farmcli.KeepKeys(ctx, c, farmcli.KeepArgs{Store: farmcli.KeysFor(name), Open: openURL, Pinned: f.OwnerKey,
 				Say: func(format string, a ...any) { fmt.Fprintf(os.Stderr, format, a...) }})
 		}
 		// the person's acts, signed with their keys when they are here to
 		// sign them; a local farm's role view acts as its owner in that role
-		c.Acts = &farmcli.Acts{Store: farmcli.KeysFor(name), Present: present,
+		c.Acts = &farmcli.Acts{Store: farmcli.KeysFor(name), Present: present, Pinned: f.OwnerKey,
 			Say: func(format string, a ...any) { fmt.Fprintf(os.Stderr, "act       "+format, a...) }}
 		if f.Owner != "" && f.As != "" && f.As != f.Owner {
 			c.Acts.As = f.As
@@ -1535,7 +1535,7 @@ func openSignedIn(ctx context.Context, name string, f farmcli.Farm, u string, w 
 	if err != nil {
 		return err
 	}
-	return farmcli.OpenBrowser(ctx, c, farmcli.OpenArgs{Store: farmcli.KeysFor(name), Page: u, Open: openURL,
+	return farmcli.OpenBrowser(ctx, c, farmcli.OpenArgs{Store: farmcli.KeysFor(name), Page: u, Open: openURL, Pinned: f.OwnerKey,
 		Say: func(format string, a ...any) { fmt.Fprintf(w, format, a...) }})
 }
 

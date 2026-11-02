@@ -19,6 +19,9 @@ type KeepArgs struct {
 	Say func(format string, a ...any)
 	// Now is the time; zero is time.Now.
 	Now time.Time
+	// Pinned is the farm's owner key as up pinned it: a farm whose index
+	// books another renews nothing.
+	Pinned string
 }
 
 // KeepKeys is what each run of the CLI does for this machine's keys at a
@@ -53,6 +56,12 @@ func KeepKeys(ctx context.Context, c *Client, a KeepArgs) {
 		// silence is how a HUD hides a device: say what couldn't be read
 		say("devices   couldn't check for new devices of yours: %v\n", err)
 		return
+	}
+	if renew {
+		if err := CheckOwner(ctx, c, a.Store, cfg, a.Pinned); err != nil {
+			say("key       this machine's key was not renewed: %v\n", err)
+			renew = false
+		}
 	}
 	if renew {
 		la := LoginArgs{Store: a.Store, Farm: cfg, Open: a.Open, Say: a.Say}

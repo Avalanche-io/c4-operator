@@ -43,10 +43,14 @@ type Acts struct {
 	As string
 	// Say tells the person why an act went unsigned, once a kind.
 	Say func(format string, a ...any)
+	// Pinned is the farm's owner key as up pinned it, on a farm up made:
+	// nothing is signed for a farm whose index books another.
+	Pinned string
 
 	needs map[string]api.ActNeed
 	farm  string
 	read  bool
+	bad   error
 	said  map[string]bool
 }
 
@@ -72,9 +76,23 @@ func (a *Acts) header(ctx context.Context, c *Client, act string, on *api.ActOn,
 		if err := c.Do(ctx, http.MethodGet, "/acts/needs", nil, &n); err == nil {
 			a.needs = n.Acts
 		}
-		if cfg, err := PeopleConfig(ctx, c); err == nil {
-			a.farm = cfg.Farm
+		// the farm the act is made for is the one this machine's key was
+		// certified at, from its own chain, never the HUD's word
+		if a.farm, err = certFarm(cert); err != nil {
+			return "", err
 		}
+		if a.Pinned != "" {
+			cfg, err := PeopleConfig(ctx, c)
+			if err == nil {
+				err = CheckOwner(ctx, c, a.Store, cfg, a.Pinned)
+			}
+			if err != nil {
+				a.bad = err
+			}
+		}
+	}
+	if a.bad != nil {
+		return "", a.bad
 	}
 	if a.needs == nil || a.farm == "" {
 		// a HUD from before signed acts, or one with no people's issuer

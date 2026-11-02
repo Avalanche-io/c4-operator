@@ -8,6 +8,7 @@ import (
 	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -202,5 +203,48 @@ func TestNoticesOnABookFarm(t *testing.T) {
 	KeepKeys(ctx, c, KeepArgs{Store: st, Say: say})
 	if !strings.Contains(said.String(), "a new device signed in as you") || !strings.Contains(said.String(), ShortDevice(deviceID(k))) {
 		t.Errorf("the browser sealed in the book: %q", said.String())
+	}
+}
+
+// Probe P4: the pin is checked against the farm, by its own index: up on
+// a farm made again, whose owner some other key enrolled first, is
+// refused, though this machine kept certificates that match the pin.
+func TestPinCheckedAgainstTheFarm(t *testing.T) {
+	ctx := context.Background()
+	a := newOwnerIssuer(t)
+	st := keystore.Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
+	outA, err := UpKeys(ctx, a.client, st, "noor", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned := outA.Owner.Device
+	if _, err := UpKeys(ctx, a.client, st, "noor", pinned, false); err != nil {
+		t.Fatalf("the same farm again: %v", err)
+	}
+	b := newOwnerIssuer(t)
+	other := keystore.Store{Dir: filepath.Join(t.TempDir(), "other"), FileOnly: true}
+	if _, err := EnrolOwner(ctx, b.client, other, "noor"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UpKeys(ctx, b.client, st, "noor", pinned, false); !errors.Is(err, ErrOwnerKey) {
+		t.Errorf("a farm whose owner is another key: %v", err)
+	}
+	cfg, _ := PeopleConfig(ctx, b.client)
+	if err := CheckOwner(ctx, b.client, other, cfg, pinned); !errors.Is(err, ErrOwnerKey) {
+		t.Errorf("CheckOwner on that farm: %v", err)
+	}
+}
+
+// Probe P6, the farm: an act names the farm this machine's key was
+// certified at, from its own chain, whatever the HUD's config says.
+func TestActsNameTheFarmOfTheirKey(t *testing.T) {
+	o := newOwnerIssuer(t)
+	ctx := context.Background()
+	st := keystore.Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
+	if _, err := EnrolOwner(ctx, o.client, st, "noor"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := BookBrowserCode(ctx, o.client, st, "c4someotherfarm", "noor"); err == nil || !strings.Contains(err.Error(), "certified at") {
+		t.Errorf("an act for a farm the HUD named: %v", err)
 	}
 }

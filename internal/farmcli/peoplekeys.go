@@ -126,7 +126,8 @@ var ErrOwnerKey = errors.New("the farm's owner key is not the one this machine e
 // and an agent's or a script's up never puts that on their screen, so it
 // enrols the device key alone and touch-list acts go unsigned.
 func UpKeys(ctx context.Context, c *Client, st keystore.Store, owner, pinned string, touch bool) (*people.OwnerCertified, error) {
-	if _, err := PeopleConfig(ctx, c); err != nil {
+	cfg, err := PeopleConfig(ctx, c)
+	if err != nil {
 		var ae *APIError
 		if errors.As(err, &ae) && ae.Status == http.StatusNotFound {
 			return nil, ErrNoIssuer
@@ -142,6 +143,11 @@ func UpKeys(ctx context.Context, c *Client, st keystore.Store, owner, pinned str
 		// tell them apart
 		return nil, fmt.Errorf("%w: it is %s, and this machine pinned %s when up enrolled it; if the farm was made again, remove its keys (%s) and run up again",
 			ErrOwnerKey, out.Owner.Device, pinned, st.Dir)
+	}
+	// the farm's own record of its owner, from its index, is this
+	// machine's key: not only what this machine kept
+	if err := CheckOwner(ctx, c, st, cfg, out.Owner.Device); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -163,6 +169,11 @@ func enrolOwner(ctx context.Context, c *Client, st keystore.Store, owner string,
 	}
 	if cfg.OwnerEnrolled {
 		dev, err := LoadCert(st, keystore.Device)
+		if err == nil && dev != nil {
+			if f, ferr := certFarm(dev); ferr != nil || f != cfg.Farm {
+				return nil, fmt.Errorf("%w: this machine's key was enrolled at farm %.16s, and this farm is %.16s; if the farm was made again, remove its keys (%s) and run up again", ErrOwnerKey, f, cfg.Farm, st.Dir)
+			}
+		}
 		if err != nil || dev == nil {
 			if err == nil {
 				err = errors.New("none is kept in " + st.Dir)
@@ -236,6 +247,9 @@ func ownerAct(st keystore.Store, farm, owner string, on provenance.Subject, act 
 	}
 	if cert == nil {
 		return nil, errors.New("this machine's key is not enrolled at the farm: c4 farm up enrols it")
+	}
+	if farm, err = sameFarm(cert, farm); err != nil {
+		return nil, err
 	}
 	p, err := json.Marshal(params)
 	if err != nil {
@@ -381,6 +395,10 @@ func ApproveDevice(ctx context.Context, c *Client, st keystore.Store, farm, devi
 func approveWith(ctx context.Context, c *Client, farm, device string, dev provenance.P256Signer, devCert *people.Certified,
 	touch provenance.P256Signer, touchCert *people.Certified) (*people.Booked, error) {
 	person := strings.TrimPrefix(devCert.Identity, provenance.IdentityBase+"user/")
+	farm, err := sameFarm(devCert, farm)
+	if err != nil {
+		return nil, err
+	}
 	tc := deviceCert(touchCert)
 	b, err := provenance.SignPersonAct(provenance.PersonAct{Farm: farm, Act: "approve-machine", Person: person, Confirmed: true,
 		Subject: provenance.Subject{Name: "device:" + device, Digest: map[string]string{"c4": device}}, Params: json.RawMessage("{}")},
@@ -393,6 +411,20 @@ func approveWith(ctx context.Context, c *Client, farm, device string, dev proven
 		return nil, fmt.Errorf("approving the machine: %w", err)
 	}
 	return &booked, nil
+}
+
+// sameFarm is the farm an act is made for: the one this machine's key was
+// certified at, from its own chain; a farm the HUD names otherwise is
+// refused.
+func sameFarm(cert *people.Certified, said string) (string, error) {
+	f, err := certFarm(cert)
+	if err != nil {
+		return "", err
+	}
+	if said != "" && said != f {
+		return "", fmt.Errorf("the farm says it is %.16s, and this machine's key was certified at %.16s", said, f)
+	}
+	return f, nil
 }
 
 // KeysFor is a farm's keys on this machine: ~/.c4/<farm>/keys, which an
@@ -417,6 +449,9 @@ type OpenArgs struct {
 	Wait, Poll time.Duration
 	// Say tells the person what happened.
 	Say func(format string, a ...any)
+	// Pinned is the farm's owner key as up pinned it: a farm whose index
+	// books another enrols no browser.
+	Pinned string
 }
 
 // OpenBrowser opens a page of the HUD in the person's browser, signed in.
@@ -439,6 +474,9 @@ func OpenBrowser(ctx context.Context, c *Client, a OpenArgs) error {
 			return err
 		}
 		return a.Open(u)
+	}
+	if err := CheckOwner(ctx, c, a.Store, cfg, a.Pinned); err != nil {
+		return err
 	}
 	code, err := BookBrowserCode(ctx, c, a.Store, cfg.Farm, cfg.Owner)
 	if err != nil {

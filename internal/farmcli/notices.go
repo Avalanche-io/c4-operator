@@ -296,6 +296,75 @@ func readBook(ctx context.Context, c *Client, roots *x509.CertPool, farm string,
 	}
 }
 
+// FarmOwner is the farm's owner key as its people's index books it: the
+// first device the installer token enrolled, read from the start and
+// checked as each run's reading is, without moving what this machine
+// keeps. "" when the index books none.
+func FarmOwner(ctx context.Context, c *Client, st keystore.Store, cfg *people.Config) (string, error) {
+	mine, err := LoadCert(st, keystore.Device)
+	if err != nil || mine == nil {
+		return "", err
+	}
+	roots, err := farmRoots(mine, cfg.Farm)
+	if err != nil {
+		return "", err
+	}
+	w := &indexWatch{}
+	var entries []*people.Entry
+	if cfg.Order == people.OrderBook {
+		entries, err = readBook(ctx, c, roots, cfg.Farm, w)
+	} else {
+		entries, err = readIndex(ctx, c, roots, cfg.Farm, w)
+	}
+	if err != nil {
+		return "", err
+	}
+	for _, e := range entries {
+		if e.Kind != people.KindDevice || e.TouchFor != "" {
+			continue
+		}
+		if d, err := deviceRecord(ctx, c, roots, e.Record); err == nil && d.Evidence == schema.EvidenceInstaller && d.TouchFor == "" {
+			return e.Device, nil
+		}
+	}
+	return "", nil
+}
+
+// CheckOwner checks the farm's owner key, as its index books it, against
+// the one this machine pinned when up enrolled it: a farm whose owner key
+// is another is refused, whatever its HUD says. Nothing is pinned on a
+// farm up didn't make.
+func CheckOwner(ctx context.Context, c *Client, st keystore.Store, cfg *people.Config, pinned string) error {
+	if pinned == "" {
+		return nil
+	}
+	owner, err := FarmOwner(ctx, c, st, cfg)
+	if err != nil {
+		return fmt.Errorf("the farm's owner key: %w", err)
+	}
+	if owner != pinned {
+		if owner == "" {
+			owner = "none"
+		}
+		return fmt.Errorf("%w: its index books %s, and this machine pinned %s when up enrolled it; if the farm was made again, remove its keys (%s) and run up again",
+			ErrOwnerKey, owner, pinned, st.Dir)
+	}
+	return nil
+}
+
+// certFarm is the farm a certificate was issued at: its CA's farm ID,
+// from the chain itself, never the HUD's word.
+func certFarm(cert *people.Certified) (string, error) {
+	if cert == nil || len(cert.Chain) < 2 {
+		return "", errors.New("this machine's certificate names no farm CA")
+	}
+	ca, err := x509.ParseCertificate(cert.Chain[len(cert.Chain)-1])
+	if err != nil {
+		return "", err
+	}
+	return provenance.FarmID(ca), nil
+}
+
 // farmRoots is the farm's CA, from this machine's own certificate chain,
 // checked to be the farm's.
 func farmRoots(mine *people.Certified, farm string) (*x509.CertPool, error) {
