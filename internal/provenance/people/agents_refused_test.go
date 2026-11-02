@@ -264,3 +264,18 @@ func TestRefusedAgentCertificatesRateLimited(t *testing.T) {
 		t.Errorf("a minute later, granted: %d %s", code, body)
 	}
 }
+
+// A replacement ends only a grant of the same person, key and agent as
+// the new grant it books: one booking noor's grant of her key to another
+// agent, written to end her grant to the assistant, is refused at the
+// seal.
+func TestReplacementOfAnotherAgentsGrantRefused(t *testing.T) {
+	a := agentFarm(t)
+	grant := a.granted()
+	a.seal()
+	act := a.grant("reviewer", a.agent, true)
+	a.submit(people.Entry{Kind: people.KindGrantEnd, End: people.EndReplaced, Record: a.keep(act), Grant: grant, Agent: "reviewer", Device: a.agent.id, Person: "noor", By: "noor"})
+	if res := refusals(a.seal()); len(res) != 1 || res[0].Reason != farmbook.ReasonDisagrees {
+		t.Errorf("a replacement by a grant to another agent: %+v", res)
+	}
+}

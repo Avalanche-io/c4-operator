@@ -273,3 +273,22 @@ func TestAgentActRefusedWhenItsUseCannotBeBooked(t *testing.T) {
 		t.Errorf("an act whose use can't be booked: %d, want 403", code)
 	}
 }
+
+// The decision the HUD writes for the queue names whom it was made for,
+// the wait's server, which the queue holds it to.
+func TestDecideRequestNamesTheWait(t *testing.T) {
+	a := newAgentDecide(t, "agent:assistant")
+	k := a.agent("assistant", "dana", false)
+	if code, _ := a.decide(agentRequest(ownWait, map[string]string{ActHeader: a.act(k, "dana", ownWait)})); code != http.StatusOK {
+		t.Fatalf("the decision: %d", code)
+	}
+	var j c4v1.WorkJob
+	if err := a.s.Client.Get(context.Background(), k8stypes.NamespacedName{Namespace: "show-a", Name: "sh040-light-v007"}, &j); err != nil {
+		t.Fatal(err)
+	}
+	var reqs []c4v1.WorkDecideRequest
+	json.Unmarshal([]byte(j.Annotations[c4v1.AnnotationDecide]), &reqs)
+	if len(reqs) == 0 || reqs[len(reqs)-1].WaitsFor != "agent:assistant" {
+		t.Errorf("the decide request: %+v", reqs)
+	}
+}

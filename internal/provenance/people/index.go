@@ -563,9 +563,6 @@ func (x *Index) loadKind(ctx context.Context, e *Entry, pending bool) error {
 		if (e.TouchFor != "" || inBook(e)) && e.TouchFor != d.Predicate.TouchFor {
 			return fmt.Errorf("the entry names touchFor %.16s, its record %.16s", e.TouchFor, d.Predicate.TouchFor)
 		}
-		if x.agentKey(e.Device, e.Position-1) {
-			return farmbook.Refuse(farmbook.ReasonRejected, fmt.Errorf("key %.16s was granted to an agent: an agent's key is never a person's device", e.Device))
-		}
 		if x.devices == nil {
 			x.devices, x.raw = map[string]*schema.Device{}, map[string][]byte{}
 		}

@@ -391,6 +391,13 @@ func TestReturnedCertificateCheckedBeforeUse(t *testing.T) {
 			leaf, _ := other.CA.IssueLeaf(pub, c.Identity, c.Device, c.Grant, time.Hour, time.Now())
 			c.Chain = [][]byte{leaf.Raw, other.CA.Cert.Raw}
 		},
+		"a device other than its key's": func(c *people.AgentCertified, _ *ecdsa.PublicKey, _ *provenance.CA) {
+			c.Device = provtest.ID("another key")
+		},
+		"a leaf its CA didn't sign": func(c *people.AgentCertified, pub *ecdsa.PublicKey, _ *provenance.CA) {
+			leaf, _ := other.CA.IssueLeaf(pub, c.Identity, c.Device, c.Grant, time.Hour, time.Now())
+			c.Chain[0], c.Expires = leaf.Raw, leaf.NotAfter
+		},
 		"an end other than its leaf's": func(c *people.AgentCertified, _ *ecdsa.PublicKey, _ *provenance.CA) {
 			c.Expires = c.Expires.Add(24 * time.Hour)
 		},

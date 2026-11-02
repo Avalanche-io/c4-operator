@@ -135,19 +135,21 @@ func private(path string, dir bool) error {
 	if dir {
 		want, kind, what = 0o700, "key directory", "directory"
 	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		what += ", but a symlink"
+	}
 	switch {
-	case fi.Mode()&os.ModeSymlink != 0:
-		return fmt.Errorf("the agent's %s %s is a symlink: refused; a key lives in a file of the person's own", kind, path)
-	case dir != fi.IsDir() || !dir && !fi.Mode().IsRegular():
-		return fmt.Errorf("the agent's %s %s is not a %s", kind, path, what)
+	case dir != fi.IsDir() || !dir && !fi.Mode().IsRegular() || fi.Mode()&os.ModeSymlink != 0:
+		return fmt.Errorf("the agent's %s %s is not a %s: refused; a key lives in a file of the person's own", kind, path, what)
 	case fi.Mode().Perm() != want:
 		return fmt.Errorf("the agent's %s %s is mode %v, not %v: refused, since others may have read it (chmod %o, or remove the key and grant a new one)", kind, path, fi.Mode().Perm(), want, want)
 	}
 	return ownedByMe(path, fi)
 }
 
-// readPrivate reads a key file after checking it is private, and that the
-// file read is the one checked.
+// readPrivate reads a key file after checking it is private. Its
+// directory is checked first (Key): the person's own and 0700, so no one
+// else can put another file in its place between the check and the read.
 func readPrivate(path string) ([]byte, error) {
 	if err := private(path, false); err != nil {
 		return nil, err
@@ -157,14 +159,6 @@ func readPrivate(path string) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	li, err := os.Lstat(path)
-	if err != nil || !os.SameFile(fi, li) {
-		return nil, fmt.Errorf("the agent's key file %s changed while it was read", path)
-	}
 	return io.ReadAll(io.LimitReader(f, 64<<10))
 }
 
