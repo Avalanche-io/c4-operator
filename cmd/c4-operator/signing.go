@@ -23,6 +23,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/auth"
 	"github.com/Avalanche-io/c4-operator/internal/bindings"
+	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 )
 
@@ -54,6 +55,9 @@ type signing struct {
 	// once the manager can read them (useBindings); until then every
 	// identity is certified unbound.
 	bindings atomic.Pointer[bindings.Resolver]
+	// recheck is how often an in-process component asks whether the
+	// binding in force for it changed (useBindings).
+	recheck time.Duration
 }
 
 // bind is the deployment binding in force for identity, or none before
@@ -67,15 +71,18 @@ func (s *signing) bind(ctx context.Context, identity string) (provenance.Bound, 
 	return r.Bind(ctx, identity)
 }
 
-// componentRecheck is how often a component's signer asks whether the
-// binding in force for it changed.
-var componentRecheck = 5 * time.Second
-
 // useBindings certifies under the farm's deployment bindings from now on:
 // the workload issuer at once, and the components (controller, queue,
-// HUD), certified in this process, re-certify whenever the binding in
-// force for them changes, not only at half their life.
-func (s *signing) useBindings(r *bindings.Resolver) {
+// HUD, people's issuer), certified in this process, re-certify whenever
+// the binding in force for them changes, not only at half their life.
+// Each asks at most every recheck, the farm book's seal interval, so a
+// component lags a binding change by no more than the book does, on every
+// replica, without a restart.
+func (s *signing) useBindings(r *bindings.Resolver, recheck time.Duration) {
+	if recheck <= 0 {
+		recheck = farmbook.DefaultSealEvery
+	}
+	s.recheck = recheck
 	s.bindings.Store(r)
 	for _, sg := range []*provenance.Signer{s.controller, s.queue, s.hud} {
 		if sg != nil {
@@ -417,7 +424,7 @@ func (f everyReplica) NeedLeaderElection() bool        { return false }
 
 // newStale is one in-process component's renewal check, with its own
 // pace: its leaf is out of date with the binding in force for it, asked
-// at most every componentRecheck; never before the manager reads
+// at most every recheck; never before the manager reads
 // bindings (useBindings).
 func (s *signing) newStale() func(leaf *x509.Certificate) bool {
 	var once sync.Once
@@ -427,7 +434,7 @@ func (s *signing) newStale() func(leaf *x509.Certificate) bool {
 		if r == nil {
 			return false
 		}
-		once.Do(func() { stale = r.Stale(componentRecheck) })
+		once.Do(func() { stale = r.Stale(s.recheck) })
 		return stale(leaf)
 	}
 }

@@ -1425,11 +1425,22 @@ importer, a manager component.
   never outlives its `end`. An identity no binding covers is still
   certified, naming none, until strict accountability (K8). The farm
   binding covers `<farm>/*`, so every identity certified today stays bound.
+  In-process components re-certify within the farm book's seal interval
+  when their binding changes, on every replica. `sync/` and `import/`
+  bindings take effect once K6 and the importer follow-up give those
+  deployments their identities.
 - **Verifiers** follow certificate, binding, owner: a farm book entry by
   book order, a record no book names yet by the farm's bindings. A signer
   with no binding, or one not in force for it there, is labelled
   `unattributed: deployment has no owner`; a record booked after its
   binding ended early, `revoked`. Before K8 a label never refuses.
+- **The window before project books.** Task, resolution, decision, job and
+  import records sit in project stores, and no book names them yet, so
+  none is judged `revoked`. A record signed after a binding's early end,
+  with a certificate issued before it, goes uncaught until project books
+  exist: the window is the rest of that certificate's hour or day. The
+  record's own `signedAt` never closes it, since it is the signer's claim
+  (accountability DESIGN 5.4).
 - **What "ended" means.** Ending a binding early (`end-binding`, by its
   owner silently, or by a farm admin with a touch) stops new certificates
   under it at once. Certificates already issued live out their hour (a

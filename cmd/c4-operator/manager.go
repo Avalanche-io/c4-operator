@@ -199,7 +199,7 @@ func runManager(args []string) error {
 		if book != nil {
 			r.Book = book.newReader()
 		}
-		sig.useBindings(r)
+		sig.useBindings(r, *farmBookSeal)
 	}
 	if book != nil && !*work {
 		log.Info("--system-store without --work: nothing seals the farm book, and its entries wait")

@@ -821,7 +821,7 @@ answers `404`.
   whole has none.
 - `binding` is the entry's record's signer followed to its deployment
   binding and owner ([Deployment bindings](#deployment-bindings)):
-  `{ binding?, owner?, deployment?, label? }`, judged by the entries before
+  `{ id?, owner?, deployment?, label? }`, judged by the entries before
   it, at the time it counts from. `label` is `unattributed: deployment has
   no owner` for a signer certified with no binding, or one not in force
   for it there, and `revoked` for a record booked after its binding ended
@@ -2369,7 +2369,11 @@ It is in force from its booked position (the one rule, `InForceAt`).
   CA certifies, after the farm binding's farm: `<farm>/node/<name>`,
   `<farm>/runner/<name>`, `<farm>/sync/<tracker>`, `<farm>/import/<project>`
   or `<farm>/component/{hud,queue,controller}` (`400` for anything else,
-  the whole farm included: that is `POST /farm/binding`).
+  the whole farm included: that is `POST /farm/binding`). A `sync/` or
+  `import/` binding may be made now and matches no certificate yet: it
+  takes effect once K6 and the importer follow-up give a tracker's sync
+  and a project's importer those identities (today they are certified as
+  their service accounts, under the farm binding).
 - **`for` only narrows** what the signer policy lets that deployment sign:
   a node `task/v1`; a host runner `task/v1`, `request/v1`; a tracker's sync
   `act/v1`, `request/v1`; an importer `import/v1`, `ingest/v1`; the
@@ -2412,21 +2416,36 @@ It is in force from its booked position (the one rule, `InForceAt`).
 under the binding in force for it: the one naming its identity exactly,
 byte for byte, else the farm binding (`<farm>/*`); no other prefix or glob
 counts. The leaf names the binding as a URI SAN, `urn:c4:binding:<C4 ID of
-its record>`, and never outlives its `end`. The controller, queue, HUD and people's issuer, certified in the
-manager's own process, each re-certify within seconds when the binding in
-force for them changes. An identity no binding covers is still certified,
+its record>`, and never outlives its `end`. The controller, queue, HUD and
+people's issuer, certified in the manager's own process, each re-certify
+when the binding in force for them changes, on every replica and without
+a restart, within the farm book's seal interval (`--farm-book-seal`, 2
+seconds by default). An identity no binding covers is still certified,
 naming none, and so is any identity while the bindings can't be read: its
-records are labelled, never attributed to a binding that may have ended. Where the farm keeps a farm book, a binding is in
-force only while the book says so too; one made before the farm kept a
-book is judged by its object.
+records are labelled, never attributed to a binding that may have ended.
+Where the farm keeps a farm book, a binding is in force only while the
+book says so too; one made before the farm kept a book is judged by its
+object.
 
 **What verifiers show.** A record's signer is followed to its binding and
-owner as `binding: { binding?, owner?, deployment?, label? }`: on each farm
-book entry (`GET /book/farm`), by book order, and on each link of a chain
-of custody (`GET /custody/{ns}/{name}`), whose records no book names yet,
-by the farm's bindings (never `revoked` there). The label is `unattributed:
-deployment has no owner` or `revoked`; before strict accountability (K8)
-a label never refuses a record.
+owner as `binding: { id?, owner?, deployment?, label? }`, worked out when
+served, never part of the record:
+- **On each farm book entry** (`GET /book/farm`), by book order: the
+  binding the leaf names, booked before the entry, naming its signer's
+  deployment, and in force at the entry's position. A record booked after
+  its binding ended early is `revoked`.
+- **On each link of a chain of custody** (`GET /custody/{ns}/{name}`),
+  whose task, resolution, decision, job and import records no book names
+  yet: the binding the leaf names, a binding of this farm naming its
+  signer's deployment. These are never labelled `revoked`. A record such a
+  deployment signs after its binding's early end, with a certificate
+  issued before it, isn't caught until project books exist: that window is
+  the rest of that certificate's hour or day. The record's own `signedAt`
+  is never used to close it, since it is the signer's claim.
+- The label is `unattributed: deployment has no owner` (a leaf naming no
+  binding, one not in force for it, not booked, or another deployment's)
+  or `revoked`. Before strict accountability (K8) a label never refuses a
+  record.
 
 ## Held tracker writes
 

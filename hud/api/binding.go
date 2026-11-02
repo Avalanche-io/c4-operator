@@ -104,7 +104,7 @@ type BindingsResponse struct {
 // "revoked" for a record booked after its binding ended early. Before
 // strict accountability (K8) a label never refuses a record.
 type SignerBinding struct {
-	Binding    string `json:"binding,omitempty"`
+	Binding    string `json:"id,omitempty"`
 	Owner      string `json:"owner,omitempty"`
 	Deployment string `json:"deployment,omitempty"`
 	Label      string `json:"label,omitempty"`

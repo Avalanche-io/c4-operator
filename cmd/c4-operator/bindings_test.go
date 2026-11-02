@@ -55,7 +55,7 @@ func TestIssuerCertifiesUnderTheBindingInForce(t *testing.T) {
 			User: authnv1.UserInfo{Username: "system:serviceaccount:c4-hosts:laptop-1"}}}, nil
 	})
 	sig := &signing{ca: ca}
-	sig.useBindings(&bindings.Resolver{Client: reader})
+	sig.useBindings(&bindings.Resolver{Client: reader}, time.Second)
 	srv := httptest.NewServer(http.StripPrefix("/workload", hostIssuer(sig, kube, reader, "c4-system")))
 	defer srv.Close()
 	leaf := func() *provenanceLeaf {
@@ -114,10 +114,7 @@ func TestTodayEveryIdentityStaysBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	sig.hud = hud
-	defer func(d time.Duration) { componentRecheck = d }(componentRecheck)
-	componentRecheck = 0
-	r := &bindings.Resolver{Client: reader}
-	sig.useBindings(r)
+	sig.useBindings(&bindings.Resolver{Client: reader}, time.Nanosecond)
 	if l := leafOf(t, hud); l.binding != "" {
 		t.Fatalf("the HUD's leaf names %q before the farm is bound", l.binding)
 	}
@@ -182,13 +179,11 @@ func TestEachComponentRechecksItsOwnBinding(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	defer func(d time.Duration) { componentRecheck = d }(componentRecheck)
-	componentRecheck = time.Hour
 	farmID := provtest.ID("the farm binding")
 	if err := reader.Create(context.Background(), testBinding("farm", "dana", "studio/*", farmID, now.Add(-time.Hour))); err != nil {
 		t.Fatal(err)
 	}
-	sig.useBindings(&bindings.Resolver{Client: reader})
+	sig.useBindings(&bindings.Resolver{Client: reader}, time.Hour)
 	for name, s := range map[string]*provenance.Signer{"controller": sig.controller, "queue": sig.queue, "hud": sig.hud} {
 		if l := leafOf(t, s); l.binding != farmID {
 			t.Errorf("the %s's leaf names %q, not the farm binding", name, l.binding)
@@ -213,7 +208,7 @@ func TestUnreadableBindingsCertifyUnbound(t *testing.T) {
 	// a reader that doesn't know DeploymentBindings: every list fails
 	reader := fake.NewClientBuilder().WithScheme(runtime.NewScheme()).Build()
 	sig := &signing{ca: ca}
-	sig.useBindings(&bindings.Resolver{Client: reader})
+	sig.useBindings(&bindings.Resolver{Client: reader}, time.Second)
 	if _, err := sig.bind(context.Background(), provenance.RunnerIdentity("laptop-1")); err == nil {
 		t.Fatal("the bindings read")
 	}
@@ -226,4 +221,54 @@ func TestUnreadableBindingsCertifyUnbound(t *testing.T) {
 	if l := leafOf(t, s); l.binding != "" {
 		t.Errorf("the leaf names %q", l.binding)
 	}
+}
+
+// Every replica's components pick up a binding change without a restart,
+// within the recheck interval (the farm book's seal interval): two
+// replicas' HUDs, each certified unbound, both re-certify under the farm
+// binding once it is made, then under the HUD's own binding once that is.
+func TestReplicasPickUpABindingWithoutARestart(t *testing.T) {
+	now := time.Now()
+	ca, err := provenance.NewCA(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheme := runtime.NewScheme()
+	if err := c4v1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	reader := fake.NewClientBuilder().WithScheme(scheme).Build()
+	const recheck = 50 * time.Millisecond
+	var huds []*provenance.Signer
+	for range 2 {
+		sig := &signing{ca: ca}
+		if sig.hud, err = provenance.NewSigner(context.Background(), provenance.BoundLocalIssuer(ca, provenance.ComponentIdentity("hud"), 24*time.Hour, sig.bind)); err != nil {
+			t.Fatal(err)
+		}
+		sig.useBindings(&bindings.Resolver{Client: reader}, recheck)
+		huds = append(huds, sig.hud)
+	}
+	// within the interval and a margin, every replica's HUD names want
+	names := func(want string) {
+		t.Helper()
+		for k, h := range huds {
+			deadline := time.Now().Add(20 * recheck)
+			for leafOf(t, h).binding != want {
+				if time.Now().After(deadline) {
+					t.Fatalf("replica %d's HUD names %q, not %q", k, leafOf(t, h).binding, want)
+				}
+				time.Sleep(recheck / 5)
+			}
+		}
+	}
+	names("")
+	farmID, hudID := provtest.ID("the farm binding"), provtest.ID("the HUD's binding")
+	if err := reader.Create(context.Background(), testBinding("farm", "dana", "studio/*", farmID, now.Add(-time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	names(farmID)
+	if err := reader.Create(context.Background(), testBinding("component-hud", "dana", "studio/component/hud", hudID, now.Add(-time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+	names(hudID)
 }

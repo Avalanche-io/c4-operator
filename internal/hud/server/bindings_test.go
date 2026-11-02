@@ -161,8 +161,9 @@ func TestDeploymentBindings(t *testing.T) {
 	}
 }
 
-// A binding's owner ends their own binding with a signed act and no
-// touch, like a revoke; a bind needs the farm admin's touch.
+// A bind needs the farm admin's touch, and so does a rotation, which ends
+// another owner's binding (the end-binding rule); a binding's owner ends
+// their own binding with a signed act and no touch, like a revoke.
 func TestBindingActs(t *testing.T) {
 	s, g, headers := deploymentFarm(t)
 	on, ok := s.farmSubject(context.Background())
@@ -185,6 +186,25 @@ func TestBindingActs(t *testing.T) {
 	withUID(t, s, b, "b1d0e5a2-0000-4000-8000-000000000002")
 	b = readBinding(t, s, name)
 	subject := actOn(bindingSubject(b))
+	rotate := map[string]any{"owner": "lee"}
+	if code, out, _ := send("dana", "/api/v1/bindings/"+name+"/rotate", rotate, g.act(t, dana, subject, "bind", rotate, false)); code != http.StatusForbidden {
+		t.Errorf("the farm owner rotates noor's binding without a touch: %d %v", code, out)
+	}
+	code, out, rec = send("dana", "/api/v1/bindings/"+name+"/rotate", rotate, g.act(t, dana, subject, "bind", rotate, true))
+	cites(t, "rotate", code, out, rec, subject, CustodyConfirmed)
+	if ch, _ := rec.Change.(map[string]any); ch["follows"] != b.Spec.Record {
+		t.Errorf("the rotation follows %v", ch["follows"])
+	}
+
+	// noor's own binding of another machine, ended by noor
+	body = map[string]any{"owner": "noor", "to": "studio/runner/laptop-2"}
+	code, out, _ = send("dana", "/api/v1/bindings", body, g.act(t, dana, farmOn, "bind", body, true))
+	if code != http.StatusOK {
+		t.Fatalf("bind laptop-2: %d %v", code, out)
+	}
+	name = bindingNamedIn(out)
+	withUID(t, s, readBinding(t, s, name), "b1d0e5a2-0000-4000-8000-000000000003")
+	subject = actOn(bindingSubject(readBinding(t, s, name)))
 	end := map[string]any{"owner": "noor"}
 	code, out, rec = send("noor", "/api/v1/bindings/"+name+"/end", end, g.act(t, noor, subject, "end-binding", end, false))
 	cites(t, "noor ends her own binding", code, out, rec, subject, CustodySigned)
