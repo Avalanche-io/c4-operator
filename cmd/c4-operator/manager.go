@@ -448,6 +448,8 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 	if sig.ca != nil {
 		// host runners reach the workload issuer at the HUD's address
 		srv.HostIssuer = hostIssuer(sig, kube, mgr.GetAPIReader(), namespace)
+		// and their units' keys, on the runner's own signed request
+		srv.HostUnitIssuer = hostUnitIssuer(sig, mgr.GetAPIReader())
 	}
 	// The clean agent environment blocks run in by default ().
 	if id, err := agent.BaseEnvID(); err != nil {

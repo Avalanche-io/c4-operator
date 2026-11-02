@@ -2,6 +2,7 @@ package provenance
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/json"
 	"strings"
@@ -118,5 +119,51 @@ func TestVerifyUnitReport(t *testing.T) {
 	other.AddCert(ca2.Cert)
 	if _, _, err := VerifyUnitReport(b, other, now); err == nil {
 		t.Fatal("another farm's roots took it")
+	}
+}
+
+// A host unit's key, issued through its runner, names the runner in its
+// leaf; held in a file, it signs the unit's report, which verifies as the
+// unit's and says which runner holds it.
+func TestHostUnitHeldKey(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	ca, err := NewCA(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(ca.Cert)
+	const jobUID = "9c1d2e7f-0000-4000-8000-000000000001"
+	id := UnitIdentity("show-a", "port", "2", jobUID, 1)
+	pub, key, _ := ed25519.GenerateKey(nil)
+	leaf, err := ca.IssueHostUnit(pub, id, "laptop-1", time.Hour, now)
+	if err != nil || CertRunner(leaf) != "laptop-1" || CertIdentity(leaf) != id {
+		t.Fatalf("leaf: %v, runner %q", err, CertRunner(leaf))
+	}
+	if _, err := ca.IssueHostUnit(pub, NodeIdentity("w1"), "laptop-1", time.Hour, now); err == nil {
+		t.Fatal("a node certified as a host unit")
+	}
+	b, err := EncodeHeld(key, []*x509.Certificate{leaf, ca.Cert})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := HeldSigner(b)
+	if err != nil || s.Identity() != id {
+		t.Fatalf("held: %v", err)
+	}
+	on := ActSubject("pod", "show-a", "port-u2", "5e1f0c2a-0000-4000-8000-0000000000a2", strings.Repeat("ab", 32))
+	act, err := SignUnitAct(ctx, s, UnitAct{Subject: on, Act: "needs", Params: json.RawMessage(`{"what":"x"}`), Owner: "dana"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, _, err := VerifyUnitReport(act, roots, now); err != nil || v.Runner != "laptop-1" {
+		t.Fatalf("a host unit's report: %v, runner %q", err, v.Runner)
+	}
+	_, wrong, _ := ed25519.GenerateKey(nil)
+	if bad, _ := EncodeHeld(wrong, []*x509.Certificate{leaf}); bad != nil {
+		if _, err := HeldSigner(bad); err == nil {
+			t.Fatal("a key read with another key's leaf")
+		}
 	}
 }

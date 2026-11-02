@@ -149,6 +149,9 @@ type Verified struct {
 	// Grant the grant an agent's or a CI job's leaf names.
 	Device string
 	Grant  string
+	// Runner is the host runner (its Node) a host unit's leaf names: the
+	// unit's key was issued through it and is held by it.
+	Runner string
 	// TouchDevice is a confirmed act's touch key, by its device ID: the
 	// second of its two signatures.
 	TouchDevice string
@@ -318,7 +321,7 @@ func VerifyBundle(data []byte, roots *x509.CertPool) (*Verified, error) {
 	}
 	v := &Verified{Identity: CertIdentity(leaf), PredicateType: st.PredicateType, Subjects: st.Subject,
 		Predicate: st.Predicate, SignedAt: when.SignedAt, Payload: payload, Farm: farm,
-		Device: CertDevice(leaf), Grant: CertGrant(leaf), Expires: leaf.NotAfter}
+		Device: CertDevice(leaf), Grant: CertGrant(leaf), Runner: CertRunner(leaf), Expires: leaf.NotAfter}
 	if v.Device != "" && v.Device != CertDeviceID(leaf) {
 		return nil, fmt.Errorf("%w: the leaf names device %s, but its key is device %s", ErrUntrusted, v.Device, CertDeviceID(leaf))
 	}

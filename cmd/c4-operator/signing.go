@@ -310,23 +310,15 @@ func unitIdentity(ctx context.Context, r client.Reader, id *auth.Identity) (stri
 		}
 		return "", true, fmt.Errorf("reading pod %s/%s: %w", id.Namespace, id.PodName, err)
 	}
-	job := pod.Labels[c4v1.LabelJob]
-	if job == "" {
+	if pod.Labels[c4v1.LabelJob] == "" {
 		return "", false, nil
 	}
-	ref := metav1.GetControllerOf(&pod)
-	attempt, err := strconv.Atoi(pod.Annotations[c4v1.AnnotationAttempt])
-	switch {
-	case string(pod.UID) != id.PodUID:
+	if string(pod.UID) != id.PodUID {
 		return "", true, fmt.Errorf("the token is bound to pod %s/%s %s, which is now another pod", id.Namespace, id.PodName, id.PodUID)
-	case ref == nil || ref.Kind != "WorkJob" || ref.Name != job || ref.UID == "":
-		return "", true, fmt.Errorf("pod %s/%s is not a unit of job %s", id.Namespace, id.PodName, job)
-	case pod.Labels[c4v1.LabelUnit] == "":
-		return "", true, fmt.Errorf("pod %s/%s names no unit", id.Namespace, id.PodName)
-	case err != nil || attempt < 1:
-		return "", true, fmt.Errorf("pod %s/%s names no attempt", id.Namespace, id.PodName)
-	case pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed || pod.DeletionTimestamp != nil:
-		return "", true, fmt.Errorf("unit %s/%s's attempt %d has ended", job, pod.Labels[c4v1.LabelUnit], attempt)
+	}
+	unit, err := podUnit(&pod)
+	if err != nil {
+		return "", true, err
 	}
 	// a host runner's unit is certified only through its runner, which
 	// asks for units bound to its own Node, of its owners' jobs
@@ -335,7 +327,27 @@ func unitIdentity(ctx context.Context, r client.Reader, id *auth.Identity) (stri
 	} else if host {
 		return "", true, fmt.Errorf("pod %s/%s runs on host runner %s: its certificate comes through that runner", id.Namespace, id.PodName, pod.Spec.NodeName)
 	}
-	return provenance.UnitIdentity(id.Namespace, job, pod.Labels[c4v1.LabelUnit], string(ref.UID), attempt), true, nil
+	return unit, true, nil
+}
+
+// podUnit is the identity of the unit attempt a live unit pod runs,
+// unit/<ns>/<job>/<unit>@<job UID>/<attempt>: the pod is its WorkJob's,
+// names its unit and an attempt of 1 or more, and has not ended.
+func podUnit(pod *corev1.Pod) (string, error) {
+	job := pod.Labels[c4v1.LabelJob]
+	ref := metav1.GetControllerOf(pod)
+	attempt, err := strconv.Atoi(pod.Annotations[c4v1.AnnotationAttempt])
+	switch {
+	case job == "" || ref == nil || ref.Kind != "WorkJob" || ref.Name != job || ref.UID == "":
+		return "", fmt.Errorf("pod %s/%s is not a unit of job %s", pod.Namespace, pod.Name, job)
+	case pod.Labels[c4v1.LabelUnit] == "":
+		return "", fmt.Errorf("pod %s/%s names no unit", pod.Namespace, pod.Name)
+	case err != nil || attempt < 1:
+		return "", fmt.Errorf("pod %s/%s names no attempt", pod.Namespace, pod.Name)
+	case pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed || pod.DeletionTimestamp != nil:
+		return "", fmt.Errorf("unit %s/%s's attempt %d has ended", job, pod.Labels[c4v1.LabelUnit], attempt)
+	}
+	return provenance.UnitIdentity(pod.Namespace, job, pod.Labels[c4v1.LabelUnit], string(ref.UID), attempt), nil
 }
 
 // hostNode reports whether Node name is a host runner's machine: its

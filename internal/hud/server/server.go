@@ -173,6 +173,10 @@ type Server struct {
 	// token (audience c4-signer), and only a host runner's account; nil
 	// serves none.
 	HostIssuer http.Handler
+	// HostUnitIssuer certifies a host unit's key for its runner, at
+	// /workload/v1/unit-certificate, on a request the runner signed as
+	// itself; nil serves none.
+	HostUnitIssuer http.Handler
 	// hostIssuerLimits and peopleLimits bound the two issuer routes
 	// (ratelimit.go).
 	hostIssuerLimits, peopleLimits routeLimits
@@ -336,6 +340,9 @@ func (s *Server) Handler() http.Handler {
 	}
 	if s.HostIssuer != nil {
 		mux.Handle("POST /workload/v1/certificate", limited(&s.hostIssuerLimits, hostIssuerBudget, http.StripPrefix("/workload", s.HostIssuer)))
+	}
+	if s.HostUnitIssuer != nil {
+		mux.Handle("POST /workload/v1/unit-certificate", limited(&s.hostIssuerLimits, hostIssuerBudget, http.StripPrefix("/workload", s.HostUnitIssuer)))
 	}
 	if s.Sandbox != nil && s.DevViewers != nil {
 		p := s.sandboxProxy()

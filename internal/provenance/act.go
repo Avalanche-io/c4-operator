@@ -68,6 +68,10 @@ func ParseUnitIdentity(id string) (UnitOf, bool) {
 const (
 	DeviceURN = "urn:c4:device:"
 	GrantURN  = "urn:c4:grant:"
+	// RunnerURN names, on a host unit's leaf, the host runner its key was
+	// issued through and is held by: the unit runs there, and its acts are
+	// what that runner vouches for.
+	RunnerURN = "urn:c4:runner:"
 )
 
 // LeafURIs are the URI SANs of a leaf: its identity, then its device or
@@ -99,6 +103,9 @@ func CertDevice(c *x509.Certificate) string { return certURN(c, DeviceURN) }
 
 // CertGrant is the grant ID a leaf names, or "".
 func CertGrant(c *x509.Certificate) string { return certURN(c, GrantURN) }
+
+// CertRunner is the host runner (its Node) a host unit's leaf names, or "".
+func CertRunner(c *x509.Certificate) string { return certURN(c, RunnerURN) }
 
 func certURN(c *x509.Certificate, prefix string) string {
 	for _, u := range c.URIs {

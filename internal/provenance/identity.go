@@ -169,6 +169,31 @@ func (ca *CA) IssueLeaf(pub crypto.PublicKey, identity, device, grant string, tt
 	if err != nil {
 		return nil, fmt.Errorf("identity %q is not under %s: %v", identity, IdentityBase, err)
 	}
+	return ca.issue(pub, identity, uris, ttl, now)
+}
+
+// IssueHostUnit certifies a host unit's Ed25519 key as identity (a unit's
+// attempt), naming the host runner it was issued through and is held by
+// (RunnerURN, the runner's Node).
+func (ca *CA) IssueHostUnit(pub ed25519.PublicKey, identity, node string, ttl time.Duration, now time.Time) (*x509.Certificate, error) {
+	if _, ok := ParseUnitIdentity(identity); !ok {
+		return nil, fmt.Errorf("%s is not a unit", identity)
+	}
+	if node == "" || len(pub) != ed25519.PublicKeySize {
+		return nil, errors.New("a host unit's leaf names its runner and holds a 32-byte Ed25519 key")
+	}
+	uris, err := LeafURIs(identity, "", "")
+	if err != nil {
+		return nil, err
+	}
+	r, err := url.Parse(RunnerURN + url.PathEscape(node))
+	if err != nil {
+		return nil, err
+	}
+	return ca.issue(pub, identity, append(uris, r), ttl, now)
+}
+
+func (ca *CA) issue(pub crypto.PublicKey, identity string, uris []*url.URL, ttl time.Duration, now time.Time) (*x509.Certificate, error) {
 	tmpl := &x509.Certificate{
 		SerialNumber: serial(),
 		Subject:      pkix.Name{CommonName: identity},
