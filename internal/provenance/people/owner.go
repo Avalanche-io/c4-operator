@@ -216,9 +216,9 @@ func (i *Issuer) handleOwnerTouch(w http.ResponseWriter, r *http.Request) {
 			return nil, refuse(http.StatusForbidden, "the owner's key %.16s is not in force: a removed key gets no touch key", oe.Device)
 		case x.touchKeyFor(oe.Device):
 			return nil, refuse(http.StatusConflict, "the owner's key has a touch key already: the installer token enrols the first one only, and a touch on it enrols another")
-		case !now.Before(touchKeyUntil(oe)):
-			return nil, refuse(http.StatusConflict, "the installer token enrols the owner's first touch key only within %s of the owner's enrolment, which ended at %s: acts that need a touch can't be confirmed on this farm",
-				TouchKeyWindow, touchKeyUntil(oe).UTC().Format(time.RFC3339))
+		case !now.Before(x.touchKeyUntil(oe)):
+			return nil, refuse(http.StatusConflict, "the installer token enrols the owner's first touch key only within %s of the owner's enrolment, which ended at %s: acts that need a touch can't be confirmed on this farm until c4 farm touch-key --reopen, at a terminal, opens a fresh window",
+				TouchKeyWindow, x.touchKeyUntil(oe).UTC().Format(time.RFC3339))
 		}
 		if err := x.unseen(device); err != nil {
 			return nil, err
@@ -254,14 +254,76 @@ func (x *Index) ownerEntry() *Entry {
 	return nil
 }
 
-// touchKeyUntil is when the owner's first-touch-key window ends: a time in
-// the past when the owner entry's time can't be read.
-func touchKeyUntil(oe *Entry) time.Time {
-	at, err := time.Parse(time.RFC3339, oe.At)
+// touchKeyUntil is when the owner's first-touch-key window ends: within
+// TouchKeyWindow of the owner's enrolment, or of the last reopening; a
+// time in the past when the entry's time can't be read.
+func (x *Index) touchKeyUntil(oe *Entry) time.Time {
+	from := oe
+	if r := x.reopened(oe.Device); r != nil {
+		from = r
+	}
+	at, err := time.Parse(time.RFC3339, from.At)
 	if err != nil {
 		return time.Time{}
 	}
 	return at.Add(TouchKeyWindow)
+}
+
+// reopened is the last reopening of device's touch-key window, or nil.
+func (x *Index) reopened(device string) *Entry {
+	var last *Entry
+	for _, e := range x.entries {
+		if e.Kind == KindTouchWindow && e.Device == device {
+			last = e
+		}
+	}
+	return last
+}
+
+// handleTouchReopen opens one fresh TouchKeyWindow for a one-person farm
+// owner's first touch key (c4 farm touch-key --reopen, which rotates the
+// installer token first and sends the new one): on the installer token,
+// from the farm's own machine, only while the owner key never had a touch
+// key. The reopening is booked, so the owner's page and the CLI show it.
+func (i *Issuer) handleTouchReopen(w http.ResponseWriter, r *http.Request) {
+	ctx, now := r.Context(), i.now()
+	owner := i.owner(ctx)
+	switch {
+	case !i.local(r):
+		fail(w, refuse(http.StatusForbidden, "the touch-key window is reopened from the farm's own machine (c4 farm touch-key --reopen)"))
+		return
+	case len(i.InstallerToken) == 0 || owner == "":
+		fail(w, refuse(http.StatusForbidden, "this is not a one-person farm: a touch key is enrolled on a step-up sign-in"))
+		return
+	case !i.installer(r):
+		fail(w, refuse(http.StatusForbidden, "the touch-key window is reopened with this machine's installer token (%s)", InstallerHeader))
+		return
+	}
+	x := i.Index
+	var until time.Time
+	_, err := x.append(ctx, now, i.sign, func() ([]pending, error) {
+		oe := x.ownerEntry()
+		switch {
+		case oe == nil:
+			return nil, refuse(http.StatusForbidden, "this farm's owner is not enrolled yet: c4 farm up enrols them")
+		case x.inForce(int64(len(x.entries)), now)[oe.Device] == nil:
+			return nil, refuse(http.StatusForbidden, "the owner's key %.16s is not in force: a removed key gets no touch key", oe.Device)
+		case x.touchKeyFor(oe.Device):
+			return nil, refuse(http.StatusConflict, "the owner's key has a touch key already: a touch on it enrols another")
+		}
+		until = now.Add(TouchKeyWindow)
+		return []pending{{entry: &Entry{Kind: KindTouchWindow, Device: oe.Device, Person: owner, Addr: i.addr(r)}}}, nil
+	})
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, TouchWindow{Until: until.UTC().Format(time.RFC3339)})
+}
+
+// TouchWindow answers a reopening: when the fresh window ends.
+type TouchWindow struct {
+	Until string `json:"until"`
 }
 
 // touchKeyFor reports whether a touch key was ever enrolled for device.

@@ -79,6 +79,10 @@ const (
 	// KindFlag: something the issuer saw that the person is told of: a
 	// device renewing from two places at once.
 	KindFlag = "flag"
+	// KindTouchWindow: a one-person farm's owner, with no touch key,
+	// reopened the installer token's window for their first one (c4 farm
+	// touch-key --reopen). Books no record.
+	KindTouchWindow = "touch-window"
 )
 
 // FlagTwoPlaces is a device seen renewing from two network addresses
@@ -509,6 +513,11 @@ func (x *Index) loadKind(ctx context.Context, e *Entry, pending bool) error {
 	case KindFlag:
 		if e.Record != "" || e.Flag != FlagTwoPlaces || x.at(e.Position - 1)[e.Device] == nil {
 			return fmt.Errorf("a flag is %s, of a device the index books, and books no record", FlagTwoPlaces)
+		}
+		return nil
+	case KindTouchWindow:
+		if e.Record != "" || e.Person == "" || e.Device == "" || x.at(int64(len(x.entries)))[e.Device] == nil {
+			return errors.New("a touch window is a person's, for an owner key the index books, and books no record")
 		}
 		return nil
 	case KindSetting:

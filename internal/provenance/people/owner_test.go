@@ -1,6 +1,7 @@
 package people_test
 
 import (
+	"context"
 	"encoding/base64"
 	"net/http"
 	"strings"
@@ -271,5 +272,53 @@ func TestNoTouchKeyForARemovedOwnerKey(t *testing.T) {
 	code, body := r.call("POST", "/v1/people/owner/touch", local, r.enrolment(newDev(t), "noor", cli.id, "mac"), nil, people.InstallerHeader, installerToken)
 	if code != http.StatusForbidden || !strings.Contains(body, "not in force") {
 		t.Errorf("a touch key for a removed owner key: %d %s", code, body)
+	}
+}
+
+// c4 farm touch-key --reopen: once the window has closed, the owner with
+// no touch key reopens it on the installer token, from the farm's own
+// machine; the reopening is booked, the config shows it and the new end,
+// and a touch key enrols within it. Once there is a touch key, reopening
+// is refused. Another index reading the same book takes the entry.
+func TestTouchKeyWindowReopens(t *testing.T) {
+	r := onePerson(t)
+	cli := newDev(t)
+	r.up(cli, nil)
+	r.now = r.now.Add(people.TouchKeyWindow + time.Hour)
+	if code, body := r.call("POST", "/v1/people/renew", "", r.enrolment(cli, "noor", "", "mac"), nil); code != http.StatusOK {
+		t.Fatalf("renewing: %d %s", code, body)
+	}
+	touch := func() (int, string) {
+		return r.call("POST", "/v1/people/owner/touch", local, r.enrolment(newDev(t), "noor", cli.id, "mac"), nil, people.InstallerHeader, installerToken)
+	}
+	if code, body := touch(); code != http.StatusConflict || !strings.Contains(body, "--reopen") {
+		t.Fatalf("after the window: %d %s", code, body)
+	}
+	reopen := func(host, token string) (int, string) {
+		return r.call("POST", "/v1/people/owner/touch/reopen", host, struct{}{}, nil, people.InstallerHeader, token)
+	}
+	if code, _ := reopen("", installerToken); code != http.StatusForbidden {
+		t.Errorf("from another machine: %d", code)
+	}
+	if code, _ := reopen(local, strings.Repeat("0", 64)); code != http.StatusForbidden {
+		t.Errorf("another token: %d", code)
+	}
+	if code, body := reopen(local, installerToken); code != http.StatusOK {
+		t.Fatalf("reopening: %d %s", code, body)
+	}
+	var cfg people.Config
+	r.call("GET", "/v1/people/config", "", nil, &cfg)
+	if until, err := time.Parse(time.RFC3339, cfg.TouchKeyUntil); err != nil || !until.Equal(r.now.Add(people.TouchKeyWindow)) || cfg.TouchKeyReopened == "" {
+		t.Errorf("config after reopening: until %q, reopened %q", cfg.TouchKeyUntil, cfg.TouchKeyReopened)
+	}
+	if code, body := touch(); code != http.StatusOK {
+		t.Fatalf("a touch key in the reopened window: %d %s", code, body)
+	}
+	if code, body := reopen(local, installerToken); code != http.StatusConflict {
+		t.Errorf("reopening with a touch key: %d %s", code, body)
+	}
+	again := &people.Index{Farm: r.index.Farm, Roots: r.index.Roots, Store: r.store, Head: r.head}
+	if _, err := again.Position(context.Background()); err != nil {
+		t.Errorf("another index reading the book: %v", err)
 	}
 }

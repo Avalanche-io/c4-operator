@@ -213,6 +213,7 @@ func (i *Issuer) mux() *http.ServeMux {
 	m.HandleFunc("POST /v1/people/renew", i.handleRenew)
 	m.HandleFunc("POST /v1/people/owner", i.handleOwner)
 	m.HandleFunc("POST /v1/people/owner/touch", i.handleOwnerTouch)
+	m.HandleFunc("POST /v1/people/owner/touch/reopen", i.handleTouchReopen)
 	m.HandleFunc("POST /v1/people/browser", i.handleBrowser)
 	m.HandleFunc("GET /v1/people/codes/{code}", i.handleCode)
 	m.HandleFunc("POST /v1/people/acts", i.handleAct)
@@ -305,6 +306,9 @@ type Config struct {
 	// is when the installer token stops enrolling its first one (c4 farm
 	// touch-key, RFC 3339): in the past once the window has closed.
 	TouchKeyUntil string `json:"touchKeyUntil,omitempty"`
+	// TouchKeyReopened is when the owner last reopened that window (c4
+	// farm touch-key --reopen), as booked; absent if never.
+	TouchKeyReopened string `json:"touchKeyReopened,omitempty"`
 	LeafTTL       string `json:"leafTTL"`
 	Lapse         string `json:"lapse"`
 	// SoftwareTouchKeys says this farm takes a touch key that states a
@@ -344,15 +348,18 @@ func (i *Issuer) handleConfig(w http.ResponseWriter, r *http.Request) {
 	x := i.Index
 	x.mu.Lock()
 	pos, enrolled := x.pos, x.ownerRecord() != nil
-	until := ""
+	until, reopened := "", ""
 	if oe := x.ownerEntry(); oe != nil && !x.touchKeyFor(oe.Device) && i.owner(r.Context()) != "" {
-		until = touchKeyUntil(oe).UTC().Format(time.RFC3339)
+		until = x.touchKeyUntil(oe).UTC().Format(time.RFC3339)
+		if re := x.reopened(oe.Device); re != nil {
+			reopened = re.At
+		}
 	}
 	x.mu.Unlock()
 	writeJSON(w, http.StatusOK, Config{Farm: i.Farm(), Order: x.Order(), Position: pos, Provider: set, WebAuthn: i.WebAuthn,
 		Nonce:  "the device ID: the C4 ID of the key's DER SubjectPublicKeyInfo, as a string (c4...)",
 		StepUp: StepUpConfig{MaxAge: age.String(), ACR: append(append([]string{}, DefaultStepUpACR...), i.StepUp.ACR...), AMR: "mfa, or factors of two kinds (RFC 8176): known (pwd, pin, kba), held (otp, sms, tel, hwk, swk, sc, pop), being (fpt, face, iris, retina, vbm)"},
-		Owner:  i.owner(r.Context()), OwnerEnrolled: enrolled, TouchKeyUntil: until, LeafTTL: LeafTTL.String(), Lapse: Lapse.String(), SoftwareTouchKeys: i.SoftwareTouchKeys})
+		Owner:  i.owner(r.Context()), OwnerEnrolled: enrolled, TouchKeyUntil: until, TouchKeyReopened: reopened, LeafTTL: LeafTTL.String(), Lapse: Lapse.String(), SoftwareTouchKeys: i.SoftwareTouchKeys})
 }
 
 // Reads need a caller (PEOPLE-KEYS-2 7): the person the HUD signed in,
