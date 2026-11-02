@@ -2515,53 +2515,88 @@ book: on a farm that keeps none, every party route is `501`, the reads
 and `party:` waits keep taking the `c4:party:<name>` group, as before. The
 HUD shows its Parties tab only where `HEAD /parties` answers.
 
+**Who is who** (PEOPLE-KEYS-2 10.4 item 27):
+- A viewer is a person Party's person only through a sign-in that Party
+  lists by name. Nothing falls back to the user name, or to whom the
+  viewer's work belongs to.
+- A sign-in goes on a Party only by signing in with it. A name the HUD
+  signs people in as is added only by the viewer signed in as it; a
+  provider's subject only with `idToken`, a fresh ID token for it, which
+  the people's issuer checks as `whoami` does (issuer, audience, `azp`,
+  freshness, signature, subject). So a person makes their own person
+  Party, and adds their own sign-ins; they, or a farm admin, remove one;
+  nobody adds one for someone else.
+- A membership names a Party, person or organisation, never a bare
+  sign-in name. One named by a name no Party has (booked before this
+  rule) lapses visibly: it shows, with `lapsed`, and holds nothing.
+- Making an organisation never makes its maker an admin. Its make-party
+  names its first admin, a person Party other than the maker's own, who
+  counts only once they accept (`POST /parties/{name}/accept`) with their
+  own touched act.
+
 **What the viewer may do.** The viewer the snapshot, the event stream and
 `/needs-me` serve says so in three flags, each by the rule its route takes:
-- `makeParties`: `POST /parties` would take a make from it: the guard every
-  party write passes (no unit, agent or tracker's sync, no development
-  viewer without the installer's secret, a farm book and a signer) and the
-  farm admin's right (create on `parties`, or a development viewer in the
-  farm-admin role or every role). The route and the flag use one function.
-- `bindingOwner`: the viewer is the farm binding's owner.
-- `makeOwnParty`: that owner may make their own person Party now, without
-  the farm admin's right: their Party doesn't exist yet. Once it does, it
-  is false, and `bindingOwner` stays.
+- `makeParties`: `POST /parties` would take an organisation from it: the
+  guard every party write passes (no unit, agent or tracker's sync, no
+  development viewer without the installer's secret, a farm book and a
+  signer) and the farm admin's right (create on `parties`, or a
+  development viewer in the farm-admin role or every role). The route and
+  the flag use one function.
+- `makeOwnParty`: it may make its own person Party now: the same guard, and
+  no Party lists the sign-in it is using yet. A person who signs in by the
+  `c4-sign-ins` Secret proves one of its subjects as they do.
+- `bindingOwner`: the viewer is the farm binding's owner: the person of the
+  owner's person Party, through its sign-ins, or, while the farm keeps no
+  Party of the owner's name, the one signed in as it.
 
 The event stream reads them when it opens.
 
-| route                              | body                                                | answer                                                                                                                                                                                                                                                                                 |
-| ---------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /parties`                     |                                                     | `{ parties, purposes }`: every party, by name, and the purposes a member may hold                                                                                                                                                                                                      |
-| `GET /parties/{name}`              |                                                     | `{ ok, party, record }`; `404` for no such party                                                                                                                                                                                                                                       |
-| `POST /parties`                    | `{ name, kind, displayName, legalName?, signIns? }` | `{ ok, message, party, record }` (`make-party`): a farm admin (who may create `parties`) makes a party; whoever makes an organisation is its first admin, holding `member` and `admin`. The same make again by its maker answers `existing: true`; any other make of the name is `409` |
-| `PATCH /parties/{name}`            | `{ displayName?, legalName?, perPersonViews? }`     | `{ ok, message, party, record }` (`change-party`): the party's admin changes its names, and an organisation's per-person views policy                                                                                                                                                  |
-| `PUT /parties/{name}/sign-ins`     | `{ signIns }`                                       | `{ ok, message, party, record }` (`set-sign-ins`): a person's sign-in subjects, all of them, set by a farm admin or by the person, who adds only the HUD sign-in they are using (a provider's subject is a farm admin's to add). One sign-in is one person's (`409`)                   |
-| `POST /parties/{name}/members`     | `{ person \| group, purposes }`                     | `{ ok, message, party, record }` (`add-member`): an admin adds a member, by name or by a group of the studio's own; `409` for one in force already                                                                                                                                     |
-| `PUT /parties/{name}/members`      | `{ person \| group, purposes }`                     | the same (`set-purposes`): an admin changes a membership's purposes; `404` for none in force                                                                                                                                                                                           |
-| `POST /parties/{name}/members/end` | `{ person \| group }`                               | the same (`end-member`): an admin, or the member themselves, ends a membership; it is kept in the book, never deleted                                                                                                                                                                  |
+| route                              | body                                                                       | answer                                                                                                                                                                                                                                                                                                                        |
+| ---------------------------------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /parties`                     |                                                                            | `{ parties, purposes }`: every party, by name, and the purposes a member may hold                                                                                                                                                                                                                                             |
+| `GET /parties/{name}`              |                                                                            | `{ ok, party, record }`; `404` for no such party                                                                                                                                                                                                                                                                              |
+| `POST /parties`                    | `{ name, kind, displayName, legalName?, signIns?, idToken?, firstAdmin? }` | `{ ok, message, party, record }` (`make-party`): a farm admin makes an organisation, naming `firstAdmin`; a person makes their own person Party, listing the sign-in they are using and any provider subject `idToken` proves. The same make again by its maker answers `existing: true`; any other make of the name is `409` |
+| `POST /parties/{name}/accept`      | `{}`, with `X-C4-Act`                                                      | `{ ok, message, party, record }` (`accept-admin`): the first admin the organisation's make-party names accepts, with their own confirmed act; then they hold `member` and `admin`. `403` for anyone else or without a touched act, `409` once accepted                                                                        |
+| `PATCH /parties/{name}`            | `{ displayName?, legalName?, perPersonViews? }`                            | `{ ok, message, party, record }` (`change-party`): the party's admin changes its names, and an organisation's per-person views policy                                                                                                                                                                                         |
+| `PUT /parties/{name}/sign-ins`     | `{ signIns, idToken? }`                                                    | `{ ok, message, party, record }` (`set-sign-ins`): a person's sign-in subjects, all of them. The person adds their own, each proved: the name they are signed in with, one provider subject per write with `idToken`. The person, or a farm admin, removes one. One sign-in is one person's (`409`)                           |
+| `POST /parties/{name}/members`     | `{ person \| group, purposes }`                                            | `{ ok, message, party, record }` (`add-member`): an admin adds a member, a Party by its name or a group of the studio's own; `400` for a name no Party has, `409` for one in force already                                                                                                                                    |
+| `PUT /parties/{name}/members`      | `{ person \| group, purposes }`                                            | the same (`set-purposes`): an admin changes a membership's purposes; `404` for none in force                                                                                                                                                                                                                                  |
+| `POST /parties/{name}/members/end` | `{ person \| group }`                                                      | the same (`end-member`): an admin, or the member themselves, ends a membership; it is kept in the book, never deleted                                                                                                                                                                                                         |
 
 A party is `{ name, kind, displayName, legalName?, signIns?,
-perPersonViews?, made: { by, at, record }, changed?, members, groups?,
-booked, yours?, actOn }`.
+perPersonViews?, made: { by, at, record }, changed?, firstAdmin?: { person,
+accepted, record? }, members, groups?, booked, yours?, actOn }`.
 - `name` is lower-case letters, digits, dots and dashes, at most 63: the
-  chain/1 party pattern, narrowed to an object name. `kind` is `person` or
-  `organisation`, and never changes.
+  chain/1 party pattern, narrowed to an object name and to one case. A
+  wait's `party:<name>` is held to the same pattern, so `party:Kestrel` is
+  refused where the wait is written and decided by no one.
+- `kind` is `person` or `organisation`, and never changes.
 - `legalName` (an organisation's) is what a contract carries, and what the
-  farm CA will name (ORGANIZATION 4). `signIns` (a person's) are the sign-in
-  subjects that are them, each `{ issuer?, subject }`: with `issuer`, a
-  provider's subject ID, which the people's issuer certifies their devices
-  on; without, a name the HUD signs them in as (a token username, an SSO
-  header's value, a development name). One subject is one person's across
-  every Party and the `c4-sign-ins` Secret: a provider subject the Secret
-  gives someone with no person Party of their own is `409`. They go only
-  to the person and to farm admins.
+  farm CA will name (ORGANIZATION 4).
+- `signIns` (a person's) are the sign-in subjects that are them, each
+  `{ issuer?, subject }`: with `issuer`, a provider's subject ID, which the
+  people's issuer certifies their devices on; without, a name the HUD
+  signs them in as (a token username, an SSO header's value, a
+  development name). An issuer is kept and compared in its one spelling
+  (scheme and host in lower case, no trailing slash). One subject is one
+  person's across every Party and the `c4-sign-ins` Secret: a subject
+  another Party holds, or one the Secret gives someone with no person
+  Party of their own, is `409`. A person the Secret signs in makes their
+  Party only listing one of their Secret subjects, proved, since the
+  Secret's lines for them are ignored once it exists (`403` otherwise), so
+  their Party never locks them out of the issuer. Sign-ins go only to the
+  person and to farm admins.
+- `firstAdmin` (an organisation's) is the first admin its make-party
+  named, and whether they accepted. Until they do, it has no admin.
 - `members` and `groups` are the organisation's memberships in force, each
-  `{ person | group, purposes, inEffect, by, record, since, pending? }`:
-  who granted it, its record, and when its book entry counts from. An
-  organisation's `groups` always end with `c4:party:<name>` holding
+  `{ person | group, purposes, inEffect, by, record, since, pending?,
+  lapsed? }`: who granted it, its record, and when its book entry counts
+  from. `lapsed` says why one holds nothing: it names no Party, or its
+  record does not verify (an entry pending the seal can cite anything).
+  An organisation's `groups` always end with `c4:party:<name>` holding
   `member`, which has no record: the studio's sign-in says who is in it.
-- `booked` says the make-party record is in the book; until it is, the
-  organisation has no members (make it again the same way to book it).
+- `booked` says the make-party record is in the book; make it again the
+  same way to book it.
 - `yours` are the purposes the viewer holds for it, in effect. `actOn` is
   what an act changing the party or its members is on.
 
@@ -2581,45 +2616,53 @@ groups the viewer signed in with. `c4:party:<name>` and `c4-party-<name>`
 hold `member` and nothing more, so a rule for either is `400`.
 
 **Who may:**
-- Make a party: a farm admin (one who may create `parties`, or a
-  development viewer in the farm-admin role on the installer's secret).
-  The farm binding's owner may also make their own person Party while it
-  doesn't exist, signed in as themselves and naming only that sign-in, so
-  the owner's Party, which the people's issuer's admins come from, can
-  always be made.
+- Make an organisation: a farm admin (one who may create `parties`, or a
+  development viewer in the farm-admin role on the installer's secret),
+  naming a first admin who is not themselves (`403`).
+- Make a person Party: the person, signed in with what it lists.
 - Change a party: an organisation's `admin`; for a person's party, the
-  person, or for its sign-ins a farm admin.
+  person, or a farm admin; its sign-ins as above.
 - Change members: the organisation's `admin`. A member may end their own
-  membership. An admin never grants for themselves: a membership that is
-  theirs (by name, or a group they are in) may give them only purposes they
-  hold already (`403`). The last admin by name is never removed (`409`):
-  add another first.
+  membership. An admin never grants for themselves: their own named
+  membership gains nothing, a purpose they hold only by a group is never
+  copied into it, and a group they are in gains only what they hold by
+  name (`403`). The last admin by name is never removed (`409`): add
+  another first.
 - Never: a unit, an agent (`X-C4-Client: mcp`, `X-C4-Agent`) or a
   tracker's sync (`403`), nor a development viewer without the
   installer's secret.
 
+**Inside the append.** A membership write is judged once to sign it, and
+again inside the farm book's append, on the book as it stands at the
+State the entry is written from: when another writer moved the State
+first, the HUD reads the book again and judges again, as the people's
+issuer's append does. So two admins ending each other at once leave one:
+the second is refused (`409`, or `403` once the first took their admin).
+
 **Records.** Each write is a control record of its verb (`make-party`,
-`change-party`, `set-sign-ins`, `add-member`, `set-purposes`,
-`end-member`) and may carry its act (`X-C4-Act`), on the farm for
-`make-party` and on the party (`actOn`) otherwise. `make-party`,
-`add-member`, `set-purposes` and `set-sign-ins` are touch-list acts
-(`GET /acts/needs`); `end-member` and `change-party` are a person's,
-silent. A membership's record targets `party:<name>/person:<person>` or
-`party:<name>/group:<group>`, and its `change` is `{ party, member |
-group, purposes, follows? }`, `follows` naming the record it replaces. For
-a membership the book is the state: the HUD books its record before it
-answers, and a record the book does not take is `503`, with nothing
-changed.
+`accept-admin`, `change-party`, `set-sign-ins`, `add-member`,
+`set-purposes`, `end-member`) and may carry its act (`X-C4-Act`), on the
+farm for `make-party` and on the party (`actOn`) otherwise; `accept-admin`
+takes one, confirmed. `make-party`, `accept-admin`, `add-member`,
+`set-purposes` and `set-sign-ins` are touch-list acts (`GET /acts/needs`);
+`end-member` and `change-party` are a person's, silent. A person's own
+act is taken from any sign-in their Party lists. A membership's record
+targets `party:<name>/person:<person>` or `party:<name>/group:<group>`,
+and its `change` is `{ party, member | group, purposes, follows? }`,
+`follows` naming the record it replaces; an organisation's make-party
+names `firstAdmin`, and opens no one's membership. For a membership the
+book is the state: the HUD books its record before it answers, and a
+record the book does not take is `503`, with nothing changed.
 
 **Waits.** A `party:<name>` wait for a party the farm keeps is decided only
-by a person holding `member` for it, in effect: by name, by a group, or by
-`c4:party:<name>`. The decision's `authorization` ends with the membership
-it was made under (`; a member of kestrel holding member (record ...)`). A
-wait for a party the farm doesn't keep takes the `c4:party:<name>` group,
-as before. A tracker login the people map names as a kept party decides
-nothing for it (`403`): it names no member. A person's party ties their
-sign-ins together, so a `person:noor` wait is decided by any sign-in in
-noor's `signIns`.
+by a person holding `member` for it, in effect: by their Party, by a
+group, or by `c4:party:<name>`. The decision's `authorization` ends with
+the membership it was made under (`; a member of kestrel holding member
+(record ...)`). A wait for a party the farm doesn't keep takes the
+`c4:party:<name>` group, as before. A tracker login the people map names as
+a kept party decides nothing for it (`403`): it names no member. A
+person's party ties their sign-ins together, so a `person:noor` wait is
+decided by any sign-in in noor's `signIns`.
 
 ## Held tracker writes
 
@@ -2821,9 +2864,10 @@ the index already books is `409` at any replica, after any restart.
 - **From a removal's position on,** the device's certificates are no longer
   in force. A removed key never comes back.
 - **An admin** is, once the farm owner's Party (the binding owner's name)
-  exists and its `make-party` is in the farm book, a person holding
-  `admin` by name in it, in force in the book (for a person's Party, that
-  person). Until then, whatever other Parties exist, the farm binding's
+  exists, its `make-party` is in the farm book and, for an organisation,
+  the first admin it names has accepted, a person holding `admin` by name
+  in it, in force in the book (for a person's Party, that person). Making
+  the owner's Party makes its maker no admin. Until then, whatever other Parties exist, the farm binding's
   owner, as before Parties. Parties or a book that can't be read make no
   one an admin. The same admins read others' ID tokens and addresses.
 - **`set-sign-in-provider` is refused** (`403`) until a touch can confirm
