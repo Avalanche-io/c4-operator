@@ -527,6 +527,10 @@ func TestPartySignIns(t *testing.T) {
 	if code, out := signIns("noor-sso", "noor@studio.example", "noor", sso+" 00u-noor"); code != http.StatusForbidden || !says(out, "a farm admin adds 00u-noor at "+sso) {
 		t.Errorf("noor adds a provider subject: %d %v", code, out)
 	}
+	// even one spelled as her HUD sign-in: at a provider it is the provider's word
+	if code, out := signIns("noor-sso", "noor@studio.example", "noor", sso+" noor@studio.example"); code != http.StatusForbidden || !says(out, "a farm admin adds noor@studio.example at "+sso) {
+		t.Errorf("noor adds her HUD name at a provider: %d %v", code, out)
+	}
 	if code, _ := signIns("ines", "noor@studio.example", "ftp://sso.studio.example 00u-noor"); code != http.StatusBadRequest {
 		t.Errorf("an issuer that is no URL: %d", code)
 	}
