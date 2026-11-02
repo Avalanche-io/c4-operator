@@ -315,16 +315,27 @@ func WatchCode(ctx context.Context, c *Client, code string, wait, poll time.Dura
 	end := time.Now().Add(wait)
 	for {
 		var st people.CodeState
-		if err := c.Issuer(ctx, http.MethodGet, "/v1/people/codes/"+people.CodeHash(code), nil, &st); err != nil {
+		next := poll
+		err := c.Issuer(ctx, http.MethodGet, "/v1/people/codes/"+people.CodeHash(code), nil, &st)
+		var ae *APIError
+		switch {
+		case errors.As(err, &ae) && ae.Status == http.StatusTooManyRequests:
+			// a busy issuer asks clients to wait: wait as long as it says,
+			// up to the deadline, and read again
+			if time.Now().After(end) {
+				return &people.CodeState{State: "waiting"}, nil
+			}
+			next = max(ae.RetryAfter, poll)
+		case err != nil:
 			return nil, err
-		}
-		if st.State != "waiting" || time.Now().After(end) {
+		case st.State != "waiting" || time.Now().After(end):
 			return &st, nil
 		}
+		next = min(next, max(time.Until(end), poll))
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(poll):
+		case <-time.After(next):
 		}
 	}
 }

@@ -334,3 +334,68 @@ func TestOpenCountersignsOnlyWhatThePersonSees(t *testing.T) {
 		}
 	}
 }
+
+// A busy issuer answers 429 with Retry-After: WatchCode waits as long as
+// it says and reads again, rather than failing c4 farm open; a 429 that
+// lasts past the deadline is a code still waiting.
+func TestWatchCodeRidesOutA429(t *testing.T) {
+	o := newOwnerIssuer(t)
+	ctx := context.Background()
+	st := keystore.Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
+	if _, err := EnrolOwner(ctx, o.client, st, "noor"); err != nil {
+		t.Fatal(err)
+	}
+	code, err := BookBrowserCode(ctx, o.client, st, o.scratch.ID, "noor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	busy := 2
+	limited := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/issuer/v1/people/codes/") && busy > 0 {
+			busy--
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			w.Write([]byte(`{"error":"slow down"}`))
+			return
+		}
+		o.mux.ServeHTTP(w, r)
+	}))
+	defer limited.Close()
+	c, _ := NewClient(Farm{HUD: limited.URL})
+	c.Installer = testInstaller
+	start := time.Now()
+	s, err := WatchCode(ctx, c, code, 3*time.Second, time.Millisecond)
+	if err != nil || s.State != "waiting" || time.Since(start) < 2*time.Second {
+		t.Errorf("after two 429s: %v %+v, waited %v", err, s, time.Since(start))
+	}
+	busy = 1000
+	if s, err := WatchCode(ctx, c, code, 50*time.Millisecond, time.Millisecond); err != nil || s.State != "waiting" {
+		t.Errorf("a 429 past the deadline: %v %+v", err, s)
+	}
+	if d := retryAfter("2"); d != 2*time.Second {
+		t.Errorf("Retry-After 2: %v", d)
+	}
+}
+
+// An issuer read answered 429 is asked again after its Retry-After; a
+// write is never repeated.
+func TestIssuerReadsRideOutA429WritesDont(t *testing.T) {
+	calls := map[string]int{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls[r.Method]++
+		if calls[r.Method] == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	c, _ := NewClient(Farm{HUD: srv.URL})
+	if err := c.Issuer(context.Background(), http.MethodGet, "/v1/people/config", nil, &map[string]any{}); err != nil || calls["GET"] != 2 {
+		t.Errorf("a read: %v after %d calls", err, calls["GET"])
+	}
+	if err := c.Issuer(context.Background(), http.MethodPost, "/v1/people/acts", map[string]any{}, nil); err == nil || calls["POST"] != 1 {
+		t.Errorf("a write: %v after %d calls", err, calls["POST"])
+	}
+}

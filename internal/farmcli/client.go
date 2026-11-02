@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -45,6 +47,9 @@ type APIError struct {
 	Status int
 	Msg    string
 	Body   []byte
+	// RetryAfter is how long the farm asks a client to wait before it asks
+	// again (Retry-After, on a 429 or 503); zero when it says nothing.
+	RetryAfter time.Duration
 }
 
 func (e *APIError) Error() string { return e.Msg }
@@ -120,7 +125,21 @@ func apiError(resp *http.Response) error {
 	case http.StatusForbidden:
 		msg = "not allowed: " + msg
 	}
-	return &APIError{Status: resp.StatusCode, Msg: msg, Body: data}
+	return &APIError{Status: resp.StatusCode, Msg: msg, Body: data, RetryAfter: retryAfter(resp.Header.Get("Retry-After"))}
+}
+
+// retryAfter reads a Retry-After header: seconds, or an HTTP date.
+func retryAfter(v string) time.Duration {
+	if v == "" {
+		return 0
+	}
+	if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n >= 0 {
+		return time.Duration(n) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		return max(time.Until(t), 0)
+	}
+	return 0
 }
 
 // Do sends a JSON request and decodes a JSON answer into out. Answers
@@ -130,8 +149,23 @@ func (c *Client) Do(ctx context.Context, method, path string, in, out any, also 
 }
 
 // Issuer is Do at the people's issuer (/issuer/v1/people/...).
+//
+// A read the issuer answers 429 (a busy issuer, rate-limiting clients) is
+// asked again after its Retry-After, a few times and briefly; a write is
+// never repeated.
 func (c *Client) Issuer(ctx context.Context, method, path string, in, out any, also ...int) error {
-	return c.doAt(ctx, issuerPrefix, method, path, in, out, also...)
+	for try := 0; ; try++ {
+		err := c.doAt(ctx, issuerPrefix, method, path, in, out, also...)
+		var ae *APIError
+		if method != http.MethodGet || try == 3 || !errors.As(err, &ae) || ae.Status != http.StatusTooManyRequests || ae.RetryAfter > 5*time.Second {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(max(ae.RetryAfter, 200*time.Millisecond)):
+		}
+	}
 }
 
 func (c *Client) doAt(ctx context.Context, prefix, method, path string, in, out any, also ...int) error {
