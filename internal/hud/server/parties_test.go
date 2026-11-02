@@ -91,6 +91,7 @@ func newPartyRig(t *testing.T, objs ...runtime.Object) *partyRig {
 		// noor and dana, by the studio's sign-in
 		"noor-sso": {User: "noor@studio.example", Role: "artist", All: true},
 		"dana-sso": {User: "dana@studio.example", Role: "artist", All: true},
+		"mallory":  {User: "mallory", Role: "artist", All: true},
 	} {
 		s.DevViewers[name] = v
 	}
@@ -197,6 +198,22 @@ func (p *partyRig) accept(t *testing.T, name, as, person string, touched bool) (
 	return p.call(t, http.MethodPost, "/api/v1/parties/"+name+"/accept", as, map[string]any{}, map[string]string{ActHeader: act})
 }
 
+// secret has the c4-sign-ins Secret sign noor and dana in, by their
+// provider subjects, as a studio farm does before Parties.
+func (p *partyRig) secret() {
+	p.s.StandInSignIns = people.StaticSignIns{"noor": {{Issuer: sso, Subject: peopletest.NoorSub}}, "dana": {{Issuer: sso, Subject: peopletest.DanaSub}}}
+}
+
+// bind binds the farm to owner, run for runFor ("" for a farm its owner
+// runs).
+func (p *partyRig) bind(t *testing.T, owner, runFor string) {
+	t.Helper()
+	if err := p.s.Client.Create(context.Background(), &c4v1.DeploymentBinding{ObjectMeta: metav1.ObjectMeta{Name: c4v1.FarmBindingName},
+		Spec: c4v1.DeploymentBindingSpec{Owner: owner, RunFor: runFor, To: "laptop-1/*", For: []string{"task/v1"}, By: owner}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // people make the rig's usual persons' Parties, each signed in as their
 // own name: those named, or ines, lee, dana, noor, maya, sam and kim.
 func (p *partyRig) people(t *testing.T, who ...string) {
@@ -267,6 +284,8 @@ func ins(list ...string) []api.SignIn {
 func TestPartiesAndMembers(t *testing.T) {
 	p := newPartyRig(t)
 	ctx := context.Background()
+	// a managed farm: the provider runs it for kestrel
+	p.bind(t, "avalanche", "kestrel")
 	p.people(t)
 	withFirst := func(first string) map[string]any { b := kestrel(); b["firstAdmin"] = first; return b }
 	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "maya", withFirst("noor"), nil); code != http.StatusForbidden || !says(out, "a farm admin keeps the party list") {
@@ -276,7 +295,7 @@ func TestPartiesAndMembers(t *testing.T) {
 		t.Errorf("an organisation with no first admin: %d %v", code, out)
 	}
 	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", withFirst("ines"), nil); code != http.StatusForbidden || !says(out, "never makes its maker its admin") {
-		t.Errorf("ines names herself first admin: %d %v", code, out)
+		t.Errorf("ines names herself first admin on a managed farm: %d %v", code, out)
 	}
 	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", withFirst("noor@studio.example"), nil); code != http.StatusBadRequest {
 		t.Errorf("a first admin by a bare sign-in name: %d %v", code, out)
@@ -626,6 +645,7 @@ func TestPartyWaitsTakeMembers(t *testing.T) {
 func TestPartySignIns(t *testing.T) {
 	p := newPartyRig(t)
 	ctx := context.Background()
+	p.secret()
 	mk := func(as, name string, signIns []api.SignIn, token string) (int, map[string]any) {
 		body := map[string]any{"name": name, "kind": "person", "displayName": name, "signIns": signIns}
 		if token != "" {
@@ -714,6 +734,7 @@ func TestPartySignIns(t *testing.T) {
 func TestPartyNameIsNoSignIn(t *testing.T) {
 	p := newPartyRig(t)
 	ctx := context.Background()
+	p.secret()
 	p.own(t, "dana-sso", "dana", sso+" "+peopletest.DanaSub)
 	_, v := p.viewer("dana")
 	if st := p.s.standingOf(ctx, v); st.person != "" || st.holds("dana", PurposeAdmin) {
@@ -736,7 +757,8 @@ func TestPartyNameIsNoSignIn(t *testing.T) {
 func TestPartySelfGrantByAliasRefused(t *testing.T) {
 	p := newPartyRig(t)
 	ctx := context.Background()
-	p.own(t, "noor-sso", "noor")
+	p.secret()
+	p.own(t, "noor-sso", "noor", sso+" "+peopletest.NoorSub)
 	p.people(t, "ines", "lee", "sam")
 	p.org(t, "kestrel", "noor", "noor-sso")
 	code, out := p.call(t, http.MethodPost, "/api/v1/parties/kestrel/members", "noor-sso", map[string]any{"person": "noor@studio.example", "purposes": []string{"member", "approve-spend", "admin"}}, nil)
@@ -828,7 +850,8 @@ func TestPartyLastAdminRaceRefused(t *testing.T) {
 // (R7); nobody else's is.
 func TestPartyPersonsOwnActTaken(t *testing.T) {
 	p := newPartyRig(t)
-	p.own(t, "noor-sso", "noor")
+	p.secret()
+	p.own(t, "noor-sso", "noor", sso+" "+peopletest.NoorSub)
 	on := p.party(t, "noor", "noor-sso").ActOn
 	body := map[string]any{"signIns": ins()}
 	act := p.g.act(t, p.f.Person(t, "dana", true), on, "set-sign-ins", body, true)
@@ -1167,12 +1190,9 @@ func TestPartyReadsNeedTheBook(t *testing.T) {
 // Party once it exists.
 func TestPartyViewerRights(t *testing.T) {
 	p := newPartyRig(t)
-	ctx := context.Background()
-	if err := p.s.Client.Create(ctx, &c4v1.DeploymentBinding{ObjectMeta: metav1.ObjectMeta{Name: c4v1.FarmBindingName},
-		Spec: c4v1.DeploymentBindingSpec{Owner: "noor", To: "laptop-1/*", For: []string{"task/v1"}, By: "noor"}}); err != nil {
-		t.Fatal(err)
-	}
+	p.bind(t, "noor", "")
 	p.own(t, "dana", "dana")
+	p.secret()
 	viewer := func(as string, headers map[string]string) api.Viewer {
 		t.Helper()
 		r := httptest.NewRequest(http.MethodGet, "/api/v1/snapshot?as="+as, nil)
@@ -1198,8 +1218,9 @@ func TestPartyViewerRights(t *testing.T) {
 			t.Errorf("%s %v: makeParties %v, and POST /parties answers %d", c.as, c.headers, v.MakeParties, code)
 		}
 	}
-	if v := viewer("noor", nil); v.MakeParties || !v.BindingOwner || !v.MakeOwnParty {
-		t.Errorf("noor, the binding's owner, before her Party: %+v", v)
+	// before the owner's Party, no one is its person, by name or otherwise
+	if v := viewer("noor", nil); v.MakeParties || v.BindingOwner || !v.MakeOwnParty {
+		t.Errorf("viewer noor, the binding's owner's name, before her Party: %+v", v)
 	}
 	if v := viewer("dana", nil); v.MakeOwnParty || v.BindingOwner {
 		t.Errorf("dana, with her Party: %+v", v)
@@ -1209,7 +1230,7 @@ func TestPartyViewerRights(t *testing.T) {
 	}
 	// the owner's Party is made by its person signed in otherwise:
 	// bindingOwner now follows its sign-ins, not the user name
-	p.own(t, "noor-sso", "noor")
+	p.own(t, "noor-sso", "noor", sso+" "+peopletest.NoorSub)
 	if v := viewer("noor", nil); v.BindingOwner {
 		t.Errorf("viewer noor, not among the owner's Party's sign-ins: %+v", v)
 	}
@@ -1281,4 +1302,77 @@ func TestPartyMemoFollowsTheBook(t *testing.T) {
 	if p.s.inForce(after, farmbook.ForceMembership, key) == nil {
 		t.Error("noor's acceptance is not read at the next view of the book")
 	}
+}
+
+// A person Party is made only by its person, under their own name: the
+// one they sign in as, or the one the c4-sign-ins Secret gives a subject
+// they prove. So mallory makes no Party named dana, nobody makes one for
+// someone else, and while the Secret names dana, a Party named dana takes
+// a subject the Secret gives her, proved, from whoever makes it.
+func TestPartyIsMadeByItsPerson(t *testing.T) {
+	p := newPartyRig(t)
+	mk := func(as, name string, signIns []api.SignIn, token string) (int, map[string]any) {
+		body := map[string]any{"name": name, "kind": "person", "displayName": name, "signIns": signIns}
+		if token != "" {
+			body["idToken"] = token
+		}
+		return p.call(t, http.MethodPost, "/api/v1/parties", as, body, nil)
+	}
+	if code, out := mk("mallory", "dana", ins("mallory"), ""); code != http.StatusForbidden || !says(out, "takes the name they sign in as") {
+		t.Errorf("mallory makes dana: %d %v", code, out)
+	}
+	if code, out := mk("ines", "dana", ins("dana"), ""); code != http.StatusForbidden {
+		t.Errorf("a farm admin makes dana's Party: %d %v", code, out)
+	}
+	p.secret()
+	// dana's HUD name, under a subject the Secret doesn't give her
+	if code, out := mk("dana", "dana", ins("dana", sso+" 00u-other"), p.token("00u-other")); code != http.StatusForbidden || !says(out, "signs in by the c4-sign-ins Secret") {
+		t.Errorf("dana's Party on a subject the Secret doesn't give her: %d %v", code, out)
+	}
+	if code, out := mk("mallory", "dana", ins("mallory", sso+" 00u-mallory"), p.token("00u-mallory")); code != http.StatusForbidden {
+		t.Errorf("mallory makes dana, proving her own subject: %d %v", code, out)
+	}
+	if code, out := mk("dana-sso", "dana", ins("dana@studio.example", sso+" "+peopletest.DanaSub), p.token(peopletest.DanaSub)); code != http.StatusOK {
+		t.Errorf("dana makes her Party, proving the subject the Secret gives her: %d %v", code, out)
+	}
+	// once, and one subject is one person's
+	if code, out := mk("dana", "dana2", ins("dana", sso+" "+peopletest.DanaSub), p.token(peopletest.DanaSub)); code != http.StatusConflict {
+		t.Errorf("a second Party on dana's subject: %d %v", code, out)
+	}
+}
+
+// On a farm its owner runs, a farm admin may name themselves an
+// organisation's first admin, a small studio's one admin; they count only
+// once they accept with their own touched act, booked, and the Party says
+// who named whom and when they accepted. On a managed farm they may not
+// (TestPartiesAndMembers).
+func TestPartySelfNamedOnASelfRunFarm(t *testing.T) {
+	p := newPartyRig(t)
+	ctx := context.Background()
+	p.bind(t, "kestrel", "")
+	p.people(t, "ines", "noor")
+	body := kestrel()
+	body["firstAdmin"] = "ines"
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", body, nil); code != http.StatusOK {
+		t.Fatalf("ines names herself on a self-run farm: %d %v", code, out)
+	}
+	p.uid(t, "kestrel")
+	_, ines := p.viewer("ines")
+	if p.s.holdsFor(ctx, ines, "kestrel", PurposeAdmin) {
+		t.Fatal("ines is kestrel's admin before she accepts")
+	}
+	if fa := p.party(t, "kestrel", "noor").FirstAdmin; fa == nil || !fa.SelfNamed || fa.Accepted {
+		t.Errorf("kestrel's first admin before she accepts: %+v", fa)
+	}
+	if code, out := p.accept(t, "kestrel", "ines", "ines", true); code != http.StatusOK {
+		t.Fatalf("ines accepts: %d %v", code, out)
+	}
+	fa := p.party(t, "kestrel", "noor").FirstAdmin
+	if fa == nil || !fa.SelfNamed || !fa.Accepted || fa.At.IsZero() || fa.Record == "" {
+		t.Errorf("kestrel's first admin after she accepts: %+v", fa)
+	}
+	if !p.s.holdsFor(ctx, ines, "kestrel", PurposeAdmin) {
+		t.Error("ines is no admin after accepting")
+	}
+	p.seal(t)
 }

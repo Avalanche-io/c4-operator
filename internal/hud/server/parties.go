@@ -521,8 +521,12 @@ func (s *Server) partyView(ctx context.Context, p *c4v1.Party, view *farmbook.Vi
 	}
 	if _, fa := madeBy(view, p.Name); fa != "" {
 		out.FirstAdmin = &api.FirstAdmin{Person: fa}
+		if q := findParty(st.parties, fa); st != nil && q != nil && slices.Contains(q.Spec.SignIns, c4v1.PartySignIn{Subject: p.Spec.Made.By}) {
+			// the farm admin who made it named themselves
+			out.FirstAdmin.SelfNamed = true
+		}
 		if acc := farmbook.AdminAccepted(view.All(), p.Name); acc != nil {
-			out.FirstAdmin.Accepted, out.FirstAdmin.Record = true, acc.Entry.Record
+			out.FirstAdmin.Accepted, out.FirstAdmin.Record, out.FirstAdmin.At = true, acc.Entry.Record, acc.Time
 		}
 	}
 	var ps []c4v1.Party
@@ -674,6 +678,16 @@ func (s *Server) partyWriteRefusal(r *http.Request, v *api.Viewer) (int, string)
 	return 0, ""
 }
 
+// managedFarm says whether the farm is run for another party: its binding
+// names a runFor (ORGANIZATION 6). There a farm admin who makes an
+// organisation never names themselves its first admin; on a farm its
+// owner runs they may, since a small studio's farm admin is often its one
+// admin, and they still count only once they accept, booked.
+func (s *Server) managedFarm(ctx context.Context) bool {
+	b, err := s.farmBinding(ctx)
+	return err != nil || b != nil && b.Spec.RunFor != ""
+}
+
 // farmAdminMakes is the farm admin's right making an organisation takes
 // (DESIGN D8): create on parties, or for a development viewer the
 // farm-admin role or every role (devrights). name "" asks of any party.
@@ -688,9 +702,8 @@ func (s *Server) farmAdminMakes(ctx context.Context, r *http.Request, v *api.Vie
 //   - makeOwnParty: make their own person Party now, by the guard, no
 //     Party listing their sign-in yet. One who signs in by the
 //     c4-sign-ins Secret proves their subject as they do;
-//   - bindingOwner: the farm binding's owner: the owner's person Party's
-//     person, or, while the farm keeps no Party of the owner's name, the
-//     one signed in as it.
+//   - bindingOwner: the farm binding's owner: the person of the owner's
+//     person Party, through its sign-ins; no one before it exists.
 func (s *Server) withPartyRights(r *http.Request, v *api.Viewer) *api.Viewer {
 	out := *v
 	ctx := r.Context()
@@ -700,8 +713,9 @@ func (s *Server) withPartyRights(r *http.Request, v *api.Viewer) *api.Viewer {
 	}
 	person := s.partyPerson(v, ps)
 	if b, err := s.farmBinding(ctx); err == nil && b != nil && v.Unit == nil {
+		// through the owner's person Party's sign-ins alone (R1)
 		owner := findParty(ps, b.Spec.Owner)
-		out.BindingOwner = owner == nil && v.User == b.Spec.Owner || owner != nil && person == owner.Name
+		out.BindingOwner = owner != nil && owner.Spec.Kind == c4v1.PartyPerson && person == owner.Name
 	}
 	if code, _ := s.partyWriteRefusal(r, v); code != 0 {
 		return &out
@@ -869,29 +883,32 @@ func standInRefusal(w http.ResponseWriter, who, x string, err error) {
 	fail(w, http.StatusConflict, "signIns: %s is %s's in the c4-sign-ins Secret; one sign-in is one person's", x, who)
 }
 
-// leavesTheSecret checks a person Party named party keeps its person
-// signed in at the people's issuer: where the c4-sign-ins Secret signs in
-// a person of that name, whose lines are ignored once the Party exists,
-// the Party must carry one of those subjects, proved (R2, R6). It returns
-// why not, or "".
-func (s *Server) leavesTheSecret(ctx context.Context, party string, proved *c4v1.PartySignIn) (string, error) {
-	if s.StandInSignIns == nil {
-		return "", nil
+// nameIsTheirs checks a person Party's name is its maker's (R2, R6): the
+// name they sign in as; or, where the c4-sign-ins Secret signs in a person
+// of that name, the name of a subject they prove, one of its lines for
+// them, which also keeps them signed in once the Party makes the Secret's
+// lines for them count for nothing. Names are never reused, so nobody
+// takes another's. It returns why not, or "".
+func (s *Server) nameIsTheirs(ctx context.Context, v *api.Viewer, name string, proved *c4v1.PartySignIn) (string, error) {
+	var lines []people.SignIn
+	if s.StandInSignIns != nil {
+		stand, err := s.StandInSignIns.Load(ctx)
+		if err != nil {
+			return "", err
+		}
+		lines = stand[name]
 	}
-	stand, err := s.StandInSignIns.Load(ctx)
-	if err != nil {
-		return "", err
-	}
-	lines := stand[party]
-	if len(lines) == 0 {
-		return "", nil
-	}
-	if proved != nil && slices.ContainsFunc(lines, func(y people.SignIn) bool {
+	switch {
+	case len(lines) > 0 && proved != nil && slices.ContainsFunc(lines, func(y people.SignIn) bool {
 		return y.Subject == proved.Subject && people.CanonicalIssuer(y.Issuer) == proved.Issuer
-	}) {
+	}):
 		return "", nil
+	case len(lines) > 0:
+		return fmt.Sprintf("%s signs in by the c4-sign-ins Secret, which a Party of that name replaces: list one of its subjects among signIns and prove it (idToken), so the Party is theirs and keeps them signed in", name), nil
+	case name != v.User:
+		return fmt.Sprintf("name: a person's Party takes the name they sign in as (%s), or the name the c4-sign-ins Secret gives a subject they prove", v.User), nil
 	}
-	return fmt.Sprintf("%s signs in by the c4-sign-ins Secret, which a Party of that name replaces: list one of its subjects among signIns and prove it (idToken), so the Party keeps them signed in", party), nil
+	return "", nil
 }
 
 // partyPredicate is a party write's control record, before its act.
@@ -1024,8 +1041,9 @@ func (s *Server) handleMakeParty(w http.ResponseWriter, r *http.Request) {
 		case fa == nil || fa.Spec.Kind != c4v1.PartyPerson:
 			fail(w, http.StatusBadRequest, "firstAdmin: %s is no person Party: the first admin is a person, with a Party of their own", body.FirstAdmin)
 			return
-		case person != "" && body.FirstAdmin == person:
-			fail(w, http.StatusForbidden, "firstAdmin: making a Party never makes its maker its admin: another farm admin names you, or name the person who is")
+		case person != "" && body.FirstAdmin == person && s.managedFarm(ctx):
+			// a provider's admin is never thereby the studio's admin
+			fail(w, http.StatusForbidden, "firstAdmin: this farm is run for another party (its binding's runFor), and making a Party never makes its maker its admin: name the person who is")
 			return
 		}
 		authz = s.authorization(v, "create", "parties", "", body.Name)
@@ -1051,7 +1069,7 @@ func (s *Server) handleMakeParty(w http.ResponseWriter, r *http.Request) {
 			standInRefusal(w, who, x, err)
 			return
 		}
-		switch why, err := s.leavesTheSecret(ctx, body.Name, proved); {
+		switch why, err := s.nameIsTheirs(ctx, v, body.Name, proved); {
 		case err != nil:
 			fail(w, http.StatusServiceUnavailable, "the c4-sign-ins Secret: %v", err)
 			return

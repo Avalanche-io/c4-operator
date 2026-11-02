@@ -94,9 +94,15 @@ type Party struct {
 // FirstAdmin is an organisation's first admin: a member, holding member
 // and admin, only once they accept with their own touched act.
 type FirstAdmin struct {
-	Person   string `json:"person"`
-	Accepted bool   `json:"accepted"`
-	Record   string `json:"record,omitempty"`
+	Person string `json:"person"`
+	// SelfNamed: the farm admin who made the organisation named
+	// themselves (a farm its owner runs only).
+	SelfNamed bool `json:"selfNamed,omitempty"`
+	// Accepted, At and Record: they accepted, when their accept-admin
+	// entry counts from, and its record.
+	Accepted bool      `json:"accepted"`
+	At       time.Time `json:"at,omitzero"`
+	Record   string    `json:"record,omitempty"`
 }
 
 // PartyAct is one signed change to a party.
