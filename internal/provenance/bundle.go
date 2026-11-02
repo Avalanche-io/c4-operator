@@ -152,6 +152,9 @@ type Verified struct {
 	// Runner is the host runner (its Node) a host unit's leaf names: the
 	// unit's key was issued through it and is held by it.
 	Runner string
+	// Binding is the deployment binding the signer's leaf names, by its
+	// record's C4 ID (CertBinding): "" for a signer certified unbound.
+	Binding string
 	// TouchDevice is a confirmed act's touch key, by its device ID: the
 	// second of its two signatures.
 	TouchDevice string
@@ -321,7 +324,7 @@ func VerifyBundle(data []byte, roots *x509.CertPool) (*Verified, error) {
 	}
 	v := &Verified{Identity: CertIdentity(leaf), PredicateType: st.PredicateType, Subjects: st.Subject,
 		Predicate: st.Predicate, SignedAt: when.SignedAt, Payload: payload, Farm: farm,
-		Device: CertDevice(leaf), Grant: CertGrant(leaf), Runner: CertRunner(leaf), Expires: leaf.NotAfter}
+		Device: CertDevice(leaf), Grant: CertGrant(leaf), Runner: CertRunner(leaf), Binding: CertBinding(leaf), Expires: leaf.NotAfter}
 	if v.Device != "" && v.Device != CertDeviceID(leaf) {
 		return nil, fmt.Errorf("%w: the leaf names device %s, but its key is device %s", ErrUntrusted, v.Device, CertDeviceID(leaf))
 	}

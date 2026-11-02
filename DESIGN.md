@@ -1396,8 +1396,49 @@ new binding that follows the old one. Being bound to someone is not using
 the farm alone: who holds every role comes from a binding the installer
 marks `onePerson` (only a local farm's bind request does), part of the
 signed record, and from `--single-person-farm` only on a farm with no
-binding. A shared farm bound to a person leaves stand-in to its policy. Bindings for single deployments, such as a node another
-party owns, refine it later.
+binding. A shared farm bound to a person leaves stand-in to its policy.
+
+**Bindings for one deployment** (accountability DESIGN 3.3, slice S2b)
+override the farm binding for that deployment: a node another party owns,
+a person's own Mac as a host runner, a tracker's sync, a project's
+importer, a manager component.
+- **What it names.** Its `to` names exactly one identity the farm CA
+  certifies (`<farm>/node/<name>`, `runner/<name>`, `sync/<tracker>`,
+  `import/<project>`, `component/{hud,queue,controller}`), and its `for`
+  only narrows what the signer policy lets that deployment sign
+  (`provenance.NarrowsOnly`): a node never signs control records. The HUD
+  refuses a wider one at the act, and the queue again at the seal.
+- **Who makes it.** A farm admin, by a signed `bind` act on the touch list
+  (`POST /api/v1/bindings`). Until Parties (ORGANIZATION O1) the farm admin
+  is the farm binding's owner, behind one function (`bindingAdmin`) that O1
+  replaces. Components are the farm owner's on a farm its owner runs; a
+  managed farm's, countersigned, are O6's.
+- **Precedence and time.** The most specific binding in force wins, matched
+  byte for byte, else the farm binding. It is in force by the farm book
+  (`InForceAt`, `ForceBinding`), from its bind's position to its
+  `end-binding`, to the bind of the binding that `follows` it (which ends
+  it at the same position, the changeover, so two never overlap), or to its
+  `end`.
+- **Certificates.** The workload issuer, and the components' in-process
+  issuer, certify a deployment under the binding in force for it: the leaf
+  names it (`urn:c4:binding:<C4 ID of its record>`, `Verified.Binding`) and
+  never outlives its `end`. An identity no binding covers is still
+  certified, naming none, until strict accountability (K8). The farm
+  binding covers `<farm>/*`, so every identity certified today stays bound.
+- **Verifiers** follow certificate, binding, owner: a farm book entry by
+  book order, a record no book names yet by the farm's bindings. A signer
+  with no binding, or one not in force for it there, is labelled
+  `unattributed: deployment has no owner`; a record booked after its
+  binding ended early, `revoked`. Before K8 a label never refuses.
+- **What "ended" means.** Ending a binding early (`end-binding`, by its
+  owner silently, or by a farm admin with a touch) stops new certificates
+  under it at once. Certificates already issued live out their hour (a
+  host runner's, an importer's, a unit's) or day (a node daemon's, a
+  component's), so the deployment can go on signing until they lapse; what
+  it signs after the end is booked after it, and labelled `revoked`. Ended
+  never means no more signatures that second. Revoking a key at once is
+  compromise, a revocation dated in the past (accountability DESIGN 5.4),
+  which comes later.
 
 **Links.** A Materialization may name the record of its source (annotation
 `c4.avalanche.io/source-record`): the controller verifies it before

@@ -39,6 +39,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/auth"
+	"github.com/Avalanche-io/c4-operator/internal/bindings"
 	"github.com/Avalanche-io/c4-operator/internal/controller"
 	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/hud"
@@ -189,6 +190,16 @@ func runManager(args []string) error {
 	book, err := newFarmBook(ctx, sig, kube, mgr, *signingNS, *systemStore, *farmBookSeal)
 	if err != nil {
 		return err
+	}
+	if sig.ca != nil {
+		// Deployments are certified under the binding in force for them
+		// (DESIGN 3.3), read uncached so an end counts at once, and judged
+		// by the farm book where the farm keeps one.
+		r := &bindings.Resolver{Client: mgr.GetAPIReader()}
+		if book != nil {
+			r.Book = book.newReader()
+		}
+		sig.useBindings(r)
 	}
 	if book != nil && !*work {
 		log.Info("--system-store without --work: nothing seals the farm book, and its entries wait")

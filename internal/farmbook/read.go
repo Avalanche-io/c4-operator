@@ -457,8 +457,10 @@ const (
 	// ForceGrant is a person's submit grant to a tracker: opened by a grant
 	// control record, closed by its revoke, and ending at its until.
 	ForceGrant = "grant"
-	// ForceBinding is a deployment binding: opened by a bind control
-	// record. A binding's end comes with slice 2's bindings (S2b).
+	// ForceBinding is a deployment binding, by its subject
+	// (BindingSubject): opened by a bind control record, closed by an
+	// end-binding or by a bind that follows it (its Ends), and ending at
+	// its end.
 	ForceBinding = "binding"
 	// ForceMembership is a tracker login confirmed as a person, the people
 	// map: opened by people-confirm, closed by people-revoke. An
@@ -479,7 +481,7 @@ const DeviceLapse = 90 * 24 * time.Hour
 // opens and closes are the control acts that open and close each kind.
 var (
 	opens  = map[string]string{ForceGrant: "grant", ForceBinding: "bind", ForceMembership: "people-confirm"}
-	closes = map[string]string{ForceGrant: "revoke", ForceMembership: "people-revoke"}
+	closes = map[string]string{ForceGrant: "revoke", ForceBinding: "end-binding", ForceMembership: "people-revoke"}
 )
 
 // InForce is the entry that put key in force at sealed position pos, or
@@ -539,6 +541,11 @@ func InForceAt(es []*Sealed, kind, key string, at time.Time) (*Sealed, error) {
 	var on *Sealed
 	for _, s := range es {
 		e := s.Entry
+		if kind == ForceBinding && e.Kind == KindControl && e.Act == "bind" && e.Ends == key {
+			// a binding that follows it ends it at the changeover
+			on = nil
+			continue
+		}
 		if e.Kind != KindControl || e.Subject != key {
 			continue
 		}

@@ -85,8 +85,11 @@ type Entry struct {
 	Device   string `json:"device,omitempty"`
 	TouchFor string `json:"touchFor,omitempty"`
 	// Expires is when what the entry books stops being in force by itself:
-	// a grant's until.
+	// a grant's until, a binding's end.
 	Expires string `json:"expires,omitempty"`
+	// Ends is the binding a bind that follows another ends, by its subject:
+	// the two meet at this entry's position, the changeover.
+	Ends string `json:"ends,omitempty"`
 }
 
 func (e *Entry) expires() time.Time {

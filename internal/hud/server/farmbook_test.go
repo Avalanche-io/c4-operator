@@ -39,6 +39,7 @@ type bookHUD struct {
 	ptr    *farmbook.MemoryPointer
 	own    *farmbook.MemorySealer
 	sealer *farmbook.Sealer
+	ca     *provenance.CA
 }
 
 // devices admits the people's issuer's device entries as written, in place
@@ -77,7 +78,7 @@ func newBookHUD(t *testing.T, objs ...runtime.Object) *bookHUD {
 	s.Client = fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objs...).Build()
 	roots := x509.NewCertPool()
 	roots.AddCert(ca.Cert)
-	b := &bookHUD{s: s, roots: roots, farm: provenance.FarmID(ca.Cert), store: &farmbook.MemoryStore{}, ptr: &farmbook.MemoryPointer{}, own: &farmbook.MemorySealer{}}
+	b := &bookHUD{s: s, roots: roots, ca: ca, farm: provenance.FarmID(ca.Cert), store: &farmbook.MemoryStore{}, ptr: &farmbook.MemoryPointer{}, own: &farmbook.MemorySealer{}}
 	s.FarmBook = &farmbook.Writer{Store: b.store, Pointer: b.ptr}
 	s.FarmBookReader = &farmbook.Reader{Farm: b.farm, Roots: roots, Store: b.store, Pointer: b.ptr, Own: b.own}
 	b.sealer = &farmbook.Sealer{Farm: b.farm, Roots: roots, Store: b.store, Pointer: b.ptr, Own: b.own, Signer: queue, Log: logr.Discard(),

@@ -861,6 +861,35 @@ func TestBindingsOnlyFromTheHUD(t *testing.T) {
 	if err := admin.Delete(ctx, b); err == nil {
 		t.Error("an admin deleted the farm binding")
 	}
+
+	// A binding for one deployment names exactly one; its spec never
+	// changes, and its early end is set once, never changed or taken back.
+	for _, to := range []string{"laptop-1/node", "laptop-1/node/", "laptop-1/sa/show-a/x", "laptop-1/component/issuer", "laptop-1/node/Laptop"} {
+		bad := mk("bad-"+fmt.Sprint(len(to)), "noor")
+		bad.Spec.To = to
+		if err := hud.Create(ctx, bad); err == nil {
+			t.Errorf("a binding to %q", to)
+		}
+	}
+	node := mk("node-laptop-1", "noor")
+	node.Spec.To = "laptop-1/node/laptop-1"
+	if err := hud.Create(ctx, node); err != nil {
+		t.Fatalf("the HUD binds a node: %v", err)
+	}
+	node.Ended = &c4v1.DeploymentBindingEnd{At: metav1.Now(), By: "noor", Record: "c4end"}
+	if err := hud.Update(ctx, node); err != nil {
+		t.Fatalf("the HUD ends a binding: %v", err)
+	}
+	again := node.DeepCopy()
+	again.Ended.Record = "c4other"
+	if err := hud.Update(ctx, again); err == nil || !strings.Contains(err.Error(), "a binding's end never changes") {
+		t.Errorf("the HUD changed a binding's end: %v", err)
+	}
+	back := node.DeepCopy()
+	back.Ended = nil
+	if err := hud.Update(ctx, back); err == nil || !strings.Contains(err.Error(), "never taken back") {
+		t.Errorf("the HUD took a binding's end back: %v", err)
+	}
 }
 
 // The farm's telemetry setting is the manager's alone to write: an admin

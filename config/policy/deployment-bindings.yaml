@@ -1,7 +1,9 @@
 # A deployment binding (DESIGN.md section 9.2) says whom the records a
 # deployment signs accrue to. The farm binding, made at install, names the
-# farm's owner. Only the HUD writes one, for the installer, with its
-# signed control record (internal/hud/server/binding.go). Nobody else
+# farm's owner; a binding for one deployment overrides it for that
+# deployment. Only the HUD writes one, for the installer or a farm admin,
+# with its signed control record (internal/hud/server/binding.go,
+# bindings.go), and marks one ended (its ended, set once). Nobody else
 # creates, changes or deletes one, so no one can make a farm accountable to
 # someone who never bound it, or take a binding off the trail. A binding
 # never changes (the CRD's spec rule): a new owner is a new binding that
@@ -21,7 +23,7 @@ spec:
       resources: [deploymentbindings]
   validations:
   - expression: request.userInfo.username == 'system:serviceaccount:c4-system:c4-manager'
-    message: a farm's owner is bound in the HUD (POST /api/v1/farm/binding), never written directly
+    message: deployments are bound in the HUD (POST /api/v1/farm/binding, /api/v1/bindings), never written directly
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

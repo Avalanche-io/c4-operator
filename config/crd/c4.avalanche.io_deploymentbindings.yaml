@@ -27,6 +27,9 @@ spec:
     - jsonPath: .spec.start
       name: Since
       type: string
+    - jsonPath: .ended.at
+      name: Ended
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -35,14 +38,16 @@ spec:
           the records they sign accrue to: a sign grant from the owner to the
           deployments (DESIGN.md section 9.2). The farm binding, named farm,
           covers every deployment of the farm (to: <farm>/*) and is made once,
-          when the installer binds the farm to its owner. Bindings for single
-          deployments (a node another party owns, a person's own Mac as a host
-          runner) refine it, never widen it.
+          when the installer binds the farm to its owner. A binding for one
+          deployment (to: <farm>/node/<name>, a node another party owns; a
+          person's own Mac as a host runner) overrides it for that deployment,
+          and only narrows what the signer policy lets it sign.
 
           People never write one. The HUD makes it for the installer
-          (POST /api/v1/farm/binding), signs it as a control
-          record, and is the only writer (the c4-deployment-bindings policy). A
-          binding never changes: a new owner is a new binding that follows it.
+          (POST /api/v1/farm/binding) or a farm admin (POST /api/v1/bindings),
+          signs it as a control record, and is the only writer (the
+          c4-deployment-bindings policy). Its spec never changes: a new owner is
+          a new binding that follows it. Ended is set once, when it ends early.
         properties:
           apiVersion:
             description: |-
@@ -51,6 +56,36 @@ spec:
               may reject unrecognized values.
               More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
+          ended:
+            description: |-
+              Ended is the binding's early end, set once by the act that ended it
+              (end-binding, or a binding that follows it), and never changed.
+            properties:
+              at:
+                description: At is when it ended.
+                format: date-time
+                type: string
+              by:
+                description: By is who ended it, as the HUD recorded them.
+                type: string
+              followedBy:
+                description: |-
+                  FollowedBy is the record of the binding that follows it, when an
+                  owner change ended it.
+                type: string
+              record:
+                description: |-
+                  Record is the C4 ID of the signed control record that ended it: an
+                  end-binding, or the bind of the binding that follows it.
+                type: string
+            required:
+            - at
+            - by
+            - record
+            type: object
+            x-kubernetes-validations:
+            - message: a binding's end never changes
+              rule: self == oldSelf
           kind:
             description: |-
               Kind is a string value representing the REST resource this object represents.
@@ -69,9 +104,16 @@ spec:
               by:
                 description: By is who made it, as the HUD recorded them.
                 type: string
+              end:
+                description: |-
+                  End is when it stops by itself; none is a standing binding, shown
+                  as standing until the farm has an annual review.
+                format: date-time
+                type: string
               follows:
-                description: Follows names the binding this one replaces (an owner
-                  change).
+                description: |-
+                  Follows names the binding this one replaces (an owner change), by
+                  its record's C4 ID: the two meet at this one's start.
                 type: string
               for:
                 description: For lists the record kinds the deployments sign under
@@ -117,9 +159,13 @@ spec:
                 format: date-time
                 type: string
               to:
-                description: 'To names the deployments bound: <farm>/* for the farm
-                  binding.'
-                pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?/\*$
+                description: |-
+                  To names the deployments bound: <farm>/* for the farm binding, or
+                  exactly one deployment: <farm>/node/<name>, <farm>/runner/<name>,
+                  <farm>/sync/<tracker>, <farm>/import/<project> or
+                  <farm>/component/{hud,queue,controller} (BindingToPattern).
+                maxLength: 330
+                pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?/(\*|(node|runner|sync|import)/[a-z0-9]([-.a-z0-9]{0,251}[a-z0-9])?|component/(hud|queue|controller))$
                 type: string
             required:
             - by
@@ -135,6 +181,9 @@ spec:
         required:
         - spec
         type: object
+        x-kubernetes-validations:
+        - message: a binding's end is never taken back
+          rule: '!has(oldSelf.ended) || has(self.ended)'
     served: true
     storage: true
     subresources: {}

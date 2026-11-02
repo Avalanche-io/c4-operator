@@ -19,6 +19,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/bindings"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
 	"github.com/Avalanche-io/c4-operator/schema"
@@ -275,6 +276,10 @@ type link struct {
 	Policy  string `json:"policy,omitempty"`
 	About   string `json:"about"`
 	Problem string `json:"problem,omitempty"`
+	// Binding is the signer followed to its deployment binding and owner
+	// (DESIGN 3.3), labelled where it leads to none; never a refusal
+	// before strict accountability (K8).
+	Binding *api.SignerBinding `json:"binding,omitempty"`
 }
 
 // custody is a chain of custody: who vouched for each step from a file
@@ -295,6 +300,9 @@ type custody struct {
 	ctx   context.Context
 	seen  map[string]bool
 	depth int
+	// bound is the farm's bindings, read once when first asked.
+	bound     *bindings.Lookup
+	boundRead bool
 }
 
 const custodyDepth = 4
@@ -332,7 +340,24 @@ func (c *custody) check(l *link, project, recordID, want string) *provenance.Ver
 	if err := provenance.CheckSigner(v); err != nil {
 		l.Policy = err.Error()
 	}
+	l.Binding = c.signer(v)
 	return v
+}
+
+// signer follows a record's signer to its binding and owner, by the
+// farm's bindings: nil for a record signed with a bare farm key, or
+// where the bindings can't be read.
+func (c *custody) signer(v *provenance.Verified) *api.SignerBinding {
+	if !c.boundRead {
+		c.boundRead = true
+		if c.s.Client != nil {
+			c.bound, _ = (&bindings.Resolver{Client: c.s.Client}).Lookup(c.ctx)
+		}
+	}
+	if c.bound == nil || provenance.IdentityDeployment(v.Identity) == "" {
+		return nil
+	}
+	return c.bound.Signer(v.Identity, v.Binding)
 }
 
 func predicate[T any](v *provenance.Verified) T {

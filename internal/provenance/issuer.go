@@ -28,7 +28,10 @@ type IdentifyFunc func(ctx context.Context, token string) (identity string, ttl 
 type Issuer struct {
 	CA       *CA
 	Identify IdentifyFunc
-	Now      func() time.Time
+	// Bind, when set, finds the deployment binding in force for the
+	// identity: its leaf names it and ends by its end (IssueBound).
+	Bind BindFunc
+	Now  func() time.Time
 }
 
 // TooMany is an Identify refusal for asking too often, answered 429 with
@@ -82,7 +85,14 @@ func (i *Issuer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if i.Now != nil {
 		now = i.Now()
 	}
-	cert, err := i.CA.Issue(ed25519.PublicKey(req.PublicKey), identity, ttl, now)
+	var bound Bound
+	if i.Bind != nil {
+		if bound, err = i.Bind(r.Context(), identity); err != nil {
+			http.Error(w, "the deployment bindings: "+err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+	}
+	cert, err := i.CA.IssueBound(ed25519.PublicKey(req.PublicKey), identity, bound, ttl, now)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -149,8 +159,21 @@ func RemoteIssuer(url string, token func() (string, error), hc *http.Client) Iss
 // LocalIssuer issues from a CA in this process, for the components that
 // run beside it (the controller, the queue, the HUD).
 func LocalIssuer(ca *CA, identity string, ttl time.Duration) IssueFunc {
-	return func(_ context.Context, pub ed25519.PublicKey) ([]*x509.Certificate, error) {
-		c, err := ca.Issue(pub, identity, ttl, time.Now())
+	return BoundLocalIssuer(ca, identity, ttl, nil)
+}
+
+// BoundLocalIssuer is LocalIssuer under the deployment binding bind finds
+// for identity, when bind is set (IssueBound).
+func BoundLocalIssuer(ca *CA, identity string, ttl time.Duration, bind BindFunc) IssueFunc {
+	return func(ctx context.Context, pub ed25519.PublicKey) ([]*x509.Certificate, error) {
+		var b Bound
+		if bind != nil {
+			var err error
+			if b, err = bind(ctx, identity); err != nil {
+				return nil, fmt.Errorf("the deployment bindings: %w", err)
+			}
+		}
+		c, err := ca.IssueBound(pub, identity, b, ttl, time.Now())
 		if err != nil {
 			return nil, err
 		}

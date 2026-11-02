@@ -783,8 +783,8 @@ answers `404`.
 ```
 { farm, since, head: { segment, number, position, entry },
   segments: [ <book/v1 bundle> ],
-  entries: [ { id, position, segment, entry, private?, redacted?, act? } ],
-  pending: [ { id, position, entry, private?, redacted?, act? } ],
+  entries: [ { id, position, segment, entry, private?, redacted?, act?, binding? } ],
+  pending: [ { id, position, entry, private?, redacted?, act?, binding? } ],
   more?, next }
 ```
 
@@ -819,6 +819,14 @@ answers `404`.
   a control record that cites one. It is served beside the entry, never in
   it, so the entry's ID is the same with or without it. An entry withheld
   whole has none.
+- `binding` is the entry's record's signer followed to its deployment
+  binding and owner ([Deployment bindings](#deployment-bindings)):
+  `{ binding?, owner?, deployment?, label? }`, judged by the entries before
+  it, at the time it counts from. `label` is `unattributed: deployment has
+  no owner` for a signer certified with no binding, or one not in force
+  for it there, and `revoked` for a record booked after its binding ended
+  early. It is served beside the entry, never in it, and never refuses an
+  entry before strict accountability (K8).
 - A segment's `refused` lists each entry it refused by its C4 ID and a
   `reason`: `missing`, `malformed`, `not-pending`, `other-farm`,
   `unknown-kind`, `unsigned`, `booked`, `record-missing`, `unverified`,
@@ -2317,7 +2325,8 @@ Refused (`403`): a unit, an agent (through MCP, or named in `X-C4-Agent`
 from any client, or a tracker's sync), and a development viewer without the installer's secret (open
 development viewers).
 
-A binding is `{ owner, to, runFor?, onePerson?, onePersonInEffect?, onePersonNote?, for, start, by, record, follows? }`.
+A binding is `{ owner, to, runFor?, onePerson?, onePersonInEffect?, onePersonNote?, for, start, end?, standing?, ended?, by, record, follows?, name, deployment, actOn?, inForce? }`
+(the fields after `follows` are [Deployment bindings](#deployment-bindings)').
 `record` is the signed bind record's C4 ID. The DeploymentBinding also
 carries the record itself (`spec.signed`), so a farm with no project
 store yet still has the proof. Every project's store keeps a copy.
@@ -2338,6 +2347,85 @@ person stays that person's, and standing in for them is the farm's policy
 signed bind record's `change`, and like the owner it never changes in
 place. A shared farm bound to lee, without `onePerson`, has no such
 person: lee keeps lee's own roles and waits. A managed farm never has one.
+
+## Deployment bindings
+
+A binding for one deployment overrides the farm binding for that
+deployment: a node another party owns, a person's own Mac as a host
+runner, a tracker's sync, a project's importer, or one of the manager's
+components. It is a `sign` grant from its owner, made by a farm admin as a
+signed `bind` act (on the touch list, so `confirmed` when the request
+carries its act), kept as a DeploymentBinding, and booked in the farm book.
+It is in force from its booked position (the one rule, `InForceAt`).
+
+| route                          | body                        | answer                                                                                      |
+| ------------------------------ | --------------------------- | ------------------------------------------------------------------------------------------- |
+| `GET /bindings`                |                             | `{ ok, farm, bindings: [binding] }`: every binding, in force or not, the farm binding first |
+| `POST /bindings`               | `{ owner, to, for?, end? }` | `{ ok, message, binding, record }`                                                          |
+| `POST /bindings/{name}/rotate` | `{ owner, for?, end? }`     | `{ ok, message, binding, record }`: a new owner, a binding that follows this one            |
+| `POST /bindings/{name}/end`    | `{ owner }`                 | `{ ok, message, binding, record }`: this binding ended now                                  |
+
+- **`to` names exactly one deployment of this farm,** the identity the farm
+  CA certifies, after the farm binding's farm: `<farm>/node/<name>`,
+  `<farm>/runner/<name>`, `<farm>/sync/<tracker>`, `<farm>/import/<project>`
+  or `<farm>/component/{hud,queue,controller}` (`400` for anything else,
+  the whole farm included: that is `POST /farm/binding`).
+- **`for` only narrows** what the signer policy lets that deployment sign:
+  a node `task/v1`; a host runner `task/v1`, `request/v1`; a tracker's sync
+  `act/v1`, `request/v1`; an importer `import/v1`, `ingest/v1`; the
+  controller `resolution/v1`; the queue `decision/v1`, `job/v1`,
+  `book/v1`; the HUD `control/v1`. None is all of it. A wider `for` is
+  `400` here and refused again at the seal: a node never signs control
+  records, whatever a binding says.
+- **`end`** is when it stops by itself; none makes a standing binding,
+  which the farm page marks "standing" (`standing: true`) until the farm
+  has an annual review.
+- **Who:** a farm admin. Until Parties (ORGANIZATION O1) that is the farm
+  binding's owner; otherwise `403`, as for a unit, an agent, a tracker's
+  sync or a development viewer without the installer's secret. The
+  components are the farm owner's on a farm its owner runs (`400` for
+  another owner); a managed farm's are the provider's with the farm
+  owner's countersignature, which a farm cannot make yet (`409`).
+- **One binding per deployment at a time.** A deployment bound already is
+  `409`, naming its binding: a new owner follows it (`rotate`). The new
+  binding names the one it follows (`follows`, its record's C4 ID), and
+  its one bind entry in the farm book ends the old one at the same
+  position, so the two meet only at the changeover. The old binding shows
+  `ended: { at, by, record, followedBy }`. Only the binding in force is
+  followed (`409`).
+- **Ending one early** is an `end-binding` act on the binding, by its owner
+  or a farm admin. `owner` must name the binding's owner (`400`): an owner
+  ending their own binding gives up only their own authority and needs no
+  touch, like a revoke; anyone else ending it changes who answers for the
+  deployment, so the act needs the confirmed grade (`GET /acts/needs`).
+  The farm binding is not ended (`409`); a binding not in force is `409`.
+  It shows `ended: { at, by, record }`.
+- **What ending means:** the issuer stops certifying under the binding at
+  once. Certificates already issued live out their hour or day, and a
+  record booked after the end is labelled `revoked`; "ended" never means no
+  more signatures that second (DESIGN.md 9.2).
+- An act rotating or ending a binding is on the binding, as `actOn` names
+  it (`deploymentbinding:<name>@<uid>`, at its spec's digest); one making
+  a binding is on the farm, as for `POST /farm/binding`.
+
+**What certificates carry.** The workload issuer certifies a deployment
+under the binding in force for it: the one naming its identity exactly,
+byte for byte, else the farm binding (`<farm>/*`); no other prefix or glob
+counts. The leaf names the binding as a URI SAN, `urn:c4:binding:<C4 ID of
+its record>`, and never outlives its `end`. The controller, queue and HUD,
+certified in the manager's own process, re-certify within seconds when the
+binding in force for them changes. An identity no binding covers is still
+certified, naming none. Where the farm keeps a farm book, a binding is in
+force only while the book says so too; one made before the farm kept a
+book is judged by its object.
+
+**What verifiers show.** A record's signer is followed to its binding and
+owner as `binding: { binding?, owner?, deployment?, label? }`: on each farm
+book entry (`GET /book/farm`), by book order, and on each link of a chain
+of custody (`GET /custody/{ns}/{name}`), whose records no book names yet,
+by the farm's bindings (never `revoked` there). The label is `unattributed:
+deployment has no owner` or `revoked`; before strict accountability (K8)
+a label never refuses a record.
 
 ## Held tracker writes
 

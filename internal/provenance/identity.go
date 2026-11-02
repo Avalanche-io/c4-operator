@@ -172,6 +172,50 @@ func (ca *CA) IssueLeaf(pub crypto.PublicKey, identity, device, grant string, tt
 	return ca.issue(pub, identity, uris, ttl, now)
 }
 
+// Bound is the deployment binding in force for an identity when it is
+// certified: its record's C4 ID and its end (zero for a standing
+// binding). The zero Bound is no binding.
+type Bound struct {
+	ID  string
+	End time.Time
+}
+
+// BindFunc finds the binding in force now for a deployment's identity:
+// the zero Bound for an identity no binding covers.
+type BindFunc func(ctx context.Context, identity string) (Bound, error)
+
+// IssueBound certifies a farm part's Ed25519 key as identity under the
+// binding in force for it (DESIGN 3.3): the leaf names the binding
+// (BindingURN) and never outlives its end. An unbound identity (the zero
+// Bound) is certified as Issue does, naming none, so its records are
+// labelled, not refused, until strict accountability (K8).
+func (ca *CA) IssueBound(pub ed25519.PublicKey, identity string, b Bound, ttl time.Duration, now time.Time) (*x509.Certificate, error) {
+	if b.ID == "" {
+		return ca.Issue(pub, identity, ttl, now)
+	}
+	if len(pub) != ed25519.PublicKeySize {
+		return nil, errors.New("an Ed25519 key is 32 bytes")
+	}
+	if !b.End.IsZero() {
+		if !b.End.After(now) {
+			return nil, fmt.Errorf("binding %.16s ended at %s", b.ID, b.End.UTC().Format(time.RFC3339))
+		}
+		ttl = min(ttl, b.End.Sub(now))
+	}
+	uris, err := LeafURIs(identity, "", "")
+	if err != nil {
+		return nil, fmt.Errorf("identity %q is not under %s: %v", identity, IdentityBase, err)
+	}
+	if !strings.HasPrefix(identity, IdentityBase) {
+		return nil, fmt.Errorf("identity %q is not under %s", identity, IdentityBase)
+	}
+	u, err := url.Parse(BindingURN + b.ID)
+	if err != nil {
+		return nil, err
+	}
+	return ca.issue(pub, identity, append(uris, u), ttl, now)
+}
+
 // IssueHostUnit certifies a host unit's Ed25519 key as identity (a unit's
 // attempt), naming the host runner it was issued through and is held by
 // (RunnerURN, the runner's Node).
@@ -227,6 +271,7 @@ type IssueFunc func(ctx context.Context, pub ed25519.PublicKey) ([]*x509.Certifi
 // It renews its certificate at half its lifetime.
 type Signer struct {
 	issue IssueFunc
+	stale func(leaf *x509.Certificate) bool
 
 	mu    sync.Mutex
 	key   ed25519.PrivateKey
@@ -242,6 +287,16 @@ func NewSigner(ctx context.Context, issue IssueFunc) (*Signer, error) {
 // LazySigner obtains its certificate when it first signs, or when Ready
 // gets one. A daemon that starts before the issuer can still start.
 func LazySigner(issue IssueFunc) *Signer { return &Signer{issue: issue} }
+
+// RenewWhen makes the signer renew before it signs whenever stale says
+// its leaf is out of date, not only past half its life: a component
+// certified in its own process re-certifies when the binding in force
+// for it changes. A failed renewal keeps the leaf it has while it lasts.
+func (s *Signer) RenewWhen(stale func(leaf *x509.Certificate) bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stale = stale
+}
 
 // Ready tries to obtain a certificate every interval until one is issued
 // or ctx ends.
@@ -307,13 +362,14 @@ func (s *Signer) current(ctx context.Context, now time.Time) (ed25519.PrivateKey
 	if len(s.chain) > 0 {
 		leaf = s.chain[0]
 	}
+	stale := s.stale
 	s.mu.Unlock()
 	switch {
 	case leaf == nil:
 		if err := s.renew(ctx); err != nil {
 			return nil, nil, fmt.Errorf("no signing certificate yet: %w", err)
 		}
-	case now.After(leaf.NotBefore.Add(leaf.NotAfter.Sub(leaf.NotBefore) / 2)):
+	case now.After(leaf.NotBefore.Add(leaf.NotAfter.Sub(leaf.NotBefore)/2)) || stale != nil && stale(leaf):
 		if err := s.renew(ctx); err != nil && now.After(leaf.NotAfter) {
 			return nil, nil, fmt.Errorf("signing certificate expired and renewal failed: %w", err)
 		}

@@ -72,6 +72,10 @@ const (
 	// issued through and is held by: the unit runs there, and its acts are
 	// what that runner vouches for.
 	RunnerURN = "urn:c4:runner:"
+	// BindingURN names, on a deployment's leaf, the deployment binding in
+	// force for it when it was certified, by the C4 ID of the binding's
+	// record (DESIGN 3.3): a verifier follows it to the binding's owner.
+	BindingURN = "urn:c4:binding:"
 )
 
 // LeafURIs are the URI SANs of a leaf: its identity, then its device or
@@ -106,6 +110,10 @@ func CertGrant(c *x509.Certificate) string { return certURN(c, GrantURN) }
 
 // CertRunner is the host runner (its Node) a host unit's leaf names, or "".
 func CertRunner(c *x509.Certificate) string { return certURN(c, RunnerURN) }
+
+// CertBinding is the deployment binding a leaf names, or "": none for a
+// leaf certified while no binding was in force for its identity.
+func CertBinding(c *x509.Certificate) string { return certURN(c, BindingURN) }
 
 func certURN(c *x509.Certificate, prefix string) string {
 	for _, u := range c.URIs {

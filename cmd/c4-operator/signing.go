@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -21,6 +22,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/auth"
+	"github.com/Avalanche-io/c4-operator/internal/bindings"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 )
 
@@ -48,6 +50,38 @@ type signing struct {
 	// listener stays the workloads'. Nil where the install names no
 	// people's store.
 	people http.Handler
+	// bindings finds the deployment binding in force for an identity,
+	// once the manager can read them (useBindings); until then every
+	// identity is certified unbound.
+	bindings atomic.Pointer[bindings.Resolver]
+}
+
+// bind is the deployment binding in force for identity, or none before
+// the manager reads them: what the workload issuer and the components'
+// own certificates are issued under (DESIGN 3.3).
+func (s *signing) bind(ctx context.Context, identity string) (provenance.Bound, error) {
+	r := s.bindings.Load()
+	if r == nil {
+		return provenance.Bound{}, nil
+	}
+	return r.Bind(ctx, identity)
+}
+
+// componentRecheck is how often a component's signer asks whether the
+// binding in force for it changed.
+var componentRecheck = 5 * time.Second
+
+// useBindings certifies under the farm's deployment bindings from now on:
+// the workload issuer at once, and the components (controller, queue,
+// HUD), certified in this process, re-certify whenever the binding in
+// force for them changes, not only at half their life.
+func (s *signing) useBindings(r *bindings.Resolver) {
+	s.bindings.Store(r)
+	for _, sg := range []*provenance.Signer{s.controller, s.queue, s.hud} {
+		if sg != nil {
+			sg.RenewWhen(r.Stale(componentRecheck))
+		}
+	}
 }
 
 // setupSigning loads or creates the CA, publishes its certificate, and
@@ -71,7 +105,7 @@ func setupSigning(ctx context.Context, kube kubernetes.Interface, caNamespace, n
 	}
 	s := &signing{ca: ca, roots: roots, pool: pool}
 	for name, dst := range map[string]**provenance.Signer{"controller": &s.controller, "queue": &s.queue, "hud": &s.hud} {
-		sg, err := provenance.NewSigner(ctx, provenance.LocalIssuer(ca, provenance.ComponentIdentity(name), 24*time.Hour))
+		sg, err := provenance.NewSigner(ctx, provenance.BoundLocalIssuer(ca, provenance.ComponentIdentity(name), 24*time.Hour, s.bind))
 		if err != nil {
 			return nil, err
 		}
@@ -163,7 +197,7 @@ func issuerRunnable(s *signing, kube kubernetes.Interface, projects client.Reade
 func workloadIssuer(s *signing, kube kubernetes.Interface, projects client.Reader, namespace string, only func(*auth.Identity) error) *provenance.Issuer {
 	rev := &auth.Reviewer{Client: kube, Tier: "signer"}
 	pods := &podLimits{}
-	return &provenance.Issuer{CA: s.ca, Identify: func(ctx context.Context, token string) (string, time.Duration, error) {
+	return &provenance.Issuer{CA: s.ca, Bind: s.bind, Identify: func(ctx context.Context, token string) (string, time.Duration, error) {
 		id, err := rev.Review(ctx, token, AudienceSigner)
 		if err != nil {
 			return "", 0, err

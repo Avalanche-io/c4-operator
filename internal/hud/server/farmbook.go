@@ -195,6 +195,7 @@ func (s *Server) handleFarmBook(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			es[k].Act = s.FarmBookReader.Act(ctx, view, es[k].Position)
+			es[k].Binding = s.FarmBookReader.Signer(ctx, view, es[k].Position)
 		}
 	}
 	writeJSON(w, http.StatusOK, page)

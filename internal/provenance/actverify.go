@@ -93,12 +93,27 @@ var actNeeds = map[string]ActNeed{
 // can't be read (an act's params by their C4 ID), the act needs the most
 // the kind can.
 func ActNeeds(act string, params json.RawMessage, at time.Time) ActNeed {
+	return ActNeedsBy(act, params, at, "")
+}
+
+// ActNeedsBy is ActNeeds for an act signed by person (a person's name, or
+// "" for any signer), for the kinds whose need turns on who signs: a
+// binding's owner ending their own binding gives up only their own
+// authority, silent like a revoke; anyone else ending it (the farm owner,
+// the old owner gone) changes who answers for a deployment, a touch
+// (accountability). The HUD checks params.owner is the binding's owner.
+func ActNeedsBy(act string, params json.RawMessage, at time.Time, person string) ActNeed {
 	if n, ok := actNeeds[act]; ok {
 		return n
 	}
 	var p map[string]any
 	readable := json.Unmarshal(params, &p) == nil
 	switch act {
+	case "end-binding":
+		if owner, _ := p["owner"].(string); readable && person != "" && owner == person {
+			return personOnly
+		}
+		return touched
 	case "decide":
 		// Deciding a person's wait is a person's (DESIGN 6). An agent may
 		// decide a wait that names it, when the params say whose wait it
@@ -137,6 +152,7 @@ func ActNeedsList() (map[string]ActNeed, map[string]string) {
 		"decide":         "a person's, which a tracker's relay may carry; an agent decides a wait that names it (params.waitsFor agent:<name>)",
 		"accountability": "a person's; confirmed, unless it turns strict accountability fully on (mode strict, every on-key refuse)",
 		"remove-device":  "a person's; confirmed when params.from is before the act",
+		"end-binding":    "a person's; confirmed unless params.owner is the signer, the binding's own owner ending it",
 	}
 }
 
@@ -211,7 +227,7 @@ func checkAct(v *Verified) (*schema.Act, error) {
 	case !confirmed && v.Confirmed():
 		return nil, fmt.Errorf("a touch key signed the act, and it is graded %s", by.Grade)
 	}
-	need := ActNeeds(p.Act, p.Params, v.SignedAt)
+	need := ActNeedsBy(p.Act, p.Params, v.SignedAt, by.Person)
 	if need.Person && by.Person == "" && !(need.Relayed && by.User != "") {
 		return nil, fmt.Errorf("%s is a person's act: a unit, an agent, a CI job or a relay may plan it, and a person makes it", p.Act)
 	}

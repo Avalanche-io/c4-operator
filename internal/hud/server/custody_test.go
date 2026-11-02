@@ -23,6 +23,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
@@ -37,11 +38,15 @@ type custodyFarm struct {
 	store *storeurl.Sharded
 	srv   *Server
 	k     client.Client
+	// bound is the binding every signer's leaf names, or none.
+	bound string
 }
 
 func (f *custodyFarm) sign(identity, predicateType string, subjects []provenance.Subject, pred any) string {
 	f.t.Helper()
-	sg, err := provenance.NewSigner(f.ctx, provenance.LocalIssuer(f.ca, identity, time.Hour))
+	sg, err := provenance.NewSigner(f.ctx, provenance.BoundLocalIssuer(f.ca, identity, time.Hour, func(context.Context, string) (provenance.Bound, error) {
+		return provenance.Bound{ID: f.bound}, nil
+	}))
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -71,7 +76,8 @@ func task(node, job, unit string, mat string, in c4.ID) provenance.TaskPredicate
 	}
 }
 
-func newCustodyFarm(t *testing.T) (*custodyFarm, string) {
+// Every signer's leaf names bound[0], when given.
+func newCustodyFarm(t *testing.T, bound ...string) (*custodyFarm, string) {
 	t.Helper()
 	ctx := context.Background()
 	ca, err := provenance.NewCA(time.Now())
@@ -83,6 +89,9 @@ func newCustodyFarm(t *testing.T) (*custodyFarm, string) {
 		t.Fatal(err)
 	}
 	f := &custodyFarm{t: t, ctx: ctx, ca: ca, store: st}
+	if len(bound) > 0 {
+		f.bound = bound[0]
+	}
 	plates, renderOut, denoiseOut := idOf("plates"), idOf("render output"), idOf("denoise output")
 
 	ingest := f.sign(provenance.ServiceAccountIdentity("show-a", "ingest"), provenance.PredicateIngest,
@@ -125,7 +134,9 @@ func newCustodyFarm(t *testing.T) (*custodyFarm, string) {
 	certPEM, _, _ := ca.PEM()
 	kube := kfake.NewSimpleClientset(&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "c4-system", Name: KeysConfigMap},
 		Data: map[string]string{"ca.crt": string(certPEM)}})
-	hudSigner, err := provenance.NewSigner(ctx, provenance.LocalIssuer(ca, provenance.ComponentIdentity("hud"), time.Hour))
+	hudSigner, err := provenance.NewSigner(ctx, provenance.BoundLocalIssuer(ca, provenance.ComponentIdentity("hud"), time.Hour, func(context.Context, string) (provenance.Bound, error) {
+		return provenance.Bound{ID: f.bound}, nil
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,4 +260,43 @@ func TestCustodyFailsOnAForgedLink(t *testing.T) {
 	if c = f.custody(); c.Complete {
 		t.Fatal("custody complete without the plates' resolution record")
 	}
+}
+
+// The chain of custody follows each record's signer to its binding and
+// owner, by the farm's bindings: a signer certified unbound, or under a
+// binding this farm doesn't have, is labelled unattributed, and the chain
+// still verifies (a label never refuses before K8); under the farm
+// binding, each names its owner.
+func TestCustodyFollowsSignersToTheirOwner(t *testing.T) {
+	check := func(f *custodyFarm, owner, label string) {
+		t.Helper()
+		c := f.custody()
+		if !c.Verified || !c.Complete {
+			t.Fatalf("verified %v complete %v gaps %v", c.Verified, c.Complete, c.Gaps)
+		}
+		n := 0
+		for _, l := range c.Links {
+			if l.Signer == "" {
+				continue
+			}
+			n++
+			if l.Binding == nil || l.Binding.Owner != owner || l.Binding.Label != label {
+				t.Errorf("%s link signed by %s: %+v, want owner %q, label %q", l.Kind, l.Signer, l.Binding, owner, label)
+			}
+		}
+		if n == 0 {
+			t.Fatal("no signed link")
+		}
+	}
+	f, _ := newCustodyFarm(t)
+	check(f, "", farmbook.LabelUnattributed)
+
+	id := idOf("the farm binding").String()
+	f, _ = newCustodyFarm(t, id)
+	check(f, "", farmbook.LabelUnattributed) // this farm has no such binding
+	if err := f.k.Create(f.ctx, &c4v1.DeploymentBinding{ObjectMeta: metav1.ObjectMeta{Name: "farm"}, Spec: c4v1.DeploymentBindingSpec{
+		Owner: "dana", To: "studio/*", For: []string{"task/v1"}, Start: metav1.Now(), By: "dana", Record: id}}); err != nil {
+		t.Fatal(err)
+	}
+	check(f, "dana", "")
 }

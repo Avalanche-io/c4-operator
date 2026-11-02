@@ -51,7 +51,18 @@ const (
 // onePerson holds now: only on a HUD guarded by an installer token.
 func (s *Server) bindingView(b *c4v1.DeploymentBinding) *api.FarmBinding {
 	out := &api.FarmBinding{Owner: b.Spec.Owner, To: b.Spec.To, RunFor: b.Spec.RunFor, OnePerson: b.Spec.OnePerson, For: b.Spec.For,
-		Start: b.Spec.Start.Time, By: b.Spec.By, Record: b.Spec.Record, Follows: b.Spec.Follows}
+		Start: b.Spec.Start.Time, By: b.Spec.By, Record: b.Spec.Record, Follows: b.Spec.Follows,
+		Name: b.Name, Deployment: c4v1.DeploymentOf(b.Spec.To), Standing: b.Spec.End == nil && b.Ended == nil}
+	if b.Spec.End != nil {
+		t := b.Spec.End.Time
+		out.End = &t
+	}
+	if e := b.Ended; e != nil {
+		out.Ended = &api.BindingEnded{At: e.At.Time, By: e.By, Record: e.Record, FollowedBy: e.FollowedBy}
+	}
+	if b.UID != "" {
+		out.ActOn = actOn(bindingSubject(b))
+	}
 	if b.Spec.SingleOwner() != "" {
 		out.OnePersonInEffect, out.OnePersonNote = s.installerGuarded(), onePersonNotInEffect
 		if out.OnePersonInEffect {

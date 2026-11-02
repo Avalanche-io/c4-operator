@@ -222,7 +222,7 @@ func TestRecordBookedOnce(t *testing.T) {
 func TestSegmentLinkChecked(t *testing.T) {
 	r := newRig(t)
 	for _, name := range []string{"a", "b"} {
-		r.book(r.control(r.hud, "bind", "deploymentbinding:"+name, map[string]any{"owner": "noor"}, r.now), nil)
+		r.book(r.control(r.hud, "bind", "deploymentbinding:"+name, map[string]any{"owner": "noor", "to": "studio/*"}, r.now), nil)
 		r.seal()
 	}
 	b := r.read()
@@ -260,7 +260,7 @@ func TestSegmentLinkChecked(t *testing.T) {
 func TestSegmentSignedByTheQueueOnly(t *testing.T) {
 	r := newRig(t)
 	r.sealer.Signer = r.hud
-	r.book(r.control(r.hud, "bind", "deploymentbinding:farm", map[string]any{"owner": "noor"}, r.now), nil)
+	r.book(r.control(r.hud, "bind", "deploymentbinding:farm", map[string]any{"owner": "noor", "to": "studio/*"}, r.now), nil)
 	if _, err := r.sealer.Seal(r.ctx); err == nil || !strings.Contains(err.Error(), "component/queue") {
 		t.Errorf("the sealer kept a segment it signed as the HUD: %v", err)
 	}
@@ -410,7 +410,7 @@ func TestInForceAcrossARemoval(t *testing.T) {
 	r2.book(r2.control(r2.hud, "grant", key, grantChange("dana", r2.now.Add(time.Minute)), r2.now), nil)
 	r2.seal()
 	r2.now = r2.now.Add(2 * time.Minute)
-	r2.book(r2.control(r2.hud, "bind", "deploymentbinding:farm", map[string]any{"owner": "noor"}, r2.now), nil)
+	r2.book(r2.control(r2.hud, "bind", "deploymentbinding:farm", map[string]any{"owner": "noor", "to": "studio/*"}, r2.now), nil)
 	r2.seal()
 	b2 := r2.read()
 	if on, _ := b2.InForce(farmbook.ForceGrant, key, 1); on == nil {
@@ -429,7 +429,7 @@ func TestInForceAcrossARemoval(t *testing.T) {
 // is flagged in its segment, sealed, not refused.
 func TestSignedAtOutsideItsWindowFlagged(t *testing.T) {
 	r := newRig(t)
-	r.book(r.control(r.hud, "bind", "deploymentbinding:farm", map[string]any{"owner": "noor"}, r.now), nil)
+	r.book(r.control(r.hud, "bind", "deploymentbinding:farm", map[string]any{"owner": "noor", "to": "studio/*"}, r.now), nil)
 	r.seal()
 	first := r.now
 	r.now = r.now.Add(10 * time.Second)
@@ -462,7 +462,7 @@ func TestSignedAtOutsideItsWindowFlagged(t *testing.T) {
 func TestEntriesChain(t *testing.T) {
 	r := newRig(t)
 	for _, n := range []string{"a", "b", "c"} {
-		r.book(r.control(r.hud, "bind", "deploymentbinding:"+n, map[string]any{"owner": "noor"}, r.now), nil)
+		r.book(r.control(r.hud, "bind", "deploymentbinding:"+n, map[string]any{"owner": "noor", "to": "studio/*"}, r.now), nil)
 	}
 	r.seal()
 	es := r.read().Entries(0)
@@ -478,7 +478,7 @@ func TestEntriesChain(t *testing.T) {
 		}
 	}
 	// An entry written with a position of its own is refused.
-	e, _ := farmbook.ControlEntry(r.control(r.hud, "bind", "deploymentbinding:d", map[string]any{"owner": "noor"}, r.now), r.now)
+	e, _ := farmbook.ControlEntry(r.control(r.hud, "bind", "deploymentbinding:d", map[string]any{"owner": "noor", "to": "studio/*"}, r.now), r.now)
 	e.Order = farmbook.OrderBook
 	if _, err := r.writer.Append(r.ctx, farmbook.Submission{Entry: e}); err == nil {
 		t.Error("an entry written in the book's order")
@@ -524,7 +524,7 @@ func TestClientRefusesARolledBackPage(t *testing.T) {
 	}
 	r.ptr.Set(newest)
 	// The next read goes on from the kept head.
-	r.book(r.control(r.hud, "bind", "deploymentbinding:farm", map[string]any{"owner": "noor"}, r.now), nil)
+	r.book(r.control(r.hud, "bind", "deploymentbinding:farm", map[string]any{"owner": "noor", "to": "studio/*"}, r.now), nil)
 	r.seal()
 	p := r.page(last.Position)
 	next, err := farmbook.CheckPage(r.farm.ID, r.farm.Roots, last, p)

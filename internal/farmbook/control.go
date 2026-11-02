@@ -15,7 +15,9 @@ import (
 // ControlActs are the farm-level acts the HUD signs as control records and
 // books (DESIGN 5.5), and the field of each record's change that names the
 // person it is about:
-//   - bind: the farm binding to its owner;
+//   - bind: a deployment binding, the farm's or one deployment's, to its
+//     owner, and a binding that follows another (an owner change);
+//   - end-binding: a binding ended early, by its owner or the farm owner;
 //   - grant and revoke: a person's submit grant to a tracker;
 //   - people-confirm and people-revoke: the people map, a tracker login
 //     confirmed as a person and that confirmation ended;
@@ -27,6 +29,7 @@ import (
 // and Tracker changes join as each gets its signed path.
 var ControlActs = map[string]string{
 	"bind":           "owner",
+	"end-binding":    "owner",
 	"grant":          "person",
 	"revoke":         "person",
 	"people-confirm": "person",
@@ -96,13 +99,18 @@ func controlEntry(pred json.RawMessage) (*Entry, error) {
 	if field != "" {
 		e.Person, _ = change[field].(string)
 	}
-	if c.Action == "grant" {
-		if s, _ := change["until"].(string); s != "" {
+	switch c.Action {
+	case "grant", "bind":
+		key := map[string]string{"grant": "until", "bind": "end"}[c.Action]
+		if s, _ := change[key].(string); s != "" {
 			t, err := time.Parse(time.RFC3339Nano, s)
 			if err != nil {
-				return nil, fmt.Errorf("the grant's until %q: %w", s, err)
+				return nil, fmt.Errorf("the %s's %s %q: %w", c.Action, key, s, err)
 			}
 			e.Expires = t.UTC().Format(time.RFC3339Nano)
+		}
+		if c.Action == "bind" {
+			e.Ends, _ = change["ends"].(string)
 		}
 	}
 	return e, nil
@@ -118,7 +126,8 @@ type ControlChecker struct {
 	Roots *x509.CertPool
 	Store Store
 
-	booked map[string]bool
+	booked   map[string]bool
+	bindings bindings
 }
 
 func (c *ControlChecker) Kinds() []string { return []string{KindControl} }
@@ -167,11 +176,16 @@ func (c *ControlChecker) Admit(ctx context.Context, raw []byte, p Placement) ([]
 	for _, d := range []struct{ what, entry, record string }{
 		{"the act", e.Act, want.Act}, {"the subject", e.Subject, want.Subject}, {"who acted", e.By, want.By},
 		{"the person", e.Person, want.Person}, {"the expiry", e.Expires, want.Expires}, {"the change", e.Settings, want.Settings},
+		{"the binding it ends", e.Ends, want.Ends},
 		{"the device", e.Device, ""}, {"the touch key", e.TouchFor, ""},
 	} {
 		if d.entry != d.record {
 			return nil, time.Time{}, Refuse(ReasonDisagrees, fmt.Errorf("the entry and its control record disagree on %s: %.80q, and the record %.80q", d.what, d.entry, d.record))
 		}
+	}
+	apply, err := c.bindings.check(&e, v.Predicate, p.Time)
+	if err != nil {
+		return nil, time.Time{}, Refuse(ReasonRejected, err)
 	}
 	e.Farm, e.Position, e.Prev, e.Order = p.Farm, p.Position, p.Prev, p.Order
 	sealed, _, err := canonical(&e)
@@ -182,6 +196,9 @@ func (c *ControlChecker) Admit(ctx context.Context, raw []byte, p Placement) ([]
 		c.booked = map[string]bool{}
 	}
 	c.booked[e.Record] = true
+	if apply != nil {
+		apply()
+	}
 	return sealed, v.SignedAt, nil
 }
 

@@ -53,6 +53,10 @@ type PageEntry struct {
 	// it (Reader.Act): served beside the entry, never part of it, so the
 	// entry's ID doesn't change for it. None for an entry withheld whole.
 	Act *api.Act `json:"act,omitempty"`
+	// Binding is the entry's record's signer followed to its deployment
+	// binding and owner, by book order (Reader.Signer), with a label where
+	// it leads to none: served beside the entry, never part of it.
+	Binding *api.SignerBinding `json:"binding,omitempty"`
 }
 
 // Redactions a page entry may carry.
