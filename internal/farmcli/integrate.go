@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"text/tabwriter"
 
@@ -130,7 +131,10 @@ func (in *Integration) On(ctx context.Context, o Out) error {
 // c4-farm is pointed here; one the person added is left as it is.
 func (in *Integration) mcpOn(ctx context.Context, o Out) {
 	add := func() ([]byte, error) {
-		return exec.CommandContext(ctx, in.ClaudeBin, "mcp", "add", "--scope", "user", mcpName, "--", in.FarmBin, "mcp").CombinedOutput()
+		// the server signs as the agent with its own key, under the
+		// person's grant (K5): --agent names it
+		args := append([]string{"mcp", "add", "--scope", "user", mcpName, "--", in.FarmBin}, mcpArgs...)
+		return exec.CommandContext(ctx, in.ClaudeBin, args...).CombinedOutput()
 	}
 	out, err := add()
 	switch {
@@ -142,9 +146,9 @@ func (in *Integration) mcpOn(ctx context.Context, o Out) {
 		o.printf("claude    has no farm tools yet: claude mcp add said %s\n", firstLine(string(out), err))
 		return
 	}
-	cmd := mcpCommand()
+	cmd, cargs := mcpCommand()
 	switch {
-	case cmd == "" || cmd == in.FarmBin:
+	case cmd == "" || cmd == in.FarmBin && slices.Equal(cargs, mcpArgs):
 		o.printf("claude    has the farm's tools (%s in %s, already)\n", mcpName, tildePath(mcpConfig()))
 	case in.Record["claude.mcp"]:
 		// c4's own entry, naming a c4-farm moved or replaced: point it here
@@ -153,28 +157,42 @@ func (in *Integration) mcpOn(ctx context.Context, o Out) {
 			o.printf("claude    still runs %s as %s: claude mcp add said %s\n", tildePath(cmd), mcpName, firstLine(string(out), err))
 			return
 		}
+		if cmd == in.FarmBin {
+			o.printf("claude    has the farm's tools (%s in %s), now signing as the agent %s with its own key\n", mcpName, tildePath(mcpConfig()), AgentName)
+			return
+		}
 		o.printf("claude    has the farm's tools (%s in %s, now this c4-farm, not %s)\n", mcpName, tildePath(mcpConfig()), tildePath(cmd))
 	default:
 		o.printf("claude    has an MCP server named %s already, running %s, which c4 did not add: left as it is\n", mcpName, tildePath(cmd))
 	}
 }
 
-// mcpCommand is the command Claude Code runs for the farm's MCP server, as
-// its user config holds it, or "" when it cannot be read.
-func mcpCommand() string {
+// AgentName is the agent c4 farm integrate grants a key: Claude Code on
+// this machine, which the book names agent/claude for its person. Its
+// key's device ID tells one machine's from another's.
+const AgentName = "claude"
+
+// mcpArgs are the MCP server's arguments as integrate registers it.
+var mcpArgs = []string{"mcp", "--agent", AgentName}
+
+// mcpCommand is the command and arguments Claude Code runs for the farm's
+// MCP server, as its user config holds them, or "" when it cannot be read.
+func mcpCommand() (string, []string) {
 	b, err := os.ReadFile(mcpConfig())
 	if err != nil {
-		return ""
+		return "", nil
 	}
 	var cfg struct {
 		MCPServers map[string]struct {
-			Command string `json:"command"`
+			Command string   `json:"command"`
+			Args    []string `json:"args"`
 		} `json:"mcpServers"`
 	}
 	if json.Unmarshal(b, &cfg) != nil {
-		return ""
+		return "", nil
 	}
-	return cfg.MCPServers[mcpName].Command
+	e := cfg.MCPServers[mcpName]
+	return e.Command, e.Args
 }
 
 // Off turns the integration off and takes out what On and agents add put
@@ -192,7 +210,7 @@ func (in *Integration) Off(ctx context.Context, o Out) error {
 	switch {
 	case in.ClaudeBin == "":
 	case !in.Record["claude.mcp"]:
-		if mcpCommand() != "" {
+		if cmd, _ := mcpCommand(); cmd != "" {
 			o.printf("claude    keeps its MCP server %s: c4 did not add it, so it is left as it was\n", mcpName)
 		}
 	default:

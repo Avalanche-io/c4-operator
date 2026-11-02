@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/keystore"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
@@ -382,5 +383,98 @@ func TestNoticeLabelIsPrintable(t *testing.T) {
 	s := ns[0].String()
 	if strings.ContainsAny(s, "\x1b\r\x07‮") || !strings.Contains(s, `calls itself "Safari on your Mac[2K]52;c;ZXZpbA=="`) {
 		t.Errorf("notice %q", s)
+	}
+}
+
+// newBookedOwnerIssuer is newOwnerIssuer with its index kept in a farm
+// book, which an agent's grant needs.
+func newBookedOwnerIssuer(t *testing.T) *ownerIssuer {
+	t.Helper()
+	sf := provtest.NewFarm(t, time.Now())
+	store := &farmbook.MemoryStore{}
+	idx := &people.Index{Farm: sf.ID, Roots: sf.Roots, Store: store, Head: &people.MemoryHead{},
+		Book: &farmbook.Reader{Farm: sf.ID, Roots: sf.Roots, Store: store, Pointer: &farmbook.MemoryPointer{}, Own: &farmbook.MemorySealer{}}}
+	iss := &people.Issuer{CA: sf.CA, Index: idx, Owner: func(context.Context) string { return "noor" },
+		InstallerToken: []byte(testInstaller), LocalOnly: true, Admin: func(_ context.Context, p string) bool { return p == "noor" },
+		// its touch keys are key files, a test's (withFileTouchKey)
+		SoftwareTouchKeys: true}
+	mux := http.NewServeMux()
+	mux.Handle("/issuer/v1/people/", http.StripPrefix("/issuer", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		iss.ServeHTTP(w, r.WithContext(people.WithCaller(r.Context(), "noor")))
+	})))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c, err := NewClient(Farm{HUD: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Installer = testInstaller
+	return &ownerIssuer{scratch: sf, index: idx, client: c, mux: mux}
+}
+
+// withFileTouchKey gives a file store a touch key as a file, which a
+// store loads though it never makes one: a test's stand-in for the
+// Secure Enclave's.
+func withFileTouchKey(t *testing.T, st keystore.Store) {
+	t.Helper()
+	other := keystore.Store{Dir: filepath.Join(t.TempDir(), "touch"), FileOnly: true}
+	if _, err := other.Key(keystore.Device); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(other.Dir, "device.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(st.Dir, 0o700)
+	if err := os.WriteFile(filepath.Join(st.Dir, "touch.key"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// c4 farm integrate grants the agent its own key with the person's touch:
+// the key made in the keystore as workload-claude, the grant booked and in
+// force for it; integrate off revokes it. With no touch key there is no
+// grant, and the refusal says how to make one.
+func TestIntegrateGrantsTheAgentItsKey(t *testing.T) {
+	o := newBookedOwnerIssuer(t)
+	ctx := context.Background()
+	st := keystore.Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
+	if _, err := EnrolOwner(ctx, o.client, st, "noor"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GrantAgent(ctx, o.client, st, AgentName); !errors.Is(err, ErrNoTouchKey) {
+		t.Fatalf("with no touch key: %v", err)
+	}
+
+	o = newBookedOwnerIssuer(t)
+	st = keystore.Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
+	withFileTouchKey(t, st)
+	out, err := EnrolOwner(ctx, o.client, st, "noor")
+	if err != nil || out.Touch == nil {
+		t.Fatalf("up with a touch key: %v %+v", err, out)
+	}
+	g, err := GrantAgent(ctx, o.client, st, AgentName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ak, err := st.Key(keystore.Workload(AgentName))
+	if err != nil || g.Device != deviceID(ak) || g.Grant == "" {
+		t.Fatalf("the grant %+v for key %v", g, err)
+	}
+	if _, err := os.Stat(filepath.Join(st.Dir, "workload-claude.key")); err != nil {
+		t.Errorf("the agent's key file: %v", err)
+	}
+	gs, err := AgentGrants(ctx, o.client, "")
+	if err != nil || len(gs) != 1 || !gs[0].InForce || gs[0].Grant != g.Grant || gs[0].Agent != AgentName {
+		t.Fatalf("grants %v %+v", err, gs)
+	}
+	if n, err := RevokeAgent(ctx, o.client, st, AgentName); err != nil || n != 1 {
+		t.Fatalf("integrate off: %d %v", n, err)
+	}
+	if gs, _ = AgentGrants(ctx, o.client, ""); len(gs) != 1 || gs[0].InForce || gs[0].End != "removed" {
+		t.Errorf("after integrate off: %+v", gs)
+	}
+	if n, err := RevokeAgent(ctx, o.client, st, AgentName); err != nil || n != 0 {
+		t.Errorf("off again: %d %v", n, err)
 	}
 }
