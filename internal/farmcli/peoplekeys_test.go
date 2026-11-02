@@ -265,8 +265,10 @@ func TestOpenBrowserCountersignsWhatEnrolled(t *testing.T) {
 		return o.client.Issuer(ctx, http.MethodPost, "/v1/people/browser", e, nil)
 	}
 	var said strings.Builder
+	// the person, who sees the browser show its own key
+	shows := func(q string) bool { return strings.Contains(q, ShortDevice(deviceID(browser))) }
 	a := OpenArgs{Store: st, Page: o.client.Base + "/#/needs", Open: web, Wait: 2 * time.Second, Poll: time.Millisecond,
-		Say: func(f string, v ...any) { fmt.Fprintf(&said, f, v...) }}
+		Say: func(f string, v ...any) { fmt.Fprintf(&said, f, v...) }, Confirm: shows}
 	if err := OpenBrowser(ctx, o.client, a); err != nil {
 		t.Fatal(err)
 	}

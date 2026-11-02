@@ -282,3 +282,55 @@ func TestServedSubjectCheckedAgainstWhatWasNamed(t *testing.T) {
 		t.Error("another project's subject")
 	}
 }
+
+// Probe P1: a local process reads the code from open's argv and uses it
+// first. The person compares the short ID the CLI prints with the one the
+// browser shows, so the other key is not countersigned: it is removed,
+// and nothing countersigned. With no one at the terminal nothing is.
+func TestOpenCountersignsOnlyWhatThePersonSees(t *testing.T) {
+	o := newOwnerIssuer(t)
+	o.mux.HandleFunc("/js/enrol.js", func(w http.ResponseWriter, r *http.Request) {})
+	ctx := context.Background()
+	st := keystore.Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
+	if _, err := EnrolOwner(ctx, o.client, st, "noor"); err != nil {
+		t.Fatal(err)
+	}
+	enrol := func(code string) keystore.Key {
+		k, _ := keystore.Store{Dir: filepath.Join(t.TempDir(), "b"), FileOnly: true}.Key(keystore.Device)
+		e, _ := enrolment(k, o.scratch.ID, "noor", "")
+		e.Kind, e.Protection, e.Code = "browser", schema.ProtectionBrowser, code
+		if err := o.client.Issuer(ctx, http.MethodPost, "/v1/people/browser", e, nil); err != nil {
+			return nil
+		}
+		return k
+	}
+	var attacker, real keystore.Key
+	open := func(u string) error {
+		_, frag, _ := strings.Cut(u, "#")
+		_, q, _ := strings.Cut(frag, "?")
+		code := strings.TrimPrefix(q, "browser=")
+		attacker = enrol(code) // first, from ps
+		real, _ = keystore.Store{Dir: filepath.Join(t.TempDir(), "real"), FileOnly: true}.Key(keystore.Device)
+		return nil
+	}
+	var said strings.Builder
+	err := OpenBrowser(ctx, o.client, OpenArgs{Store: st, Page: o.client.Base + "/#/needs", Open: open, Wait: 2 * time.Second, Poll: time.Millisecond,
+		Say:     func(f string, v ...any) { fmt.Fprintf(&said, f, v...) },
+		Confirm: func(q string) bool { return strings.Contains(q, ShortDevice(deviceID(real))) }})
+	if err != nil || attacker == nil {
+		t.Fatalf("open: %v (the other key enrolled: %v)", err, attacker != nil)
+	}
+	if strings.Contains(said.String(), "countersigned;") || !strings.Contains(said.String(), "is removed") {
+		t.Errorf("said %q", said.String())
+	}
+	if hasBrowser(ctx, o.client, "noor") {
+		t.Error("a countersigned browser after the person said no")
+	}
+	var out struct{ Devices []people.DeviceView }
+	o.client.Issuer(ctx, http.MethodGet, "/v1/people/devices?person=noor", nil, &out)
+	for _, d := range out.Devices {
+		if d.Device == deviceID(attacker) {
+			t.Error("the other key is still in force")
+		}
+	}
+}

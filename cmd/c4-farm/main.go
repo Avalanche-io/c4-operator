@@ -587,7 +587,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if err != nil {
 			return err
 		}
-		if err := openSignedIn(ctx, name, f, u, o.W); err != nil {
+		if err := openSignedIn(ctx, name, f, u, o.W, stdin); err != nil {
 			return err
 		}
 		// the link is the page, and signs no other browser in
@@ -866,7 +866,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if *noOpen {
 			return nil
 		}
-		return openSignedIn(ctx, localfarm.Name, cfg.Farms[localfarm.Name], localfarm.NeedsLink(o.HUD(), v), stdout)
+		return openSignedIn(ctx, localfarm.Name, cfg.Farms[localfarm.Name], localfarm.NeedsLink(o.HUD(), v), stdout, stdin)
 
 	case "down":
 		localName := fs.String("name", "", "the local farm to delete (default the current farm, when it is local)")
@@ -1530,13 +1530,20 @@ func loginKey(ctx context.Context, c *farmcli.Client, st keystore.Store, port in
 // trades for its cookie, so the token is never in an address or the
 // browser's history; and where the owner's key is on this machine, the
 // browser enrols its key and the CLI countersigns it (OpenBrowser).
-func openSignedIn(ctx context.Context, name string, f farmcli.Farm, u string, w io.Writer) error {
+func openSignedIn(ctx context.Context, name string, f farmcli.Farm, u string, w io.Writer, stdin io.Reader) error {
 	c, err := farmcli.NewClient(f)
 	if err != nil {
 		return err
 	}
-	return farmcli.OpenBrowser(ctx, c, farmcli.OpenArgs{Store: farmcli.KeysFor(name), Page: u, Open: openURL, Pinned: f.OwnerKey,
-		Say: func(format string, a ...any) { fmt.Fprintf(w, format, a...) }})
+	a := farmcli.OpenArgs{Store: farmcli.KeysFor(name), Page: u, Open: openURL, Pinned: f.OwnerKey,
+		Say: func(format string, a ...any) { fmt.Fprintf(w, format, a...) }}
+	// the person compares the browser's key with the one the code
+	// enrolled: only at a terminal, never an agent
+	if isTerminal(stdin) && !farmcli.InsideAgent() {
+		in := bufio.NewReader(stdin)
+		a.Confirm = func(q string) bool { return farmcli.Ask(farmcli.Out{W: w, In: in}, q) }
+	}
+	return farmcli.OpenBrowser(ctx, c, a)
 }
 
 // openURL opens a link in the default browser.

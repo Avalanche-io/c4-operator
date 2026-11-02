@@ -453,6 +453,9 @@ type OpenArgs struct {
 	// Pinned is the farm's owner key as up pinned it: a farm whose index
 	// books another enrols no browser.
 	Pinned string
+	// Confirm asks the person a yes-or-no question at the terminal; nil
+	// where no one is there, and then nothing is countersigned.
+	Confirm func(question string) bool
 }
 
 // OpenBrowser opens a page of the HUD in the person's browser, signed in.
@@ -505,11 +508,50 @@ func OpenBrowser(ctx context.Context, c *Client, a OpenArgs) error {
 		}
 		return nil
 	}
+	// The CLI can't see the browser make its key, and the code is not a
+	// secret against everything on this machine: whoever used it first is
+	// enrolled. So the person compares: the browser shows its own key's
+	// short ID, computed there, and the CLI the one the code enrolled.
+	spki, err := base64.RawURLEncoding.DecodeString(s.Key)
+	if err != nil || schema.DeviceID(spki) != s.Device {
+		return errors.New("the farm named a key for the browser's code that isn't the device it says: nothing was countersigned")
+	}
+	short := ShortDevice(s.Device)
+	if a.Confirm == nil {
+		say("browser   a key enrolled with the code (%s), not countersigned: run c4 farm open yourself, at a terminal, to compare it with the browser's\n", short)
+		return nil
+	}
+	say("browser   the HUD shows \"this browser's key\" in its top bar\n")
+	if !a.Confirm(fmt.Sprintf("Does the browser show this browser's key: %s?", short)) {
+		// a key the person's browser doesn't show used the code first:
+		// taken away again, which needs no touch
+		if err := RemoveDevice(ctx, c, a.Store, s.Device); err != nil {
+			return fmt.Errorf("the key that used the code (%s) is not the browser's, and removing it failed: %w; remove it from the HUD's device page", short, err)
+		}
+		say("browser   the key that used the code (%s) is not your browser's, so it is removed and nothing was countersigned: run c4 farm open again\n", short)
+		return nil
+	}
 	if err := Countersign(ctx, c, a.Store, cfg.Farm, cfg.Owner, s); err != nil {
 		return err
 	}
-	say("browser   its key is %s, countersigned; the HUD's device page shows the same\n", ShortDevice(s.Device))
+	say("browser   its key is %s, countersigned; the HUD's device page shows the same\n", short)
 	return nil
+}
+
+// RemoveDevice removes a device of this machine's person, signed with its
+// device key: remove-device on device:<ID>, which takes authority away and
+// so needs no touch.
+func RemoveDevice(ctx context.Context, c *Client, st keystore.Store, device string) error {
+	cert, err := LoadCert(st, keystore.Device)
+	if err != nil || cert == nil {
+		return fmt.Errorf("this machine's key is not enrolled: %v", err)
+	}
+	person := strings.TrimPrefix(cert.Identity, provenance.IdentityBase+"user/")
+	act, err := ownerAct(st, "", person, provenance.Subject{Name: "device:" + device, Digest: map[string]string{"c4": device}}, "remove-device", map[string]string{})
+	if err != nil {
+		return err
+	}
+	return c.Issuer(ctx, http.MethodPost, "/v1/people/acts", act, nil)
 }
 
 // enrolledWait is how long open waits on a code when the person has a
