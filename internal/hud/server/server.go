@@ -335,7 +335,7 @@ func (s *Server) Handler() http.Handler {
 		w.Header().Set("Cache-Control", "no-cache")
 		files.ServeHTTP(w, r)
 	}))
-	return s.proxyGuard(noReferrer(mux))
+	return s.proxyGuard(noReferrer(s.signedOnce(mux)))
 }
 
 // noReferrer keeps the HUD's addresses out of every Referer it would send:
@@ -412,6 +412,14 @@ var errUnauthenticated = errors.New("sign in: send a bearer token, or reach the 
 
 // viewer resolves who is asking.
 func (s *Server) viewer(r *http.Request) (*api.Viewer, error) {
+	if h := r.Header.Get(schema.RequestHeader); h != "" {
+		// a request its client signed (request/v1): its own key, not a
+		// token, names who calls (requests.go), checked once a request
+		if c, ok := r.Context().Value(signedKey{}).(*signedCaller); ok {
+			return c.v, c.err
+		}
+		return s.requestViewer(r, h)
+	}
 	if v, err := s.devViewer(r); v != nil || err != nil {
 		return v, err
 	}
