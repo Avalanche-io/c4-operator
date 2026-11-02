@@ -164,7 +164,7 @@ func (k p256) Sign(msg []byte) ([]byte, error) { return provenance.SignP256(k.ke
 
 // The person approves a second machine's key from this one, confirmed with
 // the touch key; the second machine enrols on the booked approval. The
-// device ID is what the person compares: its short form, two groups of
+// device ID is what the person compares: its short form, three groups of
 // four.
 func TestApproveAMachineWithATouch(t *testing.T) {
 	o := peopletest.OnePerson(t)
@@ -174,7 +174,7 @@ func TestApproveAMachineWithATouch(t *testing.T) {
 	}
 	ctx := context.Background()
 	other := peopletest.NewDevice(t)
-	if got := ShortDevice(other.ID); len(got) != 9 || got[4] != ' ' || got[:4] != other.ID[2:6] {
+	if got := ShortDevice(other.ID); len(got) != 14 || got != other.ID[3:7]+" "+other.ID[7:11]+" "+other.ID[11:15] {
 		t.Errorf("short form %q of %s", got, other.ID)
 	}
 	booked, err := approveWith(ctx, c, o.ID(), other.ID, p256{o.Owner.P256}, o.Owner.Cert, p256{o.Touch.P256}, o.Touch.Cert)
@@ -313,5 +313,13 @@ func TestTouchKeyNeedsTheOwnerKeyAndASecureEnclave(t *testing.T) {
 	}
 	if _, err := EnrolTouchKey(ctx, o.client, st); err == nil || !strings.Contains(err.Error(), "makes no touch key") {
 		t.Errorf("a key file store: %v", err)
+	}
+}
+
+// The short form a person compares: twelve characters in three groups of
+// four, skipping "c4" and the character after it, as the HUD shows it.
+func TestShortDeviceIsTheHUDsForm(t *testing.T) {
+	if got := ShortDevice("c45iuGgGRKQemgipm7oCjXXXX"); got != "iuGg GRKQ emgi" {
+		t.Errorf("short form %q", got)
 	}
 }

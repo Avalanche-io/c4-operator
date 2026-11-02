@@ -339,13 +339,13 @@ func Countersign(ctx context.Context, c *Client, st keystore.Store, farm, owner 
 // beforehand.
 
 // ShortDevice is a device ID as a person compares it on two screens: the
-// first eight characters after "c4", in two groups of four.
+// twelve characters after "c4" and the one after it (which takes only a
+// few values), in three groups of four, as the HUD shows it.
 func ShortDevice(id string) string {
-	s := strings.TrimPrefix(id, "c4")
-	if len(s) < 8 {
-		return s
+	if !strings.HasPrefix(id, "c4") || len(id) < 15 {
+		return strings.TrimPrefix(id, "c4")
 	}
-	return s[:4] + " " + s[4:8]
+	return id[3:7] + " " + id[7:11] + " " + id[11:15]
 }
 
 // ApproveDevice books the person's approval of a machine's key to enrol as
