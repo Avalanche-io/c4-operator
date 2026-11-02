@@ -5,6 +5,8 @@ package needs
 import (
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // About checks what a question is about: the work whose landing should
@@ -47,4 +49,45 @@ func Message(text, why string, about []string) string {
 		msg += "\nabout: " + strings.Join(about, ", ")
 	}
 	return msg
+}
+
+// MessageMax is the most a needs message may be: Kubernetes cuts a
+// container's termination message at 4096 bytes.
+const MessageMax = 4096
+
+// CutMark ends a field Fit shortened.
+const CutMark = " [cut]"
+
+// Fit shortens a question so its Message fits in MessageMax: the why
+// first, then the text, each cut at a character boundary and ending with
+// CutMark, and only if those can't make room, the last abouts. The unit
+// signs exactly what Fit returns and writes exactly its Message, so the
+// farm reads the same question it signed.
+func Fit(text, why string, about []string) (string, string, []string) {
+	text, why = strings.TrimSpace(text), strings.TrimSpace(why)
+	const keep = 64 // a field is cut no shorter than this
+	for {
+		over := len(Message(text, why, about)) - MessageMax
+		switch {
+		case over <= 0:
+			return text, why, about
+		case len(why) > keep+len(CutMark):
+			why = cut(why, max(keep, len(why)-over-len(CutMark)))
+		case len(text) > keep+len(CutMark):
+			text = cut(text, max(keep, len(text)-over-len(CutMark)))
+		case len(about) > 0:
+			about = about[:len(about)-1]
+		default:
+			return text, why, about
+		}
+	}
+}
+
+// cut is s's first n bytes or fewer, at a character boundary, without
+// trailing space, and CutMark.
+func cut(s string, n int) string {
+	for n > 0 && n < len(s) && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return strings.TrimRightFunc(s[:min(n, len(s))], unicode.IsSpace) + CutMark
 }

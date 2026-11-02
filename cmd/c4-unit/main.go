@@ -387,10 +387,13 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 		if err != nil {
 			return 2, err
 		}
-		msg := needs.Message(*what, *why, ab)
+		// what fits in a termination message, cut and marked where it
+		// doesn't: the farm reads exactly what the unit signed
+		w, y, ab := needs.Fit(*what, *why, ab)
+		msg := needs.Message(w, y, ab)
 		// signed as the unit, and on the pod before the unit ends
 		if out, err := output(e, *dir); err == nil {
-			signReport(e, out, "needs", map[string]any{"what": strings.TrimSpace(*what), "why": strings.TrimSpace(*why), "about": ab}, e.errw())
+			signReport(e, out, "needs", map[string]any{"what": w, "why": y, "about": ab}, e.errw())
 		} else if unitSigns(e) {
 			fmt.Fprintf(e.errw(), "c4-unit: this needs could not be signed (%v): the farm gets it unsigned, and from K8 refuses it\n", err)
 		}

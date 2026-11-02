@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/needs"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 )
 
@@ -160,6 +161,14 @@ func TestUnitReportsFromThePod(t *testing.T) {
 	setActs(p, sign(me, provenance.UnitAct{Act: "needs", Params: json.RawMessage(`{"what":"nothing","why":"","about":null}`)}))
 	if q.needsHolds(ctx, v, p, now) {
 		t.Fatal("a needs that is not what was signed was taken")
+	}
+	// a needs cut to fit (needs.Fit) reads back as it was signed
+	w, y, ab := needs.Fit("the delivery frame rate", strings.Repeat("the brief gives 24 here and 25 there. ", 200), []string{"unit:schema"})
+	signed, _ := json.Marshal(map[string]any{"what": w, "why": y, "about": ab})
+	p.Status.ContainerStatuses[0].State.Terminated.Message = needs.Message(w, y, ab)
+	setActs(p, sign(me, provenance.UnitAct{Act: "needs", Params: signed}))
+	if r, err := q.needsReport(ctx, v, p, now); err != nil || r["custody"] != custodyUnitSigned {
+		t.Fatalf("a needs cut to fit: %v %v", r, err)
 	}
 
 	p.Status = corev1.PodStatus{Phase: corev1.PodSucceeded, ContainerStatuses: []corev1.ContainerStatus{{State: corev1.ContainerState{

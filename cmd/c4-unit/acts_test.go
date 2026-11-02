@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Avalanche-io/c4-operator/internal/needs"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/schema"
 )
@@ -162,5 +163,25 @@ func TestUnsignedAndTheAllowance(t *testing.T) {
 	}
 	if n := len(unitActs(t, out2, roots)); n != unitActsMax {
 		t.Fatalf("%d acts", n)
+	}
+}
+
+// A needs too long for a termination message is cut to fit before it is
+// signed, so the act and the message say exactly the same.
+func TestLongNeedsSignedAsWritten(t *testing.T) {
+	e, m, roots, out := signingUnit(t)
+	os.WriteFile(filepath.Join(m["C4_CONTROL"], "acts.seen"), []byte("1"), 0o644)
+	why := strings.Repeat("the brief gives 24 here and 25 there. ", 200)
+	if c, err := run([]string{"needs", "--what", "the delivery frame rate", "--why", why}, &bytes.Buffer{}, e); c != needsCode || err != nil {
+		t.Fatalf("needs: %d %v", c, err)
+	}
+	msg, _ := os.ReadFile(m["C4_TERMINATION_LOG"])
+	acts := unitActs(t, out, roots)
+	var p struct{ What, Why string }
+	if len(acts) != 1 || json.Unmarshal(acts[0].Predicate.Params, &p) != nil {
+		t.Fatalf("acts %v", acts)
+	}
+	if len(msg) > needs.MessageMax || string(msg) != needs.Message(p.What, p.Why, nil) || !strings.HasSuffix(p.Why, needs.CutMark) {
+		t.Fatalf("message %d bytes, signed why ends %q", len(msg), p.Why[max(0, len(p.Why)-12):])
 	}
 }
