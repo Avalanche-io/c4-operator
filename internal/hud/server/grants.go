@@ -83,6 +83,10 @@ func grantView(g *c4v1.SubmitGrant, project string, now time.Time, act func(reco
 // plan a grant but never perform one: the person grants, as themselves.
 const errAgentGrants = "an agent cannot grant for you: ask the person to grant it in the HUD or with c4 farm grant"
 
+// errAgentRevokes is the refusal of a revoke an agent asks for: taking
+// authority away is a person's too, never an agent's (DESIGN 6).
+const errAgentRevokes = "an agent cannot revoke for you: ask the person to revoke it in the HUD or with c4 farm revoke"
+
 // errUnitRevokes is the refusal of a revoke a unit's own token asks for.
 const errUnitRevokes = "a unit cannot revoke a person's grant: the person, or a project admin, revokes it"
 
@@ -278,6 +282,12 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 		// A unit holds no one's grant, so it revokes none: a block pod
 		// would otherwise take back what a person gave.
 		fail(w, http.StatusForbidden, errUnitRevokes)
+		return
+	}
+	if agentActs(r) || actAgent(r) != "" {
+		// Revoking is a person's (DESIGN 6): an agent may plan it, and the
+		// person revokes, as they grant.
+		fail(w, http.StatusForbidden, errAgentRevokes)
 		return
 	}
 	m := s.current()

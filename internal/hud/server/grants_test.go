@@ -341,8 +341,9 @@ func TestSubmitTrackerURL(t *testing.T) {
 
 // An agent may plan a grant but never perform one: a grant through MCP, or
 // naming an agent from any client, is refused, and the same grant from the
-// person directly passes. Revoking only narrows, so an agent may revoke,
-// and the signed record names it.
+// person directly passes. Revoking is a person's too (DESIGN 6: taking
+// authority away is never an agent's): an agent's revoke is refused, and
+// the person's own is signed.
 func TestAgentCannotGrant(t *testing.T) {
 	s := grantFarm(t)
 	ctx := context.Background()
@@ -387,11 +388,21 @@ func TestAgentCannotGrant(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("the person's own grant: %d %v", code, out)
 	}
-	code, out = do(http.MethodDelete, "/api/v1/grants/show-a/"+c4v1.SubmitGrantName("github", "maya")+"?as=artist", nil,
-		map[string]string{"X-C4-Client": "mcp", "X-C4-Agent": "planner-bot"})
+	revoke := "/api/v1/grants/show-a/" + c4v1.SubmitGrantName("github", "maya") + "?as=artist"
+	for _, h := range []map[string]string{
+		{"X-C4-Client": "mcp"},
+		{"X-C4-Client": "mcp", "X-C4-Agent": "planner-bot"},
+		{"X-C4-Agent": "planner-bot"},
+	} {
+		code, out := do(http.MethodDelete, revoke, nil, h)
+		if msg, _ := out["error"].(string); code != http.StatusForbidden || msg != errAgentRevokes {
+			t.Errorf("an agent revoking, %v: %d %v, want 403 %q", h, code, out, errAgentRevokes)
+		}
+	}
+	code, out = do(http.MethodDelete, revoke, nil, map[string]string{"X-C4-Client": "c4-farm"})
 	id, _ := out["record"].(string)
 	if code != http.StatusOK || id == "" {
-		t.Fatalf("an agent revoking: %d %v", code, out)
+		t.Fatalf("the person revoking: %d %v", code, out)
 	}
 	st, err := s.Stores(ctx, "show-a")
 	if err != nil {
@@ -413,7 +424,7 @@ func TestAgentCannotGrant(t *testing.T) {
 	if err := json.Unmarshal(rv.Predicate, &p); err != nil {
 		t.Fatal(err)
 	}
-	if p.Action != "revoke" || p.Actor != "maya" || p.Via != "mcp" || p.Agent != "planner-bot" {
+	if p.Action != "revoke" || p.Actor != "maya" || p.Via != "c4-farm" || p.Agent != "" {
 		t.Errorf("revoke record: action %q, actor %q, via %q, agent %q", p.Action, p.Actor, p.Via, p.Agent)
 	}
 }

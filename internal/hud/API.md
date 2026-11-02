@@ -1180,8 +1180,15 @@ in `X-C4-Act`: each job control, and the endpoints below.
   `agentGrade: signed`, not `claimed`, and the act is booked as the agent's
   use of its grant. An agent's `decide` must say `waitsFor: agent:<its
   name>`; without it the act is a person's decision, which no agent makes.
-  A farm without the people's issuer and a farm book takes no agent's act
-  (`403`). A unit's or a relay's act is still refused here.
+  An agent's decision is of its own person's work only: the grant's person
+  must be the job's owner, as stamped at admission, as a unit decides only
+  its own job's waits. A farm without the people's issuer and a farm book
+  takes no agent's act (`403`). On a farm with them, an `agent:<name>` wait
+  is decided only by that agent's own act under a grant (or by a unit of
+  the job running it): `X-C4-Agent` alone, with no act, is refused `403`.
+  The act's use of its grant is booked as it is taken; a grant revoked or
+  lapsed in between refuses it. A unit's or a relay's act is still refused
+  here.
 - **The control record cites it** (`act`: its payload hash and record), is on
   its subject, and carries its `params` and grade (`custody: signed` or
   `confirmed`). A farm-level act's record is kept in the farm book's store
@@ -2288,9 +2295,12 @@ to grant it in the HUD or with c4 farm grant". On a one-person farm the
 owner holds every role, so the client, not the role, is what tells the
 person from an agent acting for them. MCP's `c4_grant` only plans: it
 answers what the grant would allow and the `c4 farm grant` command the
-person runs. Revoking only narrows, so an agent may revoke; the `revoke`
-record names the client (`via`) and the agent (`agent`). Those headers
-are what an honest client says of itself; a unit's own pod token is
+person runs. Revoking is a person's too (DESIGN 6: an agent never takes
+authority away either): `DELETE /grants/{ns}/{name}` through MCP, naming
+an agent, or carrying an agent's act, is refused `403`, "an agent cannot
+revoke for you: ask the person to revoke it in the HUD or with c4 farm
+revoke", and MCP's `c4_revoke_grant` only plans, answering the `c4 farm
+revoke` command. Those headers are what an honest client says of itself; a unit's own pod token is
 known whatever it says, so a unit can neither grant (the same `403`)
 nor revoke a person's grant (`403`, "a unit cannot revoke a person's
 grant: the person, or a project admin, revokes it").

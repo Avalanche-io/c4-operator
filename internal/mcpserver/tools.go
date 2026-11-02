@@ -202,8 +202,8 @@ func Tools(c *Client) []Tool {
 			readOnly, c.listTrackers),
 		tool("c4_list_grants", "List grants", "Grants to trackers: by default the person you act for's own, or with tracker (namespace/name) who has let that tracker submit for them. Each shows its pools, classes, end, record, and whether it serves now and why not.",
 			readOnly, c.listGrants),
-		tool("c4_revoke_grant", "Revoke a grant", "Take back a grant to a tracker: the tracker submits nothing more for that person, and units of their jobs not yet started do not get their lease. Units running now finish. The person who gave it, or a project admin, revokes it; recorded in the book.",
-			destructive, c.revokeGrant),
+		tool("c4_revoke_grant", "Plan revoking a grant", "Plan taking back a grant to a tracker: once revoked, the tracker submits nothing more for that person, and units of their jobs not yet started do not get their lease; units running now finish. It plans, never performs: taking authority away is a person's, never an agent's. It returns the exact c4 farm revoke command; show it to the person, who revokes it as themselves, in the HUD or with that command.",
+			readOnly, c.revokeGrant),
 	}
 }
 
@@ -1097,17 +1097,23 @@ type RevokeGrantIn struct {
 	Name      string `json:"name" jsonschema:"the grant's name (from c4_list_grants)"`
 }
 
-func (c *Client) revokeGrant(ctx context.Context, _ *mcp.CallToolRequest, in RevokeGrantIn) (*mcp.CallToolResult, Done, error) {
+// RevokePlan is a revoke an agent plans and the person carries out.
+type RevokePlan struct {
+	// Performed is always false: an agent plans a revoke; the person
+	// revokes (DESIGN 6).
+	Performed bool   `json:"performed"`
+	Grant     string `json:"grant"`
+	Command   string `json:"command"`
+	Message   string `json:"message"`
+}
+
+func (c *Client) revokeGrant(_ context.Context, _ *mcp.CallToolRequest, in RevokeGrantIn) (*mcp.CallToolResult, RevokePlan, error) {
 	if in.Namespace == "" || in.Name == "" {
-		return nil, Done{}, fmt.Errorf("name the grant: namespace and name, from c4_list_grants")
+		return nil, RevokePlan{}, fmt.Errorf("name the grant: namespace and name, from c4_list_grants")
 	}
-	var r struct {
-		Message string `json:"message"`
-	}
-	if err := c.do(ctx, "DELETE", "/grants/"+url.PathEscape(in.Namespace)+"/"+url.PathEscape(in.Name), nil, &r); err != nil {
-		return nil, Done{}, err
-	}
-	return nil, Done{Message: r.Message}, nil
+	g := in.Namespace + "/" + in.Name
+	return nil, RevokePlan{Grant: g, Command: "c4 farm revoke " + g,
+		Message: "an agent cannot revoke for you: the person revokes it in the HUD, or with: c4 farm revoke " + g}, nil
 }
 
 func (c *Client) listTrackers(ctx context.Context, _ *mcp.CallToolRequest, _ Empty) (*mcp.CallToolResult, api.TrackerList, error) {

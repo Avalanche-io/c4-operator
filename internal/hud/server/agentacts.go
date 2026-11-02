@@ -11,6 +11,7 @@ import (
 
 	"github.com/Avalanche-io/c4"
 
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
@@ -67,6 +68,14 @@ func (s *Server) citeAgentAct(ctx context.Context, r *http.Request, v *api.Viewe
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", errAct, err)
 	}
+	if j, _ := ctx.Value(jobKey{}).(*c4v1.WorkJob); action == "decide" {
+		// An agent decides its own owner's waits only, as a unit decides
+		// its own job's: the grant's person owns the job, as stamped at
+		// admission. Another owner's agent:<name> wait is theirs.
+		if owner := jobOwner(j); owner == "" || owner != g.Person {
+			return nil, fmt.Errorf("%w: agent %s acts for %s, and this job is %s's: an agent decides only its own person's waits", errAct, agent, g.Person, ownerWords(owner))
+		}
+	}
 	switch {
 	case g.Person != v.User && s.ownerFor(ctx, v) != g.Person:
 		return nil, fmt.Errorf("%w is agent %s's under %s's grant, and %s sent it", errAct, agent, g.Person, v.User)
@@ -78,8 +87,9 @@ func (s *Server) citeAgentAct(ctx context.Context, r *http.Request, v *api.Viewe
 		return nil, fmt.Errorf("%w: %v", errAct, err)
 	}
 	if err := s.AgentGrants.UseGrant(ctx, taken, data); err != nil {
-		// The act is taken; a use not booked only brings the lapse nearer.
-		s.Log.Error(err, "book an agent's use of its grant", "agent", agent, "grant", g.Grant)
+		// The grant is checked again as the use is booked: one revoked or
+		// lapsed since the check above refuses the act, never carries it out.
+		return nil, fmt.Errorf("%w: agent %s's grant: %v", errAct, agent, err)
 	}
 	return &citedAct{cite: &schema.ActCitation{Payload: provenance.PayloadHash(vr.Payload), Record: c4.Identify(bytes.NewReader(data)).String()},
 		params: p.Params, grade: p.Chain.By.Grade, on: subject, bundle: data, agent: agent, grant: g.Grant}, nil
@@ -91,6 +101,25 @@ func (a *citedAct) agentOnRecord(pred *controlPredicate) {
 	if a != nil && a.agent != "" {
 		pred.Agent, pred.AgentGrade = a.agent, a.grade
 	}
+}
+
+// jobKey carries, in a control's context, the job it is on (controlJob),
+// so an agent's act is checked against the job's owner.
+type jobKey struct{}
+
+// jobOwner is a job's owner, stamped at admission, or "".
+func jobOwner(j *c4v1.WorkJob) string {
+	if j == nil {
+		return ""
+	}
+	return j.Annotations[c4v1.AnnotationOwner]
+}
+
+func ownerWords(owner string) string {
+	if owner == "" {
+		return "no one's (it names no owner)"
+	}
+	return owner
 }
 
 // actAgent is the agent a request's act names, read without verifying it:

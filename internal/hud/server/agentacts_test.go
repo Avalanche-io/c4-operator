@@ -13,6 +13,7 @@ import (
 
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
@@ -26,6 +27,8 @@ import (
 type fakeGrants struct {
 	inForce map[string]*people.AgentGrant
 	used    int
+	// useErr is what booking a use answers: a grant revoked meanwhile.
+	useErr error
 }
 
 func (f *fakeGrants) AgentGrantFor(_ context.Context, v *provenance.Verified) (*people.AgentGrant, error) {
@@ -37,6 +40,9 @@ func (f *fakeGrants) AgentGrantFor(_ context.Context, v *provenance.Verified) (*
 }
 
 func (f *fakeGrants) UseGrant(context.Context, *provenance.Verified, []byte) error {
+	if f.useErr != nil {
+		return f.useErr
+	}
 	f.used++
 	return nil
 }
@@ -61,6 +67,11 @@ func newAgentDecide(t *testing.T, waitsFor string) *agentDecide {
 	rec := s.m.byKey["show-a/sh040-light-v007"]
 	rec.job.UID = k8stypes.UID(provtest.JobUID)
 	rec.job.Status.Waits[0].Server = waitsFor
+	// dana owns the job, stamped at admission: her agent decides its waits.
+	if rec.job.Annotations == nil {
+		rec.job.Annotations = map[string]string{}
+	}
+	rec.job.Annotations[c4v1.AnnotationOwner] = "dana"
 	g := &fakeGrants{inForce: map[string]*people.AgentGrant{}}
 	s.AgentGrants = g
 	return &agentDecide{t: t, s: s, f: f, grants: g, decide: decide,
@@ -210,5 +221,55 @@ func TestAgentDecidesOnlyItsOwnWait(t *testing.T) {
 	}
 	if a.grants.used != 0 {
 		t.Error("the refused act was booked as the grant's use")
+	}
+}
+
+// Probe (K5 review): dana's agent "assistant" decides an agent:assistant
+// wait on a job kestrel owns. Refused: an agent decides only its own
+// person's waits, as a unit decides only its own job's; a job naming no
+// owner is no one's agent's to decide.
+func TestAgentDecidesNoOtherOwnersAgentWait(t *testing.T) {
+	for _, owner := range []string{"kestrel", ""} {
+		a := newAgentDecide(t, "agent:assistant")
+		rec := a.s.m.byKey["show-a/sh040-light-v007"]
+		if owner == "" {
+			delete(rec.job.Annotations, c4v1.AnnotationOwner)
+		} else {
+			rec.job.Annotations[c4v1.AnnotationOwner] = owner
+		}
+		k := a.agent("assistant", "dana", false)
+		if code, _ := a.decide(agentRequest(ownWait, map[string]string{ActHeader: a.act(k, "dana", ownWait)})); code != http.StatusForbidden {
+			t.Errorf("dana's agent on a job owned by %q: %d, want 403", owner, code)
+		}
+		if a.grants.used != 0 {
+			t.Errorf("owner %q: the refused act was booked as a use", owner)
+		}
+	}
+}
+
+// Probe (K5 review): on a farm that keeps agents' grants, an agent:<name>
+// wait isn't decided by X-C4-Agent alone, with no act: from K5 only the
+// agent's own key under a grant decides it (DESIGN 6). A farm without
+// them decides as before, the agent graded claimed.
+func TestHeaderOnlyDecisionOfAnAgentWaitRefused(t *testing.T) {
+	a := newAgentDecide(t, "agent:assistant")
+	if code, _ := a.decide(agentRequest(ownWait, map[string]string{"X-C4-Agent": "assistant"})); code != http.StatusForbidden {
+		t.Errorf("header-only decision with agents' grants wired: %d, want 403", code)
+	}
+	a.s.AgentGrants = nil
+	if code, p := a.decide(agentRequest(ownWait, map[string]string{"X-C4-Agent": "assistant"})); code != http.StatusOK || p.AgentGrade != CustodyClaimed {
+		t.Errorf("header-only decision on a farm without agents' grants: %d, graded %q", code, p.AgentGrade)
+	}
+}
+
+// A grant revoked or lapsed between the check and the use's booking
+// refuses the act: the booking checks it again, and its failure is a
+// refusal, never a note in the log.
+func TestAgentActRefusedWhenItsUseCannotBeBooked(t *testing.T) {
+	a := newAgentDecide(t, "agent:assistant")
+	k := a.agent("assistant", "dana", false)
+	a.grants.useErr = people.ErrNoGrant
+	if code, _ := a.decide(agentRequest(ownWait, map[string]string{ActHeader: a.act(k, "dana", ownWait)})); code != http.StatusForbidden {
+		t.Errorf("an act whose use can't be booked: %d, want 403", code)
 	}
 }

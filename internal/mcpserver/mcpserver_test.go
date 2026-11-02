@@ -294,7 +294,7 @@ func TestToolsAreNamedAndAnnotated(t *testing.T) {
 		}
 		readOnly := strings.HasPrefix(tl.Name, "c4_list") || strings.HasPrefix(tl.Name, "c4_get") || tl.Name == "c4_farm_status" ||
 			tl.Name == "c4_cache_tiers" || tl.Name == "c4_capacity_and_cost" || tl.Name == "c4_dependency_graph" || tl.Name == "c4_diff_views" || tl.Name == "c4_trace_file" || tl.Name == "c4_verify_custody" || tl.Name == "c4_read_book" ||
-			tl.Name == "c4_suggest_deadline" || tl.Name == "c4_deadline_options" || tl.Name == "c4_describe_tool" || tl.Name == "c4_needs_me" || tl.Name == "c4_grant"
+			tl.Name == "c4_suggest_deadline" || tl.Name == "c4_deadline_options" || tl.Name == "c4_describe_tool" || tl.Name == "c4_needs_me" || tl.Name == "c4_grant" || tl.Name == "c4_revoke_grant"
 		if tl.Annotations.ReadOnlyHint != readOnly {
 			t.Errorf("tool %s: readOnlyHint %v", tl.Name, tl.Annotations.ReadOnlyHint)
 		}
@@ -630,15 +630,18 @@ func TestGrantTools(t *testing.T) {
 	if gs, _ := out["grants"].([]any); res.IsError || len(gs) != 1 {
 		t.Fatalf("list: %v %q", out, text(res))
 	}
+	// An agent plans a revoke and never performs one either: the person
+	// revokes (DESIGN 6), and the HUD refuses an agent's.
 	res, out = call(t, cs, "c4_revoke_grant", map[string]any{"namespace": "show-a", "name": "github-ab12"})
-	if res.IsError || !strings.Contains(fmt.Sprint(out["message"]), "revoked") {
-		t.Fatalf("revoke: %v %q", out, text(res))
+	if res.IsError || out["performed"] != false || out["command"] != "c4 farm revoke show-a/github-ab12" ||
+		!strings.Contains(fmt.Sprint(out["message"]), "an agent cannot revoke for you") {
+		t.Fatalf("revoke plan: %v %q", out, text(res))
 	}
 	hud.mu.Lock()
 	defer hud.mu.Unlock()
 	for _, p := range hud.posts {
-		if strings.HasPrefix(p, "/api/v1/grants ") {
-			t.Fatalf("c4_grant sent the grant: %s", p)
+		if strings.HasPrefix(p, "/api/v1/grants ") || strings.HasPrefix(p, "DELETE ") {
+			t.Fatalf("an agent's grant tool sent the grant or its revoke: %s", p)
 		}
 	}
 	want := []string{
@@ -646,7 +649,6 @@ func TestGrantTools(t *testing.T) {
 		"GET /api/v1/trackers",
 		"GET /api/v1/trackers",
 		"GET /api/v1/grants?tracker=show-a%2Fgithub",
-		"DELETE /api/v1/grants/show-a/github-ab12",
 	}
 	if len(hud.posts) != len(want) {
 		t.Fatalf("requests %v", hud.posts)

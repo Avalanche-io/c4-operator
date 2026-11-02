@@ -225,7 +225,7 @@ func (s *Server) controlJob(ctx context.Context, r *http.Request, v *api.Viewer,
 	// subject, the job by UID and its spec before the change, and cites
 	// it (acts.go).
 	on := provenance.ActSubject("workjob", j.Namespace, j.Name, string(j.UID), before)
-	act, err := s.citeAct(ctx, r, v, on, action)
+	act, err := s.citeAct(context.WithValue(ctx, jobKey{}, j), r, v, on, action)
 	if err != nil {
 		return "", err
 	}

@@ -913,6 +913,14 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 			d.Agent = ag
 		}
 		d.OwnJob = v.Unit != nil && v.Unit.Namespace == rec.job.Namespace && v.Unit.Job == rec.job.Name
+		if s.AgentGrants != nil && v.Unit == nil && d.Agent != "" && r.Header.Get(ActHeader) == "" && strings.HasPrefix(wait.Server, "agent:") {
+			// DESIGN 6, from K5: on a farm that keeps agents' grants, an
+			// agent:<name> wait is decided by that agent's own key under a
+			// grant (X-C4-Act), or by a unit of the job running it; a
+			// client's X-C4-Agent alone no longer does.
+			fail(w, http.StatusForbidden, "this waits for %s, decided by the agent's own signed act under a person's grant (X-C4-Act): the X-C4-Agent header alone doesn't decide it", waitsWhom(wait.Server))
+			return
+		}
 		d.EveryRole = s.everyRole(ctx, v)
 		if standFor, err = s.mayDecide(rec.project, wait.Server, d); err != nil {
 			fail(w, http.StatusForbidden, "%v", err)
