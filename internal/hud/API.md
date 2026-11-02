@@ -2510,8 +2510,24 @@ records use (`kestrel`), which only the HUD writes and nobody deletes (the
 organisation is not in the object: each membership is a signed control
 record booked in the farm book, and what is in force is the book's one
 rule (`farmbook.InForceAt`, kind `membership`). So Parties need the farm
-book: on a farm that keeps none, every write is `501`, and `party:` waits
-keep taking the `c4:party:<name>` group, as before.
+book: on a farm that keeps none, every party route is `501`, the reads
+(`GET` and `HEAD /parties`, `GET /parties/{name}`) as well as the writes,
+and `party:` waits keep taking the `c4:party:<name>` group, as before. The
+HUD shows its Parties tab only where `HEAD /parties` answers.
+
+**What the viewer may do.** The viewer the snapshot, the event stream and
+`/needs-me` serve says so in three flags, each by the rule its route takes:
+- `makeParties`: `POST /parties` would take a make from it: the guard every
+  party write passes (no unit, agent or tracker's sync, no development
+  viewer without the installer's secret, a farm book and a signer) and the
+  farm admin's right (create on `parties`, or a development viewer in the
+  farm-admin role or every role). The route and the flag use one function.
+- `bindingOwner`: the viewer is the farm binding's owner.
+- `makeOwnParty`: that owner may make their own person Party now, without
+  the farm admin's right: their Party doesn't exist yet. Once it does, it
+  is false, and `bindingOwner` stays.
+
+The event stream reads them when it opens.
 
 | route                              | body                                                | answer                                                                                                                                                                                                                                                                                 |
 | ---------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
