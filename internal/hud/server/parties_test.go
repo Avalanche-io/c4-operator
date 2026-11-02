@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,20 +29,26 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
+	"github.com/Avalanche-io/c4-operator/internal/provenance/people/peopletest"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/provtest"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 )
 
+// sso is the studio's sign-in provider in these tests (peopletest).
+const sso = peopletest.Issuer
+
 // partyRig is a HUD guarded by an installer token that signs under a
-// scratch farm's CA, keeps a farm book the queue seals, and trusts the
-// farm's people's keys.
+// scratch farm's CA, keeps a farm book the queue seals, trusts the farm's
+// people's keys, and checks ID tokens at a scratch sign-in provider.
 type partyRig struct {
 	s      *Server
 	f      *provtest.Farm
 	g      *actRig
+	idp    *peopletest.Farm
 	store  *farmbook.MemoryStore
 	ptr    *farmbook.MemoryPointer
 	sealer *farmbook.Sealer
+	uids   int
 }
 
 func newPartyRig(t *testing.T, objs ...runtime.Object) *partyRig {
@@ -69,16 +77,20 @@ func newPartyRig(t *testing.T, objs ...runtime.Object) *partyRig {
 			return []farmbook.Checker{&farmbook.ControlChecker{Farm: f.ID, Roots: f.Roots, Store: p.store}}
 		}}
 	p.g = newActRigOn(t, s, f)
+	p.idp = peopletest.Studio(t)
+	s.ProveSignIn = p.idp.Issuer.ProveSignIn
 	for name, v := range map[string]*api.Viewer{
 		"ines": {User: "ines", Role: "farm-admin", All: true},
+		"lee":  {User: "lee", Role: "farm-admin", All: true},
 		"dana": {User: "dana", Role: "artist", All: true},
 		"noor": {User: "noor", Role: "artist", All: true},
 		"maya": {User: "maya", Role: "artist", All: true},
 		// the studio's c4:party:kestrel group, as a sign-in reports it
 		"kim": {User: "kim", Role: "artist", All: true, Parties: []string{"kestrel"}, Groups: []string{"c4:party:kestrel"}},
 		"sam": {User: "sam", Role: "artist", All: true, Groups: []string{"lighting-sups"}},
-		// noor, by the studio's sign-in
+		// noor and dana, by the studio's sign-in
 		"noor-sso": {User: "noor@studio.example", Role: "artist", All: true},
+		"dana-sso": {User: "dana@studio.example", Role: "artist", All: true},
 	} {
 		s.DevViewers[name] = v
 	}
@@ -134,6 +146,69 @@ func (p *partyRig) viewer(as string) (*http.Request, *api.Viewer) {
 	return r, &v
 }
 
+// token is a fresh ID token for subject at the studio's provider.
+func (p *partyRig) token(subject string) string {
+	return p.idp.SSO.Token(time.Now(), subject, "", nil)
+}
+
+// uid gives a Party the UID the API server would, so an act can name it.
+func (p *partyRig) uid(t *testing.T, name string) {
+	t.Helper()
+	p.uids++
+	withUID(t, p.s, &c4v1.Party{ObjectMeta: metav1.ObjectMeta{Name: name}}, "9b1e0000-0000-4000-8000-"+strconv.FormatInt(int64(100000000000+p.uids), 10))
+}
+
+// own makes as's own person Party, name, listing as's own sign-in and
+// the provider subject given ("<issuer> <subject>"), proved.
+func (p *partyRig) own(t *testing.T, as, name string, provider ...string) {
+	t.Helper()
+	body := map[string]any{"name": name, "kind": "person", "displayName": name, "signIns": ins(append([]string{p.s.DevViewers[as].User}, provider...)...)}
+	if len(provider) == 1 {
+		_, sub, _ := strings.Cut(provider[0], " ")
+		body["idToken"] = p.token(sub)
+	}
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", as, body, nil); code != http.StatusOK {
+		t.Fatalf("%s makes their Party %s: %d %v", as, name, code, out)
+	}
+	p.uid(t, name)
+}
+
+// org has ines make the organisation name, naming first its first admin,
+// and first accept as as, with their own touched act.
+func (p *partyRig) org(t *testing.T, name, first, as string) {
+	t.Helper()
+	body := kestrel()
+	body["name"], body["firstAdmin"] = name, first
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", body, nil); code != http.StatusOK {
+		t.Fatalf("ines makes %s: %d %v", name, code, out)
+	}
+	p.uid(t, name)
+	if code, out := p.accept(t, name, as, first, true); code != http.StatusOK {
+		t.Fatalf("%s accepts %s: %d %v", first, name, code, out)
+	}
+}
+
+// accept sends POST /parties/{name}/accept as as, with person's own act
+// (touched, or not).
+func (p *partyRig) accept(t *testing.T, name, as, person string, touched bool) (int, map[string]any) {
+	t.Helper()
+	on := p.party(t, name, as).ActOn
+	act := p.g.act(t, p.f.Person(t, person, true), on, "accept-admin", map[string]any{}, touched)
+	return p.call(t, http.MethodPost, "/api/v1/parties/"+name+"/accept", as, map[string]any{}, map[string]string{ActHeader: act})
+}
+
+// people make the rig's usual persons' Parties, each signed in as their
+// own name: those named, or ines, lee, dana, noor, maya, sam and kim.
+func (p *partyRig) people(t *testing.T, who ...string) {
+	t.Helper()
+	if len(who) == 0 {
+		who = []string{"ines", "lee", "dana", "noor", "maya", "sam", "kim"}
+	}
+	for _, x := range who {
+		p.own(t, x, x)
+	}
+}
+
 // seal seals the book and checks the queue took every entry.
 func (p *partyRig) seal(t *testing.T) {
 	t.Helper()
@@ -170,39 +245,62 @@ func kestrel() map[string]any {
 	return m
 }
 
-// A farm admin makes an organisation and is its first admin; its admins
-// add, change and end members, by name and by group, each a signed
-// record the queue books; an admin never grants for themselves, the last
-// admin stays, a name is never reused, and view-people waits for the
-// organisation's policy.
+// ins are sign-ins: a bare subject the HUD signs a person in as, or
+// "<issuer URL> <subject>" for a provider's.
+func ins(list ...string) []api.SignIn {
+	out := []api.SignIn{}
+	for _, x := range list {
+		if iss, sub, ok := strings.Cut(x, " "); ok {
+			out = append(out, api.SignIn{Issuer: iss, Subject: sub})
+			continue
+		}
+		out = append(out, api.SignIn{Subject: x})
+	}
+	return out
+}
+
+// A farm admin makes an organisation naming its first admin, who counts
+// once they accept; its admins add, change and end members, Parties each,
+// by name and by group, each a signed record the queue books; an admin
+// never grants for themselves, the last admin stays, a name is never
+// reused, and view-people waits for the organisation's policy.
 func TestPartiesAndMembers(t *testing.T) {
 	p := newPartyRig(t)
 	ctx := context.Background()
-	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "maya", kestrel(), nil); code != http.StatusForbidden || !says(out, "a farm admin keeps the party list") {
-		t.Fatalf("an artist makes a party: %d %v", code, out)
+	p.people(t)
+	withFirst := func(first string) map[string]any { b := kestrel(); b["firstAdmin"] = first; return b }
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "maya", withFirst("noor"), nil); code != http.StatusForbidden || !says(out, "a farm admin keeps the party list") {
+		t.Fatalf("an artist makes an organisation: %d %v", code, out)
 	}
-	code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", kestrel(), nil)
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", kestrel(), nil); code != http.StatusBadRequest || !says(out, "firstAdmin") {
+		t.Errorf("an organisation with no first admin: %d %v", code, out)
+	}
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", withFirst("ines"), nil); code != http.StatusForbidden || !says(out, "never makes its maker its admin") {
+		t.Errorf("ines names herself first admin: %d %v", code, out)
+	}
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", withFirst("noor@studio.example"), nil); code != http.StatusBadRequest {
+		t.Errorf("a first admin by a bare sign-in name: %d %v", code, out)
+	}
+	code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", withFirst("noor"), nil)
 	if code != http.StatusOK {
 		t.Fatalf("make kestrel: %d %v", code, out)
 	}
-	if st, _ := p.ptr.Read(ctx); len(st.Pending) != 1 {
-		t.Fatalf("the make-party is not booked: %v", st.Pending)
-	}
+	p.uid(t, "kestrel")
 	pv := p.party(t, "kestrel", "maya")
-	if !pv.Booked || pv.DisplayName != "Kestrel Productions" || pv.Made.By != "ines" ||
-		!slices.Equal(members(pv)["ines"], []string{PurposeMember, PurposeAdmin}) {
-		t.Fatalf("kestrel: %+v", pv)
+	if !pv.Booked || len(pv.Members) != 0 || pv.FirstAdmin == nil || pv.FirstAdmin.Person != "noor" || pv.FirstAdmin.Accepted {
+		t.Fatalf("kestrel before its first admin accepts: %+v", pv)
 	}
-	if !slices.Equal(members(pv)["group:c4:party:kestrel"], []string{PurposeMember}) {
-		t.Errorf("the studio's c4:party:kestrel group is not shown holding member: %+v", pv.Groups)
+	_, ines := p.viewer("ines")
+	if p.s.holdsFor(ctx, ines, "kestrel", PurposeAdmin) {
+		t.Fatal("ines, who made kestrel, is its admin")
 	}
 	p.seal(t)
 
 	// a name is never reused; the same make again is an answer
-	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", kestrel(), nil); code != http.StatusOK || out["existing"] != true {
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", withFirst("noor"), nil); code != http.StatusOK || out["existing"] != true {
 		t.Errorf("make kestrel again: %d %v", code, out)
 	}
-	other := kestrel()
+	other := withFirst("noor")
 	other["displayName"] = "Kestrel Films"
 	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", other, nil); code != http.StatusConflict || !says(out, "never reused") {
 		t.Errorf("reuse kestrel: %d %v", code, out)
@@ -211,35 +309,44 @@ func TestPartiesAndMembers(t *testing.T) {
 	members := func(method, path, as string, body map[string]any) (int, map[string]any) {
 		return p.call(t, method, "/api/v1/parties/kestrel/members"+path, as, body, nil)
 	}
+	if code, out := members(http.MethodPost, "", "noor", map[string]any{"person": "dana", "purposes": []string{"member"}}); code != http.StatusForbidden {
+		t.Errorf("the named first admin acts before accepting: %d %v", code, out)
+	}
+	if code, out := p.accept(t, "kestrel", "noor", "noor", true); code != http.StatusOK {
+		t.Fatalf("noor accepts: %d %v", code, out)
+	}
 	if code, out := members(http.MethodPost, "", "dana", map[string]any{"person": "maya", "purposes": []string{"member"}}); code != http.StatusForbidden || !says(out, "not an admin") {
 		t.Errorf("a non-member adds one: %d %v", code, out)
 	}
-	if code, out := members(http.MethodPost, "", "ines", map[string]any{"person": "dana", "purposes": []string{"member", "approve-spend"}}); code != http.StatusOK {
+	if code, out := members(http.MethodPost, "", "noor", map[string]any{"person": "dana", "purposes": []string{"member", "approve-spend"}}); code != http.StatusOK {
 		t.Fatalf("add dana: %d %v", code, out)
 	}
-	if code, out := members(http.MethodPost, "", "ines", map[string]any{"person": "dana", "purposes": []string{"member"}}); code != http.StatusConflict {
+	if code, out := members(http.MethodPost, "", "noor", map[string]any{"person": "dana", "purposes": []string{"member"}}); code != http.StatusConflict {
 		t.Errorf("add dana twice: %d %v", code, out)
+	}
+	if code, out := members(http.MethodPost, "", "noor", map[string]any{"person": "kai", "purposes": []string{"member"}}); code != http.StatusBadRequest || !says(out, "never a bare sign-in name") {
+		t.Errorf("a member by a name no Party has: %d %v", code, out)
 	}
 	if code, out := members(http.MethodPost, "", "dana", map[string]any{"person": "maya", "purposes": []string{"member"}}); code != http.StatusForbidden {
 		t.Errorf("a member who is no admin adds one: %d %v", code, out)
 	}
 	// Admins revoke, never grant for themselves; the last admin stays.
-	if code, out := members(http.MethodPut, "", "ines", map[string]any{"person": "ines", "purposes": []string{"member", "admin", "approve-spend"}}); code != http.StatusForbidden || !says(out, "never grants for themselves") {
-		t.Errorf("ines grants herself: %d %v", code, out)
+	if code, out := members(http.MethodPut, "", "noor", map[string]any{"person": "noor", "purposes": []string{"member", "admin", "approve-spend"}}); code != http.StatusForbidden || !says(out, "never grants for themselves") {
+		t.Errorf("noor grants herself: %d %v", code, out)
 	}
-	if code, out := members(http.MethodPost, "/end", "ines", map[string]any{"person": "ines"}); code != http.StatusConflict || !says(out, "last admin") {
+	if code, out := members(http.MethodPost, "/end", "noor", map[string]any{"person": "noor"}); code != http.StatusConflict || !says(out, "last admin") {
 		t.Errorf("the last admin leaves: %d %v", code, out)
 	}
-	if code, out := members(http.MethodPut, "", "ines", map[string]any{"person": "ines", "purposes": []string{"member"}}); code != http.StatusConflict || !says(out, "last admin") {
+	if code, out := members(http.MethodPut, "", "noor", map[string]any{"person": "noor", "purposes": []string{"member"}}); code != http.StatusConflict || !says(out, "last admin") {
 		t.Errorf("the last admin drops admin: %d %v", code, out)
 	}
-	if code, out := members(http.MethodPost, "", "ines", map[string]any{"person": "noor", "purposes": []string{"member", "admin"}}); code != http.StatusOK {
-		t.Fatalf("add noor as an admin: %d %v", code, out)
+	if code, out := members(http.MethodPost, "", "noor", map[string]any{"person": "lee", "purposes": []string{"member", "admin"}}); code != http.StatusOK {
+		t.Fatalf("add lee as an admin: %d %v", code, out)
 	}
-	if code, out := members(http.MethodPut, "", "noor", map[string]any{"person": "ines", "purposes": []string{"member", "admin", "approve-spend"}}); code != http.StatusOK {
-		t.Errorf("another admin grants ines: %d %v", code, out)
+	if code, out := members(http.MethodPut, "", "lee", map[string]any{"person": "noor", "purposes": []string{"member", "admin", "approve-spend"}}); code != http.StatusOK {
+		t.Errorf("another admin grants noor: %d %v", code, out)
 	}
-	// a member leaves on their own; an admin may then leave, another staying
+	// a member leaves on their own
 	if code, out := members(http.MethodPost, "/end", "dana", map[string]any{"person": "dana"}); code != http.StatusOK {
 		t.Errorf("dana leaves: %d %v", code, out)
 	}
@@ -247,16 +354,16 @@ func TestPartiesAndMembers(t *testing.T) {
 		t.Errorf("dana leaves twice: %d %v", code, out)
 	}
 	// by the studio's own groups
-	if code, out := members(http.MethodPost, "", "ines", map[string]any{"group": "c4:party:kestrel", "purposes": []string{"member", "admin"}}); code != http.StatusBadRequest || !says(out, "member and nothing more") {
+	if code, out := members(http.MethodPost, "", "noor", map[string]any{"group": "c4:party:kestrel", "purposes": []string{"member", "admin"}}); code != http.StatusBadRequest || !says(out, "member and nothing more") {
 		t.Errorf("more for the c4:party: group: %d %v", code, out)
 	}
-	if code, out := members(http.MethodPost, "", "ines", map[string]any{"group": "lighting-sups", "purposes": []string{"member", "approve-spend"}}); code != http.StatusOK {
+	if code, out := members(http.MethodPost, "", "noor", map[string]any{"group": "lighting-sups", "purposes": []string{"member", "approve-spend"}}); code != http.StatusOK {
 		t.Fatalf("lighting-sups: %d %v", code, out)
 	}
-	if code, out := members(http.MethodPost, "", "ines", map[string]any{"person": "maya", "group": "lighting-sups", "purposes": []string{"member"}}); code != http.StatusBadRequest {
+	if code, out := members(http.MethodPost, "", "noor", map[string]any{"person": "maya", "group": "lighting-sups", "purposes": []string{"member"}}); code != http.StatusBadRequest {
 		t.Errorf("a person and a group at once: %d %v", code, out)
 	}
-	if code, out := members(http.MethodPost, "", "ines", map[string]any{"person": "maya", "purposes": []string{"own"}}); code != http.StatusBadRequest {
+	if code, out := members(http.MethodPost, "", "noor", map[string]any{"person": "maya", "purposes": []string{"own"}}); code != http.StatusBadRequest {
 		t.Errorf("an unknown purpose: %d %v", code, out)
 	}
 	pv = p.party(t, "kestrel", "maya")
@@ -267,10 +374,10 @@ func TestPartiesAndMembers(t *testing.T) {
 	for _, m := range pv.Groups {
 		got["group:"+m.Group] = m.Purposes
 	}
-	want := map[string][]string{"ines": {"member", "admin", "approve-spend"}, "noor": {"member", "admin"},
+	want := map[string][]string{"noor": {"member", "admin", "approve-spend"}, "lee": {"member", "admin"},
 		"group:lighting-sups": {"member", "approve-spend"}, "group:c4:party:kestrel": {"member"}}
-	if len(got) != len(want) {
-		t.Errorf("kestrel's members: %v, want %v", got, want)
+	if len(got) != len(want) || !pv.FirstAdmin.Accepted {
+		t.Errorf("kestrel's members: %v, want %v; first admin %+v", got, want, pv.FirstAdmin)
 	}
 	for k, w := range want {
 		if !slices.Equal(got[k], w) {
@@ -282,7 +389,7 @@ func TestPartiesAndMembers(t *testing.T) {
 		t.Error("sam does not hold lighting-sups' purposes, and only those")
 	}
 	// view-people is its own purpose, and off until the policy turns it on
-	if code, out := members(http.MethodPost, "", "ines", map[string]any{"person": "maya", "purposes": []string{"view-spend", "view-people"}}); code != http.StatusOK {
+	if code, out := members(http.MethodPost, "", "noor", map[string]any{"person": "maya", "purposes": []string{"view-spend", "view-people"}}); code != http.StatusOK {
 		t.Fatalf("maya views: %d %v", code, out)
 	}
 	_, maya := p.viewer("maya")
@@ -292,7 +399,7 @@ func TestPartiesAndMembers(t *testing.T) {
 	if code, out := p.call(t, http.MethodPatch, "/api/v1/parties/kestrel", "maya", map[string]any{"perPersonViews": true}, nil); code != http.StatusForbidden {
 		t.Errorf("a non-admin sets kestrel's policy: %d %v", code, out)
 	}
-	if code, out := p.call(t, http.MethodPatch, "/api/v1/parties/kestrel", "noor", map[string]any{"perPersonViews": true}, nil); code != http.StatusOK {
+	if code, out := p.call(t, http.MethodPatch, "/api/v1/parties/kestrel", "lee", map[string]any{"perPersonViews": true}, nil); code != http.StatusOK {
 		t.Fatalf("an admin turns per-person views on: %d %v", code, out)
 	}
 	if !p.s.holdsFor(ctx, maya, "kestrel", PurposeViewPeople) {
@@ -305,18 +412,50 @@ func TestPartiesAndMembers(t *testing.T) {
 	}
 }
 
+// An organisation's first admin counts only once they accept, with their
+// own touched act, once; nobody else accepts for them (R4).
+func TestPartyFirstAdminAccepts(t *testing.T) {
+	p := newPartyRig(t)
+	p.people(t)
+	body := kestrel()
+	body["firstAdmin"] = "noor"
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", body, nil); code != http.StatusOK {
+		t.Fatalf("make kestrel: %d %v", code, out)
+	}
+	p.uid(t, "kestrel")
+	if code, out := p.accept(t, "kestrel", "dana", "dana", true); code != http.StatusForbidden || !says(out, "only noor") {
+		t.Errorf("dana accepts noor's place: %d %v", code, out)
+	}
+	if code, out := p.accept(t, "kestrel", "noor", "noor", false); code != http.StatusForbidden || !says(out, "touch") {
+		t.Errorf("noor accepts with an act she didn't touch: %d %v", code, out)
+	}
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties/kestrel/accept", "noor", map[string]any{}, nil); code != http.StatusForbidden {
+		t.Errorf("noor accepts with no act: %d %v", code, out)
+	}
+	if code, out := p.accept(t, "kestrel", "noor", "noor", true); code != http.StatusOK {
+		t.Fatalf("noor accepts: %d %v", code, out)
+	}
+	if code, out := p.accept(t, "kestrel", "noor", "noor", true); code != http.StatusConflict {
+		t.Errorf("noor accepts twice: %d %v", code, out)
+	}
+	_, noor := p.viewer("noor")
+	if !p.s.holdsFor(context.Background(), noor, "kestrel", PurposeAdmin) {
+		t.Error("noor is no admin after accepting")
+	}
+	p.seal(t)
+}
+
 // Recommendations 1 and 3 each flip at one switch: with MembersByGroup off
 // no group holds a purpose, the c4:party: group included; with
 // ViewPeopleNeedsPolicy off, view-people holds once granted.
 func TestPartyRecommendationsFlip(t *testing.T) {
 	p := newPartyRig(t)
 	ctx := context.Background()
-	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", kestrel(), nil); code != http.StatusOK {
-		t.Fatalf("make kestrel: %d %v", code, out)
-	}
+	p.people(t)
+	p.org(t, "kestrel", "noor", "noor")
 	add := func(body map[string]any) {
 		t.Helper()
-		if code, out := p.call(t, http.MethodPost, "/api/v1/parties/kestrel/members", "ines", body, nil); code != http.StatusOK {
+		if code, out := p.call(t, http.MethodPost, "/api/v1/parties/kestrel/members", "noor", body, nil); code != http.StatusOK {
 			t.Fatalf("add %v: %d %v", body, code, out)
 		}
 	}
@@ -333,7 +472,7 @@ func TestPartyRecommendationsFlip(t *testing.T) {
 	if p.s.holdsFor(ctx, sam, "kestrel", PurposeMember) || p.s.holdsFor(ctx, kim, "kestrel", PurposeMember) {
 		t.Error("a group holds a purpose with MembersByGroup off")
 	}
-	if code, _ := p.call(t, http.MethodPost, "/api/v1/parties/kestrel/members", "ines", map[string]any{"group": "comp-sups", "purposes": []string{"member"}}, nil); code != http.StatusBadRequest {
+	if code, _ := p.call(t, http.MethodPost, "/api/v1/parties/kestrel/members", "noor", map[string]any{"group": "comp-sups", "purposes": []string{"member"}}, nil); code != http.StatusBadRequest {
 		t.Errorf("a group rule with MembersByGroup off: %d", code)
 	}
 	MembersByGroup = true
@@ -388,11 +527,10 @@ func TestPartyWriteGuard(t *testing.T) {
 // changes nothing.
 func TestPartyMembershipNeedsTheBook(t *testing.T) {
 	p := newPartyRig(t)
-	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", kestrel(), nil); code != http.StatusOK {
-		t.Fatalf("make kestrel: %d %v", code, out)
-	}
+	p.people(t)
+	p.org(t, "kestrel", "noor", "noor")
 	p.s.FarmBook = &farmbook.Writer{Store: p.store, Pointer: failingPointer{p.ptr}}
-	code, out := p.call(t, http.MethodPost, "/api/v1/parties/kestrel/members", "ines", map[string]any{"person": "dana", "purposes": []string{"member"}}, nil)
+	code, out := p.call(t, http.MethodPost, "/api/v1/parties/kestrel/members", "noor", map[string]any{"person": "dana", "purposes": []string{"member"}}, nil)
 	if code != http.StatusServiceUnavailable || !says(out, "nothing changed") {
 		t.Fatalf("add dana, the book refusing: %d %v", code, out)
 	}
@@ -410,7 +548,7 @@ func (failingPointer) Write(context.Context, farmbook.State, farmbook.State) err
 
 // A party: wait is the c4:party: group's while the farm keeps no Party of
 // that name; once it does, only a member holding member decides it, by
-// name or by a group, and the record says under which membership.
+// their Party or by a group, and the record says under which membership.
 func TestPartyWaitsTakeMembers(t *testing.T) {
 	p := newPartyRig(t)
 	rec := p.s.m.byKey["show-a/sh040-light-v007"]
@@ -426,12 +564,11 @@ func TestPartyWaitsTakeMembers(t *testing.T) {
 	if may("kim") != nil || may("dana") == nil {
 		t.Fatalf("before the Party, the group decides: kim %v, dana %v", may("kim"), may("dana"))
 	}
-	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", kestrel(), nil); code != http.StatusOK {
-		t.Fatalf("make kestrel: %d %v", code, out)
-	}
+	p.people(t)
+	p.org(t, "kestrel", "noor", "noor")
 	add := func(method string, body map[string]any) {
 		t.Helper()
-		if code, out := p.call(t, method, "/api/v1/parties/kestrel/members", "ines", body, nil); code != http.StatusOK {
+		if code, out := p.call(t, method, "/api/v1/parties/kestrel/members", "noor", body, nil); code != http.StatusOK {
 			t.Fatalf("%v: %d %v", body, code, out)
 		}
 	}
@@ -456,7 +593,7 @@ func TestPartyWaitsTakeMembers(t *testing.T) {
 	if !strings.Contains(pred.Authorization, "a member of kestrel holding member (record ") {
 		t.Errorf("the decision's record: %q", pred.Authorization)
 	}
-	// and the wait is on her page of what needs her, and not on maya's
+	// and the wait is on sam's page of what needs him, and not on maya's
 	needs := func(as string) bool {
 		t.Helper()
 		r, v := p.viewer(as)
@@ -481,24 +618,41 @@ func TestPartyWaitsTakeMembers(t *testing.T) {
 	}
 }
 
-// A person's party ties their sign-ins together: a farm admin sets them,
-// one sign-in is one person's, the person adds only the one they use,
-// and a sign-in of theirs decides their waits. Sign-ins go only to the
-// person and to farm admins.
+// A person makes their own Party (R2): signed in with the name it lists,
+// each provider subject proved by a fresh ID token for it; one sign-in is
+// one person's; the person adds only their own sign-ins and removes any,
+// a farm admin only removes; a sign-in of theirs decides their waits.
+// Sign-ins go only to the person and to farm admins.
 func TestPartySignIns(t *testing.T) {
-	const sso = "https://sso.studio.example"
 	p := newPartyRig(t)
 	ctx := context.Background()
-	noor := map[string]any{"name": "noor", "kind": "person", "displayName": "Noor", "signIns": ins("noor@studio.example", "noor")}
-	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", noor, nil); code != http.StatusOK {
-		t.Fatalf("make noor: %d %v", code, out)
+	mk := func(as, name string, signIns []api.SignIn, token string) (int, map[string]any) {
+		body := map[string]any{"name": name, "kind": "person", "displayName": name, "signIns": signIns}
+		if token != "" {
+			body["idToken"] = token
+		}
+		return p.call(t, http.MethodPost, "/api/v1/parties", as, body, nil)
 	}
-	lee := map[string]any{"name": "lee", "kind": "person", "displayName": "Lee", "signIns": ins("noor@studio.example")}
-	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", lee, nil); code != http.StatusConflict || !says(out, "one sign-in is one person's") {
-		t.Errorf("lee takes noor's sign-in: %d %v", code, out)
+	if code, out := mk("ines", "noor", ins("noor@studio.example"), ""); code != http.StatusForbidden || !says(out, "made by the person") {
+		t.Errorf("a farm admin makes noor's Party: %d %v", code, out)
 	}
-	org := map[string]any{"name": "saltmarsh", "kind": "organisation", "displayName": "Saltmarsh", "signIns": ins("x")}
-	if code, _ := p.call(t, http.MethodPost, "/api/v1/parties", "ines", org, nil); code != http.StatusBadRequest {
+	if code, out := mk("noor-sso", "noor", ins("noor@studio.example", sso+" "+peopletest.NoorSub), ""); code != http.StatusForbidden || !says(out, "fresh ID token") {
+		t.Errorf("a provider subject with no token: %d %v", code, out)
+	}
+	if code, out := mk("noor-sso", "noor", ins("noor@studio.example", sso+" "+peopletest.NoorSub), p.token(peopletest.DanaSub)); code != http.StatusForbidden || !says(out, "proves") {
+		t.Errorf("a provider subject on another's token: %d %v", code, out)
+	}
+	if code, out := mk("noor-sso", "noor", ins("noor@studio.example", "noor"), ""); code != http.StatusForbidden || !says(out, "added only by someone signed in as it") {
+		t.Errorf("a HUD name noor isn't signed in as: %d %v", code, out)
+	}
+	if code, out := mk("noor-sso", "noor", ins("noor@studio.example", sso+" "+peopletest.NoorSub), p.token(peopletest.NoorSub)); code != http.StatusOK {
+		t.Fatalf("noor makes her Party: %d %v", code, out)
+	}
+	p.uid(t, "noor")
+	if code, out := mk("lee", "lee", ins("lee", sso+" "+peopletest.NoorSub), p.token(peopletest.NoorSub)); code != http.StatusConflict || !says(out, "one sign-in is one person's") {
+		t.Errorf("lee takes noor's subject: %d %v", code, out)
+	}
+	if code, _ := p.call(t, http.MethodPost, "/api/v1/parties", "ines", map[string]any{"name": "saltmarsh", "kind": "organisation", "displayName": "Saltmarsh", "signIns": ins("x")}, nil); code != http.StatusBadRequest {
 		t.Errorf("an organisation with sign-ins: %d", code)
 	}
 	r, noorSSO := p.viewer("noor-sso")
@@ -516,34 +670,30 @@ func TestPartySignIns(t *testing.T) {
 	if got := p.party(t, "noor", "noor-sso").SignIns; len(got) != 2 {
 		t.Errorf("noor does not see her sign-ins: %v", got)
 	}
-	signIns := func(as string, list ...string) (int, map[string]any) {
-		return p.call(t, http.MethodPut, "/api/v1/parties/noor/sign-ins", as, map[string]any{"signIns": ins(list...)}, nil)
+	signIns := func(as string, token string, list ...string) (int, map[string]any) {
+		body := map[string]any{"signIns": ins(list...)}
+		if token != "" {
+			body["idToken"] = token
+		}
+		return p.call(t, http.MethodPut, "/api/v1/parties/noor/sign-ins", as, body, nil)
 	}
-	if code, out := signIns("noor-sso", "noor@studio.example", "noor", "maya"); code != http.StatusForbidden || !says(out, "adds only the sign-in they are using") {
-		t.Errorf("noor adds maya's sign-in: %d %v", code, out)
+	if code, out := signIns("noor-sso", "", "noor@studio.example", sso+" "+peopletest.NoorSub, "maya"); code != http.StatusForbidden || !says(out, "added only by someone signed in as it") {
+		t.Errorf("noor adds maya's name: %d %v", code, out)
 	}
-	if code, out := signIns("maya", "noor@studio.example"); code != http.StatusForbidden {
-		t.Errorf("maya changes noor's sign-ins: %d %v", code, out)
+	if code, out := signIns("ines", "", "noor@studio.example", sso+" "+peopletest.NoorSub, "noor-laptop"); code != http.StatusForbidden || !says(out, "the person adds their own") {
+		t.Errorf("a farm admin adds to noor's sign-ins: %d %v", code, out)
 	}
-	// a provider's subject is a farm admin's to add: the HUD can't see it
-	if code, out := signIns("noor-sso", "noor@studio.example", "noor", sso+" 00u-noor"); code != http.StatusForbidden || !says(out, "a farm admin adds 00u-noor at "+sso) {
-		t.Errorf("noor adds a provider subject: %d %v", code, out)
+	if code, out := signIns("maya", "", "noor@studio.example"); code != http.StatusForbidden {
+		t.Errorf("maya removes noor's sign-in: %d %v", code, out)
 	}
-	// even one spelled as her HUD sign-in: at a provider it is the provider's word
-	if code, out := signIns("noor-sso", "noor@studio.example", "noor", sso+" noor@studio.example"); code != http.StatusForbidden || !says(out, "a farm admin adds noor@studio.example at "+sso) {
-		t.Errorf("noor adds her HUD name at a provider: %d %v", code, out)
+	if code, out := signIns("ines", "", "noor@studio.example"); code != http.StatusOK {
+		t.Errorf("a farm admin removes noor's provider subject: %d %v", code, out)
 	}
-	if code, _ := signIns("ines", "noor@studio.example", "ftp://sso.studio.example 00u-noor"); code != http.StatusBadRequest {
-		t.Errorf("an issuer that is no URL: %d", code)
-	}
-	if code, out := signIns("noor-sso", "noor@studio.example"); code != http.StatusOK {
-		t.Errorf("noor drops a sign-in: %d %v", code, out)
-	}
-	if code, out := signIns("ines", "noor@studio.example", "noor-laptop", sso+" 00u-noor"); code != http.StatusOK {
-		t.Errorf("a farm admin sets noor's sign-ins: %d %v", code, out)
+	if code, out := signIns("noor-sso", p.token(peopletest.NoorSub), "noor@studio.example", "HTTPS://SSO.Studio.Example/ "+peopletest.NoorSub); code != http.StatusOK {
+		t.Errorf("noor adds her subject back, proved: %d %v", code, out)
 	}
 	pt, err := p.s.parties(ctx)
-	if err != nil || !slices.Equal(findParty(pt, "noor").Spec.SignIns, []c4v1.PartySignIn{{Subject: "noor-laptop"}, {Subject: "noor@studio.example"}, {Issuer: sso, Subject: "00u-noor"}}) || findParty(pt, "noor").Spec.Changed == nil {
+	if err != nil || !slices.Equal(findParty(pt, "noor").Spec.SignIns, []c4v1.PartySignIn{{Subject: "noor@studio.example"}, {Issuer: sso, Subject: peopletest.NoorSub}}) {
 		t.Errorf("noor's sign-ins: %+v %v", findParty(pt, "noor"), err)
 	}
 	// a sign-in two Parties hold, written around the HUD, is no one's
@@ -557,20 +707,240 @@ func TestPartySignIns(t *testing.T) {
 	p.seal(t)
 }
 
+// P1 of the O1 review: a user name is no hidden sign-in. A viewer signed
+// in as dana, though dana's Party lists only dana@studio.example and her
+// provider subject, is not dana: holds none of her purposes, and can't
+// rewrite her sign-ins or drop her provider subject (R1).
+func TestPartyNameIsNoSignIn(t *testing.T) {
+	p := newPartyRig(t)
+	ctx := context.Background()
+	p.own(t, "dana-sso", "dana", sso+" "+peopletest.DanaSub)
+	_, v := p.viewer("dana")
+	if st := p.s.standingOf(ctx, v); st.person != "" || st.holds("dana", PurposeAdmin) {
+		t.Errorf("viewer dana is Party dana: %q", st.person)
+	}
+	code, out := p.call(t, http.MethodPut, "/api/v1/parties/dana/sign-ins", "dana", map[string]any{"signIns": ins("dana")}, nil)
+	if code != http.StatusForbidden {
+		t.Errorf("viewer dana rewrites dana's sign-ins: %d %v", code, out)
+	}
+	ps, _ := p.s.parties(ctx)
+	if got := findParty(ps, "dana").Spec.SignIns; len(got) != 2 {
+		t.Errorf("dana's sign-ins now: %+v", got)
+	}
+}
+
+// P2 of the O1 review: an admin can't grant herself purposes under a
+// second name. A membership names a Party, never a bare sign-in name, so
+// her sign-in's name is refused as a member; and a purpose she holds only
+// by a group is never copied into her named membership (R3).
+func TestPartySelfGrantByAliasRefused(t *testing.T) {
+	p := newPartyRig(t)
+	ctx := context.Background()
+	p.own(t, "noor-sso", "noor")
+	p.people(t, "ines", "lee", "sam")
+	p.org(t, "kestrel", "noor", "noor-sso")
+	code, out := p.call(t, http.MethodPost, "/api/v1/parties/kestrel/members", "noor-sso", map[string]any{"person": "noor@studio.example", "purposes": []string{"member", "approve-spend", "admin"}}, nil)
+	if code == http.StatusOK {
+		t.Errorf("noor adds a member under her sign-in name: %d %v", code, out)
+	}
+	_, alias := p.viewer("noor-sso")
+	if p.s.holdsFor(ctx, alias, "kestrel", PurposeApproveSpend) {
+		t.Error("noor holds approve-spend under a second name")
+	}
+	// a purpose held only by a group: lighting-sups holds approve-spend, and
+	// sam, in it, an admin by name, can't copy it into his own membership
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties/kestrel/members", "noor-sso", map[string]any{"person": "sam", "purposes": []string{"member", "admin"}}, nil); code != http.StatusOK {
+		t.Fatalf("sam an admin: %d %v", code, out)
+	}
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties/kestrel/members", "noor-sso", map[string]any{"group": "lighting-sups", "purposes": []string{"member", "approve-spend"}}, nil); code != http.StatusOK {
+		t.Fatalf("lighting-sups: %d %v", code, out)
+	}
+	if code, out := p.call(t, http.MethodPut, "/api/v1/parties/kestrel/members", "sam", map[string]any{"person": "sam", "purposes": []string{"member", "admin", "approve-spend"}}, nil); code != http.StatusForbidden || !says(out, "never grants for themselves") {
+		t.Errorf("sam copies his group's approve-spend into his name: %d %v", code, out)
+	}
+	if code, out := p.call(t, http.MethodPut, "/api/v1/parties/kestrel/members", "sam", map[string]any{"group": "lighting-sups", "purposes": []string{"member", "approve-spend", "approve-egress"}}, nil); code != http.StatusForbidden || !says(out, "a group they are in") {
+		t.Errorf("sam grows his own group: %d %v", code, out)
+	}
+}
+
+// barrierStore makes the first two Gets wait for each other once armed.
+type barrierStore struct {
+	farmbook.Store
+	armed   atomic.Bool
+	n       atomic.Int32
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *barrierStore) Get(ctx context.Context, id string) ([]byte, error) {
+	if b.armed.Load() {
+		if b.n.Add(1) >= 2 {
+			b.once.Do(func() { close(b.release) })
+		}
+		select {
+		case <-b.release:
+		case <-time.After(3 * time.Second):
+		}
+	}
+	return b.Store.Get(ctx, id)
+}
+
+// P3 of the O1 review: two admins ending each other at once leave one.
+// The last-admin check runs inside the book's append, on the book as it
+// stands, so the second is judged after the first and refused (R5).
+func TestPartyLastAdminRaceRefused(t *testing.T) {
+	p := newPartyRig(t)
+	p.people(t)
+	p.org(t, "kestrel", "noor", "noor")
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties/kestrel/members", "noor", map[string]any{"person": "lee", "purposes": []string{"member", "admin"}}, nil); code != http.StatusOK {
+		t.Fatalf("add lee admin: %d %v", code, out)
+	}
+	bs := &barrierStore{Store: p.store, release: make(chan struct{})}
+	p.s.FarmBook = &farmbook.Writer{Store: bs, Pointer: p.ptr}
+	bs.armed.Store(true)
+	var wg sync.WaitGroup
+	codes := make([]int, 2)
+	for i, c := range []struct{ as, whom string }{{"noor", "lee"}, {"lee", "noor"}} {
+		wg.Add(1)
+		go func(i int, as, whom string) {
+			defer wg.Done()
+			codes[i], _ = p.call(t, http.MethodPost, "/api/v1/parties/kestrel/members/end", as, map[string]any{"person": whom}, nil)
+		}(i, c.as, c.whom)
+	}
+	wg.Wait()
+	bs.armed.Store(false)
+	pv := p.party(t, "kestrel", "maya")
+	admins := 0
+	for _, m := range pv.Members {
+		if slices.Contains(m.Purposes, PurposeAdmin) {
+			admins++
+		}
+	}
+	slices.Sort(codes)
+	if admins != 1 || codes[0] != http.StatusOK || codes[1] == http.StatusOK {
+		t.Errorf("two admins end each other: codes %v, %d admins left, members %+v", codes, admins, members(pv))
+	}
+	p.seal(t)
+}
+
+// P4 of the O1 review: a Party person's own signed act is taken when it
+// is sent by a sign-in their Party lists, not only by their Party's name
+// (R7); nobody else's is.
+func TestPartyPersonsOwnActTaken(t *testing.T) {
+	p := newPartyRig(t)
+	p.own(t, "noor-sso", "noor")
+	on := p.party(t, "noor", "noor-sso").ActOn
+	body := map[string]any{"signIns": ins()}
+	act := p.g.act(t, p.f.Person(t, "dana", true), on, "set-sign-ins", body, true)
+	if code, _ := p.call(t, http.MethodPut, "/api/v1/parties/noor/sign-ins", "noor-sso", body, map[string]string{ActHeader: act}); code != http.StatusForbidden {
+		t.Errorf("dana's act sent as noor: %d", code)
+	}
+	act = p.g.act(t, p.f.Person(t, "noor", true), on, "set-sign-ins", body, true)
+	if code, out := p.call(t, http.MethodPut, "/api/v1/parties/noor/sign-ins", "noor-sso", body, map[string]string{ActHeader: act}); code != http.StatusOK {
+		t.Errorf("noor's own act, sent as noor@studio.example: %d %v", code, out)
+	}
+}
+
+// P5 of the O1 review, the HUD's half: a person who signs in by the
+// c4-sign-ins Secret makes their own Party only carrying one of its
+// subjects, proved, since the Secret's lines for them are ignored once it
+// exists: so their Party never locks them out of the people's issuer
+// (R2, R6).
+func TestPartyLeavingTheSecretKeepsTheSubject(t *testing.T) {
+	p := newPartyRig(t)
+	p.s.StandInSignIns = people.StaticSignIns{"noor": {{Issuer: sso, Subject: peopletest.NoorSub}}}
+	body := map[string]any{"name": "noor", "kind": "person", "displayName": "Noor", "signIns": ins("noor")}
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "noor", body, nil); code != http.StatusForbidden || !says(out, "signs in by the c4-sign-ins Secret") {
+		t.Errorf("noor leaves the Secret with no provider subject: %d %v", code, out)
+	}
+	body["signIns"], body["idToken"] = ins("noor", sso+" "+peopletest.NoorSub), p.token(peopletest.NoorSub)
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "noor", body, nil); code != http.StatusOK {
+		t.Errorf("noor leaves the Secret with her subject, proved: %d %v", code, out)
+	}
+}
+
+// One subject stays one person's across the Parties and the c4-sign-ins
+// Secret: a provider subject the Secret gives someone with no person Party
+// of their own is refused on a Party's write, while the same person's own
+// Party, or a subject of someone who has a Party now, is not.
+func TestPartySignInsAgainstTheSecret(t *testing.T) {
+	p := newPartyRig(t)
+	p.s.StandInSignIns = people.StaticSignIns{"dana": {{Issuer: sso, Subject: peopletest.DanaSub}}, "kai": {{Issuer: sso, Subject: peopletest.NoorSub}}}
+	mk := func(as, name, sub string) (int, map[string]any) {
+		body := map[string]any{"name": name, "kind": "person", "displayName": name, "signIns": ins(p.s.DevViewers[as].User, sso+" "+sub), "idToken": p.token(sub)}
+		return p.call(t, http.MethodPost, "/api/v1/parties", as, body, nil)
+	}
+	if code, out := mk("noor", "noor", peopletest.NoorSub); code != http.StatusConflict || !says(out, "is kai's in the c4-sign-ins Secret") {
+		t.Errorf("noor takes a subject the Secret gives kai: %d %v", code, out)
+	}
+	if code, out := mk("dana", "dana", peopletest.DanaSub); code != http.StatusOK {
+		t.Errorf("dana's own Party takes her Secret subject: %d %v", code, out)
+	}
+	// kai has a Party now, so the Secret's line for kai signs in no one; kai
+	// leaves the Secret by proving another subject of theirs
+	p.s.DevViewers["kai"] = &api.Viewer{User: "kai", Role: "artist", All: true}
+	p.s.StandInSignIns = people.StaticSignIns{"dana": {{Issuer: sso, Subject: peopletest.DanaSub}}, "kai": {{Issuer: sso, Subject: peopletest.NoorSub}, {Issuer: sso, Subject: "00u-kai"}}}
+	p.own(t, "kai", "kai", sso+" 00u-kai")
+	if code, out := mk("noor", "noor", peopletest.NoorSub); code != http.StatusOK {
+		t.Errorf("noor takes a subject only kai's ignored Secret line names: %d %v", code, out)
+	}
+}
+
+// A named membership whose name is no Party, as one booked before
+// memberships named Parties, lapses visibly: shown, holding nothing (R3).
+func TestPartyMembershipByNameLapses(t *testing.T) {
+	p := newPartyRig(t)
+	ctx := context.Background()
+	p.people(t)
+	p.org(t, "kestrel", "noor", "noor")
+	// a membership of "kai", booked as an earlier HUD would have
+	rec, err := provenance.SignStatement(ctx, p.s.Signer, provenance.PredicateControl,
+		[]provenance.Subject{{Name: farmbook.MemberKey("kestrel", "kai"), Digest: map[string]string{"sha256": "00"}}},
+		controlPredicate{Actor: "noor", Action: "add-member", Target: farmbook.MemberKey("kestrel", "kai"),
+			Change: map[string]any{"party": "kestrel", "member": "kai", "purposes": []string{"member", "admin"}}}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := c4.Identify(bytes.NewReader(rec)).String()
+	if err := p.store.Put(ctx, id, rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.s.bookChecked(ctx, id, nil); err != nil {
+		t.Fatal(err)
+	}
+	var kai *api.Member
+	for _, m := range p.party(t, "kestrel", "maya").Members {
+		if m.Person == "kai" {
+			kai = &m
+		}
+	}
+	if kai == nil || kai.Lapsed == "" || len(kai.InEffect) != 0 {
+		t.Fatalf("kai's membership by a bare name: %+v", kai)
+	}
+	// whoever signs in as kai holds nothing by it
+	p.s.DevViewers["kai"] = &api.Viewer{User: "kai", Role: "artist", All: true}
+	_, v := p.viewer("kai")
+	if p.s.holdsFor(ctx, v, "kestrel", PurposeMember) {
+		t.Error("a bare name's membership holds for the viewer of that name")
+	}
+	// the last-admin check does not count a lapsed admin
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties/kestrel/members/end", "noor", map[string]any{"person": "noor"}, nil); code != http.StatusConflict {
+		t.Errorf("noor leaves with only a lapsed admin left: %d %v", code, out)
+	}
+}
+
 // A party write may carry its signed act, and its record then cites it:
 // the act on the party, of the write's own verb, with its body.
 func TestPartyActsCited(t *testing.T) {
 	p := newPartyRig(t)
-	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", kestrel(), nil); code != http.StatusOK {
-		t.Fatalf("make kestrel: %d %v", code, out)
-	}
-	withUID(t, p.s, &c4v1.Party{ObjectMeta: metav1.ObjectMeta{Name: "kestrel"}}, "9b1e0000-0000-4000-8000-000000000001")
-	on := p.party(t, "kestrel", "ines").ActOn
-	ines := p.f.Person(t, "ines", true)
+	p.people(t)
+	p.org(t, "kestrel", "noor", "noor")
+	on := p.party(t, "kestrel", "noor").ActOn
+	noor := p.f.Person(t, "noor", true)
 	body := map[string]any{"person": "dana", "purposes": []string{"member"}}
 	send := func(verb string, confirmed bool) (int, map[string]any) {
-		act := p.g.act(t, ines, on, verb, body, confirmed)
-		return p.call(t, http.MethodPost, "/api/v1/parties/kestrel/members", "ines", body, map[string]string{ActHeader: act})
+		act := p.g.act(t, noor, on, verb, body, confirmed)
+		return p.call(t, http.MethodPost, "/api/v1/parties/kestrel/members", "noor", body, map[string]string{ActHeader: act})
 	}
 	if code, out := send("end-member", true); code != http.StatusForbidden {
 		t.Errorf("an act of another verb: %d %v", code, out)
@@ -634,12 +1004,13 @@ func TestPartyRelayNeedsAMember(t *testing.T) {
 	}
 }
 
-// The act needs of a Party's verbs: making a party, adding a member and
-// changing purposes or sign-ins give authority, so need a touch; ending a
-// membership and changing a party's names are a person's, silent.
+// The act needs of a Party's verbs: making a party, accepting as its
+// first admin, adding a member and changing purposes or sign-ins give
+// authority, so need a touch; ending a membership and changing a party's
+// names are a person's, silent.
 func TestPartyActNeeds(t *testing.T) {
 	for verb, want := range map[string]provenance.ActNeed{
-		"make-party": {Person: true, Touch: true}, "add-member": {Person: true, Touch: true},
+		"make-party": {Person: true, Touch: true}, "accept-admin": {Person: true, Touch: true}, "add-member": {Person: true, Touch: true},
 		"set-purposes": {Person: true, Touch: true}, "set-sign-ins": {Person: true, Touch: true},
 		"end-member": {Person: true}, "change-party": {Person: true},
 	} {
@@ -659,10 +1030,8 @@ func TestPartyActNeeds(t *testing.T) {
 func TestPartyMembershipRecordsChecked(t *testing.T) {
 	p := newPartyRig(t)
 	ctx := context.Background()
-	code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", kestrel(), nil)
-	if code != http.StatusOK {
-		t.Fatalf("make kestrel: %d %v", code, out)
-	}
+	p.people(t)
+	p.org(t, "kestrel", "noor", "noor")
 	_, maya := p.viewer("maya")
 	key := farmbook.MemberKey("kestrel", "maya")
 	forge := func(signer *provenance.Signer) {
@@ -693,10 +1062,10 @@ func TestPartyMembershipRecordsChecked(t *testing.T) {
 	if p.s.holdsFor(ctx, maya, "kestrel", PurposeAdmin) {
 		t.Error("a pending entry citing the queue's record makes maya an admin")
 	}
-	// The HUD's own make-party record, cited by an entry that says it adds
-	// maya: the record is the HUD's, of another act.
-	made, _ := out["record"].(string)
-	raw, err := p.store.Get(ctx, made)
+	// The HUD's own accept-admin record, cited by an entry that says it
+	// adds maya: the record is the HUD's, of another act.
+	acc := p.party(t, "kestrel", "maya").FirstAdmin.Record
+	raw, err := p.store.Get(ctx, acc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -709,7 +1078,7 @@ func TestPartyMembershipRecordsChecked(t *testing.T) {
 		t.Fatal(err)
 	}
 	if p.s.holdsFor(ctx, maya, "kestrel", PurposeAdmin) {
-		t.Error("an entry citing the make-party record as maya's add-member makes her an admin")
+		t.Error("an entry citing noor's accept-admin record as maya's add-member makes her an admin")
 	}
 }
 
@@ -733,166 +1102,6 @@ func TestPartyWaitsWhenPartiesUnreadable(t *testing.T) {
 	}
 }
 
-// ins are sign-ins: a bare subject the HUD signs a person in as, or
-// "<issuer URL> <subject>" for a provider's.
-func ins(list ...string) []api.SignIn {
-	out := []api.SignIn{}
-	for _, x := range list {
-		if iss, sub, ok := strings.Cut(x, " "); ok {
-			out = append(out, api.SignIn{Issuer: iss, Subject: sub})
-			continue
-		}
-		out = append(out, api.SignIn{Subject: x})
-	}
-	return out
-}
-
-// The farm binding's owner can always make the owner's Party while it
-// doesn't exist, as themselves, with no farm admin's right: their own
-// person Party, signed in only as they are; nothing else.
-func TestPartyOwnerMakesOwn(t *testing.T) {
-	p := newPartyRig(t)
-	ctx := context.Background()
-	if err := p.s.Client.Create(ctx, &c4v1.DeploymentBinding{ObjectMeta: metav1.ObjectMeta{Name: c4v1.FarmBindingName},
-		Spec: c4v1.DeploymentBindingSpec{Owner: "noor", To: "laptop-1/*", For: []string{"task/v1"}, By: "noor"}}); err != nil {
-		t.Fatal(err)
-	}
-	mk := func(as, name, kind string, signIns ...string) (int, map[string]any) {
-		return p.call(t, http.MethodPost, "/api/v1/parties", as, map[string]any{"name": name, "kind": kind, "displayName": name, "signIns": ins(signIns...)}, nil)
-	}
-	for _, c := range []struct{ as, name, kind string }{{"noor", "saltmarsh", "organisation"}, {"noor", "dana", "person"}, {"maya", "noor", "person"}, {"noor", "noor", "organisation"}} {
-		if code, out := mk(c.as, c.name, c.kind); code != http.StatusForbidden {
-			t.Errorf("%s makes the %s %s: %d %v", c.as, c.kind, c.name, code, out)
-		}
-	}
-	if code, out := mk("noor", "noor", "person", "noor", "https://sso.studio.example 00u-noor"); code != http.StatusForbidden {
-		t.Errorf("the owner adds a provider subject to her own Party: %d %v", code, out)
-	}
-	code, out := mk("noor", "noor", "person", "noor")
-	if code != http.StatusOK {
-		t.Fatalf("the owner makes her own Party: %d %v", code, out)
-	}
-	if pred := p.g.predicate(t, "show-a", out["record"].(string)); pred.Authorization != "the farm binding's owner, making their own party" {
-		t.Errorf("the record's authorization: %q", pred.Authorization)
-	}
-	p.seal(t)
-}
-
-// One subject stays one person's across the Parties and the c4-sign-ins
-// Secret: a provider subject the Secret gives someone with no person Party
-// of their own is refused on a Party's write, while the same person's own
-// Party, or a subject of someone who has a Party now, is not.
-func TestPartySignInsAgainstTheSecret(t *testing.T) {
-	p := newPartyRig(t)
-	const sso = "https://sso.studio.example"
-	p.s.StandInSignIns = people.StaticSignIns{"lee": {{Issuer: sso, Subject: "00u-lee"}}, "dana": {{Issuer: sso, Subject: "00u-dana"}}}
-	mk := func(name string, signIns ...string) (int, map[string]any) {
-		return p.call(t, http.MethodPost, "/api/v1/parties", "ines", map[string]any{"name": name, "kind": "person", "displayName": name, "signIns": ins(signIns...)}, nil)
-	}
-	if code, out := mk("noor", sso+" 00u-lee"); code != http.StatusConflict || !says(out, "is lee's in the c4-sign-ins Secret") {
-		t.Errorf("noor takes lee's Secret subject: %d %v", code, out)
-	}
-	if code, out := mk("lee", sso+" 00u-lee"); code != http.StatusOK {
-		t.Errorf("lee's own Party takes her Secret subject: %d %v", code, out)
-	}
-	if code, out := mk("dana"); code != http.StatusOK {
-		t.Fatalf("dana's Party: %d %v", code, out)
-	}
-	// dana has a Party now, so the Secret's line for her signs in no one
-	if code, out := p.call(t, http.MethodPut, "/api/v1/parties/lee/sign-ins", "ines", map[string]any{"signIns": ins(sso+" 00u-lee", sso+" 00u-dana")}, nil); code != http.StatusOK {
-		t.Errorf("lee takes a subject only dana's ignored Secret line names: %d %v", code, out)
-	}
-	p.s.StandInSignIns = people.StaticSignIns{"kai": {{Issuer: sso, Subject: "00u-kai"}}}
-	if code, out := p.call(t, http.MethodPut, "/api/v1/parties/lee/sign-ins", "ines", map[string]any{"signIns": ins(sso+" 00u-lee", sso+" 00u-kai")}, nil); code != http.StatusConflict {
-		t.Errorf("lee takes kai's Secret subject: %d %v", code, out)
-	}
-}
-
-// A farm without a farm book has no Parties: GET and HEAD /parties and GET
-// /parties/{name} answer 501, as the writes do, so the HUD shows no tab;
-// with a book they answer.
-func TestPartyReadsNeedTheBook(t *testing.T) {
-	p := newPartyRig(t)
-	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", kestrel(), nil); code != http.StatusOK {
-		t.Fatalf("make kestrel: %d %v", code, out)
-	}
-	read := func(method, path string) int {
-		r := httptest.NewRequest(method, path+"?as=maya", nil)
-		r.Header.Set(InstallerHeader, testInstallerToken)
-		w := httptest.NewRecorder()
-		p.s.Handler().ServeHTTP(w, r)
-		return w.Code
-	}
-	for _, c := range []struct{ method, path string }{{http.MethodGet, "/api/v1/parties"}, {http.MethodHead, "/api/v1/parties"}, {http.MethodGet, "/api/v1/parties/kestrel"}} {
-		if code := read(c.method, c.path); code != http.StatusOK {
-			t.Errorf("%s %s with a book: %d", c.method, c.path, code)
-		}
-	}
-	p.s.FarmBook, p.s.FarmBookReader = nil, nil
-	for _, c := range []struct{ method, path string }{{http.MethodGet, "/api/v1/parties"}, {http.MethodHead, "/api/v1/parties"}, {http.MethodGet, "/api/v1/parties/kestrel"}} {
-		if code := read(c.method, c.path); code != http.StatusNotImplemented {
-			t.Errorf("%s %s without a book: %d, want 501", c.method, c.path, code)
-		}
-	}
-}
-
-// The viewer says what it may do about the party list, by the rules the
-// routes take: makeParties is exactly whether POST /parties succeeds for
-// it; bindingOwner names the farm binding's owner; makeOwnParty holds for
-// that owner until their own Party exists.
-func TestPartyViewerRights(t *testing.T) {
-	p := newPartyRig(t)
-	ctx := context.Background()
-	if err := p.s.Client.Create(ctx, &c4v1.DeploymentBinding{ObjectMeta: metav1.ObjectMeta{Name: c4v1.FarmBindingName},
-		Spec: c4v1.DeploymentBindingSpec{Owner: "noor", To: "laptop-1/*", For: []string{"task/v1"}, By: "noor"}}); err != nil {
-		t.Fatal(err)
-	}
-	viewer := func(as string, headers map[string]string) api.Viewer {
-		t.Helper()
-		r := httptest.NewRequest(http.MethodGet, "/api/v1/snapshot?as="+as, nil)
-		r.Header.Set(InstallerHeader, testInstallerToken)
-		for k, v := range headers {
-			r.Header.Set(k, v)
-		}
-		w := httptest.NewRecorder()
-		p.s.Handler().ServeHTTP(w, r)
-		var snap api.Snapshot
-		if err := json.Unmarshal(w.Body.Bytes(), &snap); err != nil || w.Code != http.StatusOK || snap.Viewer == nil {
-			t.Fatalf("snapshot as %s: %d %s", as, w.Code, w.Body)
-		}
-		return *snap.Viewer
-	}
-	for _, c := range []struct {
-		as      string
-		headers map[string]string
-	}{{"ines", nil}, {"maya", nil}, {"noor", nil}, {"ines", map[string]string{"X-C4-Client": "mcp"}}} {
-		v := viewer(c.as, c.headers)
-		code, _ := p.call(t, http.MethodPost, "/api/v1/parties", c.as, map[string]any{"name": "probe-" + c.as + strconv.Itoa(len(c.headers)), "kind": "organisation", "displayName": "Probe"}, c.headers)
-		if v.MakeParties != (code == http.StatusOK) {
-			t.Errorf("%s %v: makeParties %v, and POST /parties answers %d", c.as, c.headers, v.MakeParties, code)
-		}
-	}
-	if v := viewer("ines", nil); !v.MakeParties || v.BindingOwner || v.MakeOwnParty {
-		t.Errorf("ines, a farm admin: %+v", v)
-	}
-	if v := viewer("maya", nil); v.MakeParties || v.BindingOwner || v.MakeOwnParty {
-		t.Errorf("maya: %+v", v)
-	}
-	if v := viewer("noor", nil); v.MakeParties || !v.BindingOwner || !v.MakeOwnParty {
-		t.Errorf("noor, the binding's owner, before her Party: %+v", v)
-	}
-	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "noor", map[string]any{"name": "noor", "kind": "person", "displayName": "Noor"}, nil); code != http.StatusOK {
-		t.Fatalf("noor makes her Party: %d %v", code, out)
-	}
-	if v := viewer("noor", nil); !v.BindingOwner || v.MakeOwnParty {
-		t.Errorf("noor, after her Party: %+v", v)
-	}
-	p.s.FarmBook, p.s.FarmBookReader = nil, nil
-	if v := viewer("ines", nil); v.MakeParties || v.MakeOwnParty {
-		t.Errorf("rights on a farm with no book: %+v", v)
-	}
-}
-
 // One spelling for each thing: a party's name has one case, and so does a
 // wait's party; an issuer URL is kept and compared in its one spelling.
 func TestPartySpelledOneWay(t *testing.T) {
@@ -908,5 +1117,99 @@ func TestPartySpelledOneWay(t *testing.T) {
 	got, err := validSignIns(ins("HTTPS://SSO.Studio.Example/ 00u-x"))
 	if err != nil || len(got) != 1 || got[0].Issuer != "https://sso.studio.example" {
 		t.Errorf("an issuer kept as written: %v %v", got, err)
+	}
+	// two spellings of one subject are one person's
+	p.own(t, "noor", "noor", sso+" "+peopletest.NoorSub)
+	body := map[string]any{"name": "lee", "kind": "person", "displayName": "Lee", "signIns": ins("lee", "HTTPS://SSO.Studio.Example/ "+peopletest.NoorSub), "idToken": p.token(peopletest.NoorSub)}
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "lee", body, nil); code != http.StatusConflict {
+		t.Errorf("noor's subject under another spelling: %d %v", code, out)
+	}
+}
+
+// A farm without a farm book has no Parties: GET and HEAD /parties and GET
+// /parties/{name} answer 501, as the writes do, so the HUD shows no tab;
+// with a book they answer.
+func TestPartyReadsNeedTheBook(t *testing.T) {
+	p := newPartyRig(t)
+	p.own(t, "maya", "maya")
+	read := func(method, path string) int {
+		r := httptest.NewRequest(method, path+"?as=maya", nil)
+		r.Header.Set(InstallerHeader, testInstallerToken)
+		w := httptest.NewRecorder()
+		p.s.Handler().ServeHTTP(w, r)
+		return w.Code
+	}
+	for _, c := range []struct{ method, path string }{{http.MethodGet, "/api/v1/parties"}, {http.MethodHead, "/api/v1/parties"}, {http.MethodGet, "/api/v1/parties/maya"}} {
+		if code := read(c.method, c.path); code != http.StatusOK {
+			t.Errorf("%s %s with a book: %d", c.method, c.path, code)
+		}
+	}
+	p.s.FarmBook, p.s.FarmBookReader = nil, nil
+	for _, c := range []struct{ method, path string }{{http.MethodGet, "/api/v1/parties"}, {http.MethodHead, "/api/v1/parties"}, {http.MethodGet, "/api/v1/parties/maya"}} {
+		if code := read(c.method, c.path); code != http.StatusNotImplemented {
+			t.Errorf("%s %s without a book: %d, want 501", c.method, c.path, code)
+		}
+	}
+}
+
+// The viewer says what it may do about the party list, by the rules the
+// routes take: makeParties is exactly whether POST /parties takes an
+// organisation from it; makeOwnParty that it has no Party yet, and makes
+// one; bindingOwner names the farm binding's owner, through the owner's
+// Party once it exists.
+func TestPartyViewerRights(t *testing.T) {
+	p := newPartyRig(t)
+	ctx := context.Background()
+	if err := p.s.Client.Create(ctx, &c4v1.DeploymentBinding{ObjectMeta: metav1.ObjectMeta{Name: c4v1.FarmBindingName},
+		Spec: c4v1.DeploymentBindingSpec{Owner: "noor", To: "laptop-1/*", For: []string{"task/v1"}, By: "noor"}}); err != nil {
+		t.Fatal(err)
+	}
+	p.own(t, "dana", "dana")
+	viewer := func(as string, headers map[string]string) api.Viewer {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/snapshot?as="+as, nil)
+		r.Header.Set(InstallerHeader, testInstallerToken)
+		for k, v := range headers {
+			r.Header.Set(k, v)
+		}
+		w := httptest.NewRecorder()
+		p.s.Handler().ServeHTTP(w, r)
+		var snap api.Snapshot
+		if err := json.Unmarshal(w.Body.Bytes(), &snap); err != nil || w.Code != http.StatusOK || snap.Viewer == nil {
+			t.Fatalf("snapshot as %s: %d %s", as, w.Code, w.Body)
+		}
+		return *snap.Viewer
+	}
+	for i, c := range []struct {
+		as      string
+		headers map[string]string
+	}{{"ines", nil}, {"maya", nil}, {"noor", nil}, {"ines", map[string]string{"X-C4-Client": "mcp"}}} {
+		v := viewer(c.as, c.headers)
+		code, _ := p.call(t, http.MethodPost, "/api/v1/parties", c.as, map[string]any{"name": "probe-" + strconv.Itoa(i), "kind": "organisation", "displayName": "Probe", "firstAdmin": "dana"}, c.headers)
+		if v.MakeParties != (code == http.StatusOK) {
+			t.Errorf("%s %v: makeParties %v, and POST /parties answers %d", c.as, c.headers, v.MakeParties, code)
+		}
+	}
+	if v := viewer("noor", nil); v.MakeParties || !v.BindingOwner || !v.MakeOwnParty {
+		t.Errorf("noor, the binding's owner, before her Party: %+v", v)
+	}
+	if v := viewer("dana", nil); v.MakeOwnParty || v.BindingOwner {
+		t.Errorf("dana, with her Party: %+v", v)
+	}
+	if v := viewer("maya", nil); v.MakeParties || v.BindingOwner || !v.MakeOwnParty {
+		t.Errorf("maya: %+v", v)
+	}
+	// the owner's Party is made by its person signed in otherwise:
+	// bindingOwner now follows its sign-ins, not the user name
+	p.own(t, "noor-sso", "noor")
+	if v := viewer("noor", nil); v.BindingOwner {
+		t.Errorf("viewer noor, not among the owner's Party's sign-ins: %+v", v)
+	}
+	if v := viewer("noor-sso", nil); !v.BindingOwner || v.MakeOwnParty {
+		t.Errorf("noor@studio.example, the owner's Party's person: %+v", v)
+	}
+	p.s.FarmBook, p.s.FarmBookReader = nil, nil
+	if v := viewer("ines", nil); v.MakeParties || v.MakeOwnParty {
+		t.Errorf("rights on a farm with no book: %+v", v)
 	}
 }

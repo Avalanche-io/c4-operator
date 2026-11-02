@@ -6,8 +6,9 @@ import "time"
 // or an organisation each, and an organisation's members, by name or by a
 // group of the studio's own, with the purposes each holds.
 
-// PartyRequest is POST /api/v1/parties: a farm admin makes a party. The
-// one who makes an organisation is its first admin.
+// PartyRequest is POST /api/v1/parties. A farm admin makes an
+// organisation, naming its first admin, who counts once they accept; a
+// person makes their own person Party, signed in with what it lists.
 type PartyRequest struct {
 	// Name is the bare name records use (kestrel): lower case, digits,
 	// dots and dashes, never changed and never reused.
@@ -17,8 +18,15 @@ type PartyRequest struct {
 	DisplayName string `json:"displayName"`
 	// LegalName, for an organisation, is the name a contract carries.
 	LegalName string `json:"legalName,omitempty"`
-	// SignIns, for a person, are the sign-in subjects that are them.
+	// SignIns, for a person, are the sign-in subjects that are them: the
+	// one they are signed in with, and a provider's subject IDToken proves.
 	SignIns []SignIn `json:"signIns,omitempty"`
+	// IDToken, for a person, is a fresh ID token from the farm's sign-in
+	// provider for the provider subject SignIns adds.
+	IDToken string `json:"idToken,omitempty"`
+	// FirstAdmin, for an organisation, names the person Party that is
+	// its first admin once they accept (POST /parties/{name}/accept).
+	FirstAdmin string `json:"firstAdmin,omitempty"`
 }
 
 // SignIn is one sign-in subject that is a person: a provider's subject ID
@@ -41,6 +49,8 @@ type PartyChange struct {
 // sign-in subjects, all of them.
 type SignInsRequest struct {
 	SignIns []SignIn `json:"signIns"`
+	// IDToken proves the provider subject SignIns adds, if any.
+	IDToken string `json:"idToken,omitempty"`
 }
 
 // MemberRequest is a membership's add, change or end: a person by name,
@@ -72,10 +82,21 @@ type Party struct {
 	// Booked says the party is in the farm book; false while its
 	// make-party record waits to be booked, when it has no members yet.
 	Booked bool `json:"booked"`
+	// FirstAdmin, for an organisation, is the first admin its make-party
+	// named, and whether they accepted.
+	FirstAdmin *FirstAdmin `json:"firstAdmin,omitempty"`
 	// Yours are the purposes the viewer holds for it, in effect.
 	Yours []string `json:"yours,omitempty"`
 	// ActOn is what an act changing it is on (PEOPLE-KEYS-2 2.1).
 	ActOn *ActOn `json:"actOn,omitempty"`
+}
+
+// FirstAdmin is an organisation's first admin: a member, holding member
+// and admin, only once they accept with their own touched act.
+type FirstAdmin struct {
+	Person   string `json:"person"`
+	Accepted bool   `json:"accepted"`
+	Record   string `json:"record,omitempty"`
 }
 
 // PartyAct is one signed change to a party.
@@ -103,6 +124,9 @@ type Member struct {
 	Since time.Time `json:"since,omitzero"`
 	// Pending: its entry waits for the seal.
 	Pending bool `json:"pending,omitempty"`
+	// Lapsed says why it holds nothing: it names no Party (a name booked
+	// before memberships named Parties).
+	Lapsed string `json:"lapsed,omitempty"`
 }
 
 // PartyList is GET /api/v1/parties.

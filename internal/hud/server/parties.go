@@ -4,22 +4,28 @@ package server
 // Parties): the farm's party list. A Party is a person or an organisation,
 // by the bare name records use, kept as a cluster-scoped Party that only
 // the HUD writes (config/policy/parties.yaml) and nobody deletes. Who may
-// act for an organisation is not in the object: each membership, by a
-// person's name or by a group of the studio's own, with the purposes it
-// holds, is a signed control record booked in the farm book, and what is
-// in force is the book's one rule (farmbook.InForceAt, ForceMembership).
-// So a farm without a farm book has no Parties, and its party: waits take
-// the c4:party:<name> group, as before.
+// act for an organisation is not in the object: each membership, of a
+// Party by its name or of a group of the studio's own, with the purposes
+// it holds, is a signed control record booked in the farm book, and what
+// is in force is the book's one rule (farmbook.InForceAt,
+// ForceMembership). So a farm without a farm book has no Parties, and its
+// party: waits take the c4:party:<name> group, as before.
 //
-// Who may do what:
-//   - a farm admin keeps the party list (DESIGN D8): makes a party, and
-//     may set a person's sign-ins. Whoever makes an organisation is its
-//     first admin;
-//   - an organisation's admin changes its names and policy, and adds,
-//     changes and ends its members. An admin never grants for
-//     themselves, and the last named admin is never removed;
-//   - a person changes their own party, and adds to their sign-ins only
-//     the one they are signed in with;
+// Who is who (PEOPLE-KEYS-2 10.4 item 27):
+//   - a viewer is a person Party's person only through a sign-in the Party
+//     lists by name: nothing falls back to the user name (R1);
+//   - a sign-in goes on a Party only by signing in with it: the name the
+//     HUD signs the person in as, or a provider subject a fresh ID token
+//     proves (R2). So a person makes their own person Party, and adds
+//     their own sign-ins; they, or a farm admin, remove one;
+//   - a membership names a Party, never a bare sign-in name (R3);
+//   - making an organisation never makes its maker an admin: it names its
+//     first admin, who counts once they accept with their own touched act
+//     (R4);
+//   - an organisation's admin adds, changes and ends its members, never
+//     grants for themselves (a purpose held only by a group is never
+//     copied into their named membership), and never removes the last
+//     named admin, each judged inside the book's append (R5);
 //   - a member may end their own membership;
 //   - an agent, a unit and a tracker's sync never change a party, and are
 //     never members.
@@ -33,6 +39,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -83,18 +90,27 @@ var (
 	ViewPeopleNeedsPolicy = true
 )
 
-// firstAdmin are the purposes whoever makes an organisation holds.
+// firstAdmin are the purposes an organisation's first admin holds once
+// they accept.
 var firstAdmin = []string{PurposeMember, PurposeAdmin}
 
 var (
 	// partyName is a party's bare name (c4v1.PartyName).
 	partyName = c4v1.PartyName
-	// personName is a person as a membership names them: their party's
-	// name or their sign-in name.
-	personName = regexp.MustCompile(`^[^\s:/,]{1,253}$`)
 	// subjectName is a sign-in subject, and groupName a studio group.
 	subjectName = regexp.MustCompile(`^[^\s,]{1,253}$`)
 )
+
+// partyCache keeps what reading memberships costs, so a request doesn't
+// rescan: each record's verified purposes, by its C4 ID and the act and
+// subject of the entry citing it (a record never changes), and each key's
+// in-force entry at one view of the book, by its position and last entry.
+type partyCache struct {
+	mu       sync.Mutex
+	purposes map[string][]string
+	at       string
+	memo     map[string]*farmbook.Sealed
+}
 
 // parties are the farm's Parties: none on a farm without the kind.
 func (s *Server) parties(ctx context.Context) ([]c4v1.Party, error) {
@@ -128,11 +144,11 @@ func partySubject(p *c4v1.Party) provenance.Subject {
 	return provenance.Subject{Name: "party:" + p.Name + "@" + string(p.UID), Digest: map[string]string{"sha256": sha256JSON(p.Spec)}}
 }
 
-// partyPerson is the person v is for a Party's purposes: the person Party
-// one of whose sign-ins v signed in with, else whom v's own work belongs
-// to (ownerFor: on a one-person farm, its person for a role's sign-in).
-// "" for a unit, which is never a member.
-func (s *Server) partyPerson(ctx context.Context, v *api.Viewer, ps []c4v1.Party) string {
+// partyPerson is the person Party v is (R1): the one person Party that
+// lists the name v signed in with among its sign-ins. Nothing else makes
+// v a Party's person: not v's user name, nor whom its work belongs to.
+// "" for a unit, for no Party's sign-in, and for one two Parties list.
+func (s *Server) partyPerson(v *api.Viewer, ps []c4v1.Party) string {
 	if v == nil || v.Unit != nil || v.User == "" {
 		return ""
 	}
@@ -142,37 +158,87 @@ func (s *Server) partyPerson(ctx context.Context, v *api.Viewer, ps []c4v1.Party
 			held = append(held, ps[i].Name)
 		}
 	}
-	switch len(held) {
-	case 0:
-		return s.ownerFor(ctx, v)
-	case 1:
+	if len(held) == 1 {
 		return held[0]
 	}
 	// one sign-in is one person's: in two people's, it is no one
 	return ""
 }
 
+// partyPersonOf is partyPerson, the Parties read.
+func (s *Server) partyPersonOf(ctx context.Context, v *api.Viewer) string {
+	ps, err := s.parties(ctx)
+	if err != nil {
+		return ""
+	}
+	return s.partyPerson(v, ps)
+}
+
 // partyBook is the farm book as a Party's members are judged by: the
 // sealed book and the entries pending its seal, now.
 func (s *Server) partyBook(ctx context.Context) (*farmbook.View, error) {
 	if s.FarmBookReader == nil {
-		return nil, errors.New("this farm keeps no farm book (its install names no --system-store), and an organisation's members are the book's")
+		return nil, errors.New(noBookParties)
 	}
 	return s.FarmBookReader.View(ctx, time.Now())
 }
 
-// inForce is what put key in force in view, now: the book's one rule.
-func inForce(view *farmbook.View, kind, key string) *farmbook.Sealed {
-	on, _ := view.InForceAt(kind, key, view.Position(), view.Now)
+// viewKey names one view of the book: its position and its last entry.
+func viewKey(view *farmbook.View) string {
+	es := view.All()
+	if len(es) == 0 {
+		return "0"
+	}
+	return fmt.Sprint(view.Position(), es[len(es)-1].ID)
+}
+
+// inForce is what put key in force in view, now: the book's one rule,
+// kept per view.
+func (s *Server) inForce(view *farmbook.View, kind, key string) *farmbook.Sealed {
+	c := &s.partyMemo
+	at := viewKey(view)
+	c.mu.Lock()
+	if c.at != at {
+		c.at, c.memo = at, map[string]*farmbook.Sealed{}
+	}
+	on, ok := c.memo[kind+" "+key]
+	c.mu.Unlock()
+	if ok {
+		return on
+	}
+	on, _ = view.InForceAt(kind, key, view.Position(), view.Now)
+	c.mu.Lock()
+	if c.at == at {
+		c.memo[kind+" "+key] = on
+	}
+	c.mu.Unlock()
 	return on
 }
 
 // purposesOf reads the purposes the record that opened a membership
-// grants: the record from the book's store, verified as the HUD's and as
-// saying what its entry says, since an entry pending the seal is not yet
-// checked by the queue.
+// grants (farmbook.MemberPurposes), once per record and the entry citing
+// it: the check binds the record to the entry's act and subject, so an
+// entry citing another's record is checked anew.
 func (s *Server) purposesOf(ctx context.Context, on *farmbook.Sealed) ([]string, error) {
-	return farmbook.MemberPurposes(ctx, s.FarmBookReader.Store, s.trust(ctx).roots, s.FarmBookReader.Farm, on)
+	c := &s.partyMemo
+	key := on.Entry.Record + " " + on.Entry.Act + " " + on.Entry.Subject
+	c.mu.Lock()
+	got, ok := c.purposes[key]
+	c.mu.Unlock()
+	if ok {
+		return got, nil
+	}
+	got, err := farmbook.MemberPurposes(ctx, s.FarmBookReader.Store, s.trust(ctx).roots, s.FarmBookReader.Farm, on)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	if c.purposes == nil {
+		c.purposes = map[string][]string{}
+	}
+	c.purposes[key] = got
+	c.mu.Unlock()
+	return got, nil
 }
 
 // inEffect are the purposes of a membership of p that hold now.
@@ -193,56 +259,65 @@ func partyGroups(party string) []string {
 	return []string{"c4:party:" + party, "c4-party-" + party}
 }
 
+// madeBy is party's first make-party in view, and the first admin it
+// names; nil when the book has none.
+func madeBy(view *farmbook.View, party string) (*farmbook.Sealed, string) {
+	for _, s := range view.All() {
+		if s.Entry.Kind == farmbook.KindControl && s.Entry.Act == "make-party" && s.Entry.Subject == farmbook.PartyKey(party) {
+			return s, s.Entry.Person
+		}
+	}
+	return nil, ""
+}
+
 // membership is one membership of a Party in force.
 type membership struct {
 	person, group string
 	purposes      []string
 	on            *farmbook.Sealed
+	// lapsed says why it holds nothing: it names no Party (R3), or its
+	// record does not verify.
+	lapsed string
 }
 
 // membersOf are p's memberships in force in view: by name, then by group,
-// each in the order first booked. The c4:party: group, being the studio's
-// own sign-in, is not among them.
-func (s *Server) membersOf(ctx context.Context, view *farmbook.View, p *c4v1.Party) ([]membership, error) {
+// each in the order first booked. A named membership whose name is no
+// Party among ps is lapsed, and holds nothing. The c4:party: group, being
+// the studio's own sign-in, is not among them.
+func (s *Server) membersOf(ctx context.Context, view *farmbook.View, p *c4v1.Party, ps []c4v1.Party) ([]membership, error) {
 	party := farmbook.PartyKey(p.Name)
 	var keys []string
 	seen := map[string]bool{}
-	made := false
-	es := append(view.Book.Entries(0), view.Pending()...)
-	for _, s := range es {
+	for _, s := range view.All() {
 		e := s.Entry
-		key := ""
-		switch {
-		case e.Kind != farmbook.KindControl:
-		case e.Act == "make-party" && e.Subject == party && !made:
-			made = true
-			if e.Person != "" {
-				key = farmbook.MemberKey(p.Name, e.Person)
-			}
-		case strings.HasPrefix(e.Subject, party+"/"):
-			key = e.Subject
-		}
-		if key != "" && !seen[key] {
-			seen[key] = true
-			keys = append(keys, key)
+		if e.Kind == farmbook.KindControl && strings.HasPrefix(e.Subject, party+"/") && !seen[e.Subject] {
+			seen[e.Subject] = true
+			keys = append(keys, e.Subject)
 		}
 	}
 	var out []membership
 	for _, key := range keys {
-		on := inForce(view, farmbook.ForceMembership, key)
+		on := s.inForce(view, farmbook.ForceMembership, key)
 		if on == nil {
 			continue
 		}
+		m := membership{on: on}
 		purposes, err := s.purposesOf(ctx, on)
 		if err != nil {
-			return nil, err
+			// An entry pending the seal can cite anything: it holds
+			// nothing, and shows why, rather than hiding the Party.
+			s.Log.Error(err, "a membership's record", "party", p.Name, "key", key)
+			m.lapsed = "its record does not verify"
 		}
-		m := membership{purposes: purposes, on: on}
+		m.purposes = purposes
 		rest := strings.TrimPrefix(key, party+"/")
 		if g, ok := strings.CutPrefix(rest, "group:"); ok {
 			m.group = g
 		} else {
 			m.person = strings.TrimPrefix(rest, "person:")
+			if findParty(ps, m.person) == nil && m.lapsed == "" {
+				m.lapsed = "names no Party"
+			}
 		}
 		out = append(out, m)
 	}
@@ -260,13 +335,16 @@ func (s *Server) membersOf(ctx context.Context, view *farmbook.View, p *c4v1.Par
 
 // standing is what the farm's Parties say of one viewer.
 type standing struct {
-	// parties are the farm's Parties, and person whom the viewer is for
-	// their purposes (partyPerson).
+	// parties are the farm's Parties, and person the person Party the
+	// viewer is (partyPerson), "" for none.
 	parties []c4v1.Party
 	person  string
 	// held are, by party, the purposes the viewer holds in effect, each
-	// with the record that put it in force ("" for the c4:party: group).
-	held map[string]map[string]string
+	// with the record that put it in force ("" for the c4:party: group);
+	// named those its person's own named membership grants, granted, in
+	// effect or not.
+	held  map[string]map[string]string
+	named map[string][]string
 	// err is why the farm book could not be read: the viewer then holds
 	// nothing for any organisation.
 	err error
@@ -278,27 +356,30 @@ func (st *standing) holds(party, purpose string) bool {
 	return ok
 }
 
-// standingOf reads what the farm's Parties say of v: for each Party, the
-// purposes v holds in effect. An organisation's are its memberships in
-// force for v, by name and by v's groups, and the c4:party: group's
-// member; a person's party gives the person every purpose (ORGANIZATION
-// 5).
+// standingOf reads what the farm's Parties say of v, now.
 func (s *Server) standingOf(ctx context.Context, v *api.Viewer) *standing {
-	st := &standing{held: map[string]map[string]string{}}
 	ps, err := s.parties(ctx)
 	if err != nil {
-		st.err = err
-		return st
-	}
-	st.parties = ps
-	if len(ps) == 0 {
-		return st
-	}
-	st.person = s.partyPerson(ctx, v, ps)
-	if st.person == "" {
-		return st
+		return &standing{err: err, held: map[string]map[string]string{}}
 	}
 	var view *farmbook.View
+	var verr error
+	if len(ps) > 0 {
+		view, verr = s.partyBook(ctx)
+	}
+	return s.standingAt(ctx, v, ps, view, verr)
+}
+
+// standingAt is what ps and view say of v: for each Party, the purposes v
+// holds in effect. An organisation's are its memberships in force naming
+// v's person Party, those of v's groups, and the c4:party: group's member;
+// a person's own Party gives them every purpose (ORGANIZATION 5).
+func (s *Server) standingAt(ctx context.Context, v *api.Viewer, ps []c4v1.Party, view *farmbook.View, verr error) *standing {
+	st := &standing{parties: ps, held: map[string]map[string]string{}, named: map[string][]string{}, err: verr}
+	if len(ps) == 0 || v == nil || v.Unit != nil || v.User == "" {
+		return st
+	}
+	st.person = s.partyPerson(v, ps)
 	grant := func(p *c4v1.Party, purposes []string, record string) {
 		h := st.held[p.Name]
 		if h == nil {
@@ -314,25 +395,25 @@ func (s *Server) standingOf(ctx context.Context, v *api.Viewer) *standing {
 	for i := range ps {
 		p := &ps[i]
 		if p.Spec.Kind == c4v1.PartyPerson {
-			if p.Name == st.person {
+			if st.person != "" && p.Name == st.person {
 				grant(p, Purposes, p.Spec.Made.Record)
 			}
 			continue
 		}
-		if view == nil && st.err == nil {
-			view, st.err = s.partyBook(ctx)
-		}
-		if st.err != nil {
+		if view == nil {
 			continue
 		}
-		keys := []string{farmbook.MemberKey(p.Name, st.person)}
+		var keys []string
+		if st.person != "" {
+			keys = append(keys, farmbook.MemberKey(p.Name, st.person))
+		}
 		if MembersByGroup {
 			for _, g := range v.Groups {
 				keys = append(keys, farmbook.GroupKey(p.Name, g))
 			}
 		}
-		for _, key := range keys {
-			on := inForce(view, farmbook.ForceMembership, key)
+		for k, key := range keys {
+			on := s.inForce(view, farmbook.ForceMembership, key)
 			if on == nil {
 				continue
 			}
@@ -340,6 +421,9 @@ func (s *Server) standingOf(ctx context.Context, v *api.Viewer) *standing {
 			if err != nil {
 				s.Log.Error(err, "a membership's record", "party", p.Name, "key", key)
 				continue
+			}
+			if k == 0 && st.person != "" {
+				st.named[p.Name] = purposes
 			}
 			grant(p, purposes, on.Entry.Record)
 		}
@@ -431,11 +515,21 @@ func (s *Server) partyView(ctx context.Context, p *c4v1.Party, view *farmbook.Vi
 	if view == nil {
 		return out, nil
 	}
-	out.Booked = inForce(view, farmbook.ForceParty, farmbook.PartyKey(p.Name)) != nil
+	out.Booked = s.inForce(view, farmbook.ForceParty, farmbook.PartyKey(p.Name)) != nil
 	if p.Spec.Kind != c4v1.PartyOrganisation {
 		return out, nil
 	}
-	ms, err := s.membersOf(ctx, view, p)
+	if _, fa := madeBy(view, p.Name); fa != "" {
+		out.FirstAdmin = &api.FirstAdmin{Person: fa}
+		if acc := farmbook.AdminAccepted(view.All(), p.Name); acc != nil {
+			out.FirstAdmin.Accepted, out.FirstAdmin.Record = true, acc.Entry.Record
+		}
+	}
+	var ps []c4v1.Party
+	if st != nil {
+		ps = st.parties
+	}
+	ms, err := s.membersOf(ctx, view, p, ps)
 	if err != nil {
 		return out, err
 	}
@@ -444,7 +538,10 @@ func (s *Server) partyView(ctx context.Context, p *c4v1.Party, view *farmbook.Vi
 			continue
 		}
 		e := api.Member{Person: m.person, Group: m.group, Purposes: m.purposes, InEffect: inEffect(p, m.purposes),
-			By: m.on.Entry.By, Record: m.on.Entry.Record, Since: m.on.Time, Pending: m.on.Pending}
+			By: m.on.Entry.By, Record: m.on.Entry.Record, Since: m.on.Time, Pending: m.on.Pending, Lapsed: m.lapsed}
+		if m.lapsed != "" {
+			e.InEffect = []string{}
+		}
 		if m.group != "" {
 			out.Groups = append(out.Groups, e)
 		} else {
@@ -521,7 +618,7 @@ func (s *Server) handleParty(w http.ResponseWriter, r *http.Request) {
 }
 
 // partyReader is the viewer of a party route that reads: a person, not a
-// unit.
+// unit, on a farm that keeps a farm book.
 func (s *Server) partyReader(w http.ResponseWriter, r *http.Request) *api.Viewer {
 	v := s.withViewer(w, r)
 	if v == nil {
@@ -544,9 +641,7 @@ func (s *Server) partyReader(w http.ResponseWriter, r *http.Request) *api.Viewer
 const noBookParties = "this farm keeps no farm book (its install names no --system-store), and an organisation's members are the book's: it has no parties"
 
 // partyWriter is the viewer of a party route that writes, after the
-// guard every party write passes: a person, signed in or on the
-// installer's secret, never a unit, an agent or a tracker's sync; on a
-// farm that keeps a farm book and signs.
+// guard every party write passes.
 func (s *Server) partyWriter(w http.ResponseWriter, r *http.Request) *api.Viewer {
 	v := s.withViewer(w, r)
 	if v == nil {
@@ -560,8 +655,9 @@ func (s *Server) partyWriter(w http.ResponseWriter, r *http.Request) *api.Viewer
 }
 
 // partyWriteRefusal is why v may make no party write here, with its
-// status, or 0: the guard every write passes, and what the viewer's
-// makeParties and makeOwnParty say.
+// status, or 0: a person, signed in or on the installer's secret, never a
+// unit, an agent or a tracker's sync; on a farm that keeps a farm book and
+// signs. The viewer's makeParties and makeOwnParty pass it too.
 func (s *Server) partyWriteRefusal(r *http.Request, v *api.Viewer) (int, string) {
 	switch {
 	case v.Unit != nil:
@@ -578,18 +674,23 @@ func (s *Server) partyWriteRefusal(r *http.Request, v *api.Viewer) (int, string)
 	return 0, ""
 }
 
-// farmAdminMakes is the farm admin's right make-party takes (DESIGN D8):
-// create on parties, or for a development viewer the farm-admin role or
-// every role (devrights). name "" asks of any party.
+// farmAdminMakes is the farm admin's right making an organisation takes
+// (DESIGN D8): create on parties, or for a development viewer the
+// farm-admin role or every role (devrights). name "" asks of any party.
 func (s *Server) farmAdminMakes(ctx context.Context, r *http.Request, v *api.Viewer, name string) error {
 	return s.authorize(ctx, r, v, "", "create", "parties", name)
 }
 
 // withPartyRights is v as the HUD serves it (snapshot, events, needs-me),
-// a copy, with what it may do about the party list: makeParties, by the
-// guard and right make-party takes; bindingOwner, the farm binding's
-// owner; and makeOwnParty, that owner while their own Party doesn't exist,
-// by ownerMakesOwn's rule.
+// a copy, with what it may do about the party list:
+//   - makeParties: make an organisation, by the guard and the right
+//     make-party takes for one;
+//   - makeOwnParty: make their own person Party now, by the guard, no
+//     Party listing their sign-in yet. One who signs in by the
+//     c4-sign-ins Secret proves their subject as they do;
+//   - bindingOwner: the farm binding's owner: the owner's person Party's
+//     person, or, while the farm keeps no Party of the owner's name, the
+//     one signed in as it.
 func (s *Server) withPartyRights(r *http.Request, v *api.Viewer) *api.Viewer {
 	out := *v
 	ctx := r.Context()
@@ -597,20 +698,24 @@ func (s *Server) withPartyRights(r *http.Request, v *api.Viewer) *api.Viewer {
 	if err != nil {
 		return &out
 	}
-	b, err := s.farmBinding(ctx)
-	person := s.partyPerson(ctx, v, ps)
-	out.BindingOwner = err == nil && b != nil && person != "" && person == b.Spec.Owner
+	person := s.partyPerson(v, ps)
+	if b, err := s.farmBinding(ctx); err == nil && b != nil && v.Unit == nil {
+		owner := findParty(ps, b.Spec.Owner)
+		out.BindingOwner = owner == nil && v.User == b.Spec.Owner || owner != nil && person == owner.Name
+	}
 	if code, _ := s.partyWriteRefusal(r, v); code != 0 {
 		return &out
 	}
 	out.MakeParties = s.farmAdminMakes(ctx, r, v, "") == nil
-	out.MakeOwnParty = out.BindingOwner && s.ownerMakesOwn(ctx, ps, person, &api.PartyRequest{Name: person, Kind: c4v1.PartyPerson}, nil)
+	if who, _ := claimed(ps, "", []c4v1.PartySignIn{{Subject: v.User}}); who == "" && person == "" {
+		out.MakeOwnParty = subjectName.MatchString(v.User)
+	}
 	return &out
 }
 
 // validSignIns checks a list of sign-in subjects: each well formed, a
-// provider's at an http(s) issuer URL, none twice. It returns them sorted
-// by issuer, then subject.
+// provider's at an http(s) issuer URL, kept in its one spelling, none
+// twice. It returns them sorted by issuer, then subject.
 func validSignIns(in []api.SignIn) ([]c4v1.PartySignIn, error) {
 	if len(in) > 32 {
 		return nil, errors.New("signIns: at most 32")
@@ -666,14 +771,17 @@ func validPurposes(in []string) ([]string, error) {
 }
 
 // claimed is the person Party other than except that already has one of
-// subjects among its sign-ins, and that subject.
+// subjects among its sign-ins, and that subject, each compared in its one
+// spelling.
 func claimed(ps []c4v1.Party, except string, subjects []c4v1.PartySignIn) (string, string) {
 	for i := range ps {
 		if ps[i].Name == except || ps[i].Spec.Kind != c4v1.PartyPerson {
 			continue
 		}
 		for _, x := range subjects {
-			if slices.Contains(ps[i].Spec.SignIns, x) {
+			if slices.ContainsFunc(ps[i].Spec.SignIns, func(y c4v1.PartySignIn) bool {
+				return y.Subject == x.Subject && people.CanonicalIssuer(y.Issuer) == people.CanonicalIssuer(x.Issuer)
+			}) {
 				return ps[i].Name, signInWords(x)
 			}
 		}
@@ -681,23 +789,51 @@ func claimed(ps []c4v1.Party, except string, subjects []c4v1.PartySignIn) (strin
 	return "", ""
 }
 
-// ownerMakesOwn says whether the farm binding's owner may make body
-// without a farm admin's right: their own person Party, while it doesn't
-// exist, signed in only as themselves. So the owner can always make the
-// owner's Party, which the people's issuer's admins then come from.
-func (s *Server) ownerMakesOwn(ctx context.Context, ps []c4v1.Party, person string, body *api.PartyRequest, signIns []c4v1.PartySignIn) bool {
-	b, err := s.farmBinding(ctx)
-	if err != nil || b == nil || person == "" || person != b.Spec.Owner || body.Name != b.Spec.Owner ||
-		body.Kind != c4v1.PartyPerson || findParty(ps, body.Name) != nil {
-		return false
-	}
-	for _, x := range signIns {
-		// a provider's subject is a farm admin's to add
-		if x.Issuer != "" {
-			return false
+// added are the sign-ins next has that old doesn't.
+func added(old, next []c4v1.PartySignIn) []c4v1.PartySignIn {
+	var out []c4v1.PartySignIn
+	for _, x := range next {
+		if !slices.Contains(old, x) {
+			out = append(out, x)
 		}
 	}
-	return true
+	return out
+}
+
+// proveAdds checks each sign-in a write adds is the writer's own, just
+// proved (R2): a name the HUD signs people in as only by the viewer
+// signed in as it; a provider subject only by idToken, a fresh ID token
+// for it, checked by the people's issuer as whoami checks one. One write
+// adds at most one provider subject. It returns the proved one, if any.
+func (s *Server) proveAdds(ctx context.Context, v *api.Viewer, adds []c4v1.PartySignIn, idToken string) (*c4v1.PartySignIn, *errGrant) {
+	var provider *c4v1.PartySignIn
+	for i, x := range adds {
+		switch {
+		case x.Issuer == "" && x.Subject != v.User:
+			return nil, &errGrant{http.StatusForbidden, fmt.Sprintf("signIns: %s is added only by someone signed in as it, and you are signed in as %s", x.Subject, v.User)}
+		case x.Issuer != "" && provider != nil:
+			return nil, &errGrant{http.StatusBadRequest, "signIns: one write adds one provider subject, which its idToken proves"}
+		case x.Issuer != "":
+			provider = &adds[i]
+		}
+	}
+	if provider == nil {
+		return nil, nil
+	}
+	if idToken == "" {
+		return nil, &errGrant{http.StatusForbidden, fmt.Sprintf("signIns: %s goes on a Party only on a fresh ID token for it: send idToken, from signing in at the farm's provider", signInWords(*provider))}
+	}
+	if s.ProveSignIn == nil {
+		return nil, &errGrant{http.StatusNotImplemented, "this HUD has no people's issuer to check an ID token with, so it adds no provider subject"}
+	}
+	got, err := s.ProveSignIn(ctx, idToken)
+	if err != nil {
+		return nil, &errGrant{http.StatusForbidden, fmt.Sprintf("idToken: %v", err)}
+	}
+	if got.Subject != provider.Subject || people.CanonicalIssuer(got.Issuer) != provider.Issuer {
+		return nil, &errGrant{http.StatusForbidden, fmt.Sprintf("idToken proves %s at %s, not %s", got.Subject, got.Issuer, signInWords(*provider))}
+	}
+	return provider, nil
 }
 
 // standInHolder is who else the c4-sign-ins Secret (K2's stand-in) gives
@@ -733,6 +869,31 @@ func standInRefusal(w http.ResponseWriter, who, x string, err error) {
 	fail(w, http.StatusConflict, "signIns: %s is %s's in the c4-sign-ins Secret; one sign-in is one person's", x, who)
 }
 
+// leavesTheSecret checks a person Party named party keeps its person
+// signed in at the people's issuer: where the c4-sign-ins Secret signs in
+// a person of that name, whose lines are ignored once the Party exists,
+// the Party must carry one of those subjects, proved (R2, R6). It returns
+// why not, or "".
+func (s *Server) leavesTheSecret(ctx context.Context, party string, proved *c4v1.PartySignIn) (string, error) {
+	if s.StandInSignIns == nil {
+		return "", nil
+	}
+	stand, err := s.StandInSignIns.Load(ctx)
+	if err != nil {
+		return "", err
+	}
+	lines := stand[party]
+	if len(lines) == 0 {
+		return "", nil
+	}
+	if proved != nil && slices.ContainsFunc(lines, func(y people.SignIn) bool {
+		return y.Subject == proved.Subject && people.CanonicalIssuer(y.Issuer) == proved.Issuer
+	}) {
+		return "", nil
+	}
+	return fmt.Sprintf("%s signs in by the c4-sign-ins Secret, which a Party of that name replaces: list one of its subjects among signIns and prove it (idToken), so the Party keeps them signed in", party), nil
+}
+
 // partyPredicate is a party write's control record, before its act.
 func (s *Server) partyPredicate(r *http.Request, v *api.Viewer, authz, action, target string, change map[string]any) controlPredicate {
 	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Authorization: authz,
@@ -744,28 +905,62 @@ func (s *Server) partyPredicate(r *http.Request, v *api.Viewer, authz, action, t
 	return pred
 }
 
-// bookParty books a party act's control record in the farm book, now:
-// for a membership the book is the state, so an act it did not take did
-// nothing.
-func (s *Server) bookParty(ctx context.Context, record string) error {
-	if s.FarmBook == nil {
-		return errors.New("this farm keeps no farm book")
+// errPartyMoved is a write the book's state moved under too often.
+var errPartyMoved = errors.New("the farm book moved under this write too often: try again")
+
+// bookChecked books a party act's control record in the farm book, now,
+// judging check on the book as it stands at the State the entry is
+// submitted from (R5): when another writer moved it first, it reads the
+// book again and judges again, as the people's issuer's append does, so
+// two writes that each pass alone can't both be booked when together
+// they break a rule. For a membership the book is the state, so an act it
+// did not take did nothing. A refusal from check comes back as it is.
+func (s *Server) bookChecked(ctx context.Context, record string, check func(view *farmbook.View) *errGrant) error {
+	if s.FarmBook == nil || s.FarmBookReader == nil {
+		return errors.New(noBookParties)
 	}
 	rec, err := s.FarmBook.Store.Get(ctx, record)
 	if err != nil {
 		return err
 	}
-	e, err := farmbook.ControlEntry(rec, time.Now())
-	if err != nil {
-		return err
+	for try := 0; try < 8; try++ {
+		view, err := s.FarmBookReader.View(ctx, time.Now())
+		if err != nil {
+			return err
+		}
+		if check != nil {
+			if g := check(view); g != nil {
+				return g
+			}
+		}
+		e, err := farmbook.ControlEntry(rec, time.Now())
+		if err != nil {
+			return err
+		}
+		_, err = farmbook.Submit(ctx, s.FarmBook.Store, s.FarmBook.Pointer, view.State, []farmbook.Submission{{Entry: e}})
+		if !errors.Is(err, farmbook.ErrMoved) {
+			return err
+		}
 	}
-	_, err = s.FarmBook.Append(ctx, farmbook.Submission{Entry: e})
-	return err
+	return errPartyMoved
+}
+
+// bookFailed answers a party write the book did not take.
+func bookFailed(w http.ResponseWriter, err error, what string) {
+	var g *errGrant
+	if errors.As(err, &g) {
+		fail(w, g.code, "%s", g.msg)
+		return
+	}
+	fail(w, http.StatusServiceUnavailable, "the farm book did not take %s (%v), so nothing changed: try again", what, err)
 }
 
 // handleMakeParty answers POST /api/v1/parties {name, kind, displayName,
-// legalName?, signIns?}: a farm admin makes a party (make-party). Whoever
-// makes an organisation is its first admin, holding admin and member.
+// legalName?, signIns?, idToken?, firstAdmin?} (make-party):
+//   - an organisation: a farm admin makes it, naming its first admin, a
+//     person Party other than their own, who counts once they accept;
+//   - a person: the person makes their own, signed in with the name it
+//     lists and proving any provider subject it lists.
 func (s *Server) handleMakeParty(w http.ResponseWriter, r *http.Request) {
 	v := s.partyWriter(w, r)
 	if v == nil {
@@ -773,10 +968,10 @@ func (s *Server) handleMakeParty(w http.ResponseWriter, r *http.Request) {
 	}
 	var body api.PartyRequest
 	if err := decodeBody(r, &body); err != nil {
-		fail(w, http.StatusBadRequest, "send {name, kind, displayName, legalName?, signIns?}: %v", err)
+		fail(w, http.StatusBadRequest, "send {name, kind, displayName, legalName?, signIns?, idToken?, firstAdmin?}: %v", err)
 		return
 	}
-	body.Name, body.DisplayName, body.LegalName = strings.TrimSpace(body.Name), strings.TrimSpace(body.DisplayName), strings.TrimSpace(body.LegalName)
+	body.Name, body.DisplayName, body.LegalName, body.FirstAdmin = strings.TrimSpace(body.Name), strings.TrimSpace(body.DisplayName), strings.TrimSpace(body.LegalName), strings.TrimSpace(body.FirstAdmin)
 	signIns, err := validSignIns(body.SignIns)
 	switch {
 	case !partyName.MatchString(body.Name):
@@ -800,6 +995,9 @@ func (s *Server) handleMakeParty(w http.ResponseWriter, r *http.Request) {
 	case len(signIns) > 0 && body.Kind != c4v1.PartyPerson:
 		fail(w, http.StatusBadRequest, "signIns: only a person signs in; an organisation's members do")
 		return
+	case body.FirstAdmin != "" && body.Kind != c4v1.PartyOrganisation:
+		fail(w, http.StatusBadRequest, "firstAdmin: an organisation's; a person's Party has no members")
+		return
 	}
 	ctx := r.Context()
 	ps, err := s.parties(ctx)
@@ -807,41 +1005,62 @@ func (s *Server) handleMakeParty(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, "%v", err)
 		return
 	}
-	person := s.partyPerson(ctx, v, ps)
-	authz := s.authorization(v, "create", "parties", "", body.Name)
-	if err := s.farmAdminMakes(ctx, r, v, body.Name); err != nil {
-		if !s.ownerMakesOwn(ctx, ps, person, &body, signIns) {
-			fail(w, http.StatusForbidden, "a farm admin keeps the party list: %v", err)
-			return
-		}
-		authz = "the farm binding's owner, making their own party"
-	}
 	if old := findParty(ps, body.Name); old != nil {
 		s.partyExists(w, r, v, old, &body, signIns)
 		return
 	}
-	if who, x := claimed(ps, "", signIns); who != "" {
-		fail(w, http.StatusConflict, "signIns: %s is %s's already; one sign-in is one person's", x, who)
-		return
-	}
-	if who, x, err := s.standInHolder(ctx, ps, body.Name, signIns); err != nil || who != "" {
-		standInRefusal(w, who, x, err)
-		return
-	}
-	if body.Kind == c4v1.PartyOrganisation && person == "" {
-		fail(w, http.StatusForbidden, "whoever makes an organisation is its first admin, and %s is no person", v.User)
-		return
-	}
 	change := map[string]any{"name": body.Name, "kind": body.Kind, "displayName": body.DisplayName}
-	if body.LegalName != "" {
-		change["legalName"] = body.LegalName
-	}
-	if len(signIns) > 0 {
-		change["signIns"] = signIns
-	}
+	authz := ""
 	if body.Kind == c4v1.PartyOrganisation {
-		// Whoever makes an organisation is its first admin.
-		change["member"], change["purposes"] = person, firstAdmin
+		person := s.partyPerson(v, ps)
+		fa := findParty(ps, body.FirstAdmin)
+		switch err := s.farmAdminMakes(ctx, r, v, body.Name); {
+		case err != nil:
+			fail(w, http.StatusForbidden, "a farm admin keeps the party list: %v", err)
+			return
+		case body.FirstAdmin == "":
+			fail(w, http.StatusBadRequest, "firstAdmin: name the person Party that is %s's first admin once they accept; making it makes no one its admin", body.Name)
+			return
+		case fa == nil || fa.Spec.Kind != c4v1.PartyPerson:
+			fail(w, http.StatusBadRequest, "firstAdmin: %s is no person Party: the first admin is a person, with a Party of their own", body.FirstAdmin)
+			return
+		case person != "" && body.FirstAdmin == person:
+			fail(w, http.StatusForbidden, "firstAdmin: making a Party never makes its maker its admin: another farm admin names you, or name the person who is")
+			return
+		}
+		authz = s.authorization(v, "create", "parties", "", body.Name)
+		change["firstAdmin"] = body.FirstAdmin
+		if body.LegalName != "" {
+			change["legalName"] = body.LegalName
+		}
+	} else {
+		if !slices.Contains(signIns, c4v1.PartySignIn{Subject: v.User}) {
+			fail(w, http.StatusForbidden, "signIns: a person's Party is made by the person, signed in with it: list the sign-in you are using, %s", v.User)
+			return
+		}
+		proved, g := s.proveAdds(ctx, v, signIns, body.IDToken)
+		if g != nil {
+			fail(w, g.code, "%s", g.msg)
+			return
+		}
+		if who, x := claimed(ps, "", signIns); who != "" {
+			fail(w, http.StatusConflict, "signIns: %s is %s's already; one sign-in is one person's", x, who)
+			return
+		}
+		if who, x, err := s.standInHolder(ctx, ps, body.Name, signIns); err != nil || who != "" {
+			standInRefusal(w, who, x, err)
+			return
+		}
+		switch why, err := s.leavesTheSecret(ctx, body.Name, proved); {
+		case err != nil:
+			fail(w, http.StatusServiceUnavailable, "the c4-sign-ins Secret: %v", err)
+			return
+		case why != "":
+			fail(w, http.StatusForbidden, "%s", why)
+			return
+		}
+		authz = "the person, making their own party"
+		change["signIns"] = signIns
 	}
 	pred := s.partyPredicate(r, v, authz, "make-party", farmbook.PartyKey(body.Name), change)
 	// making a party is an act on the farm itself
@@ -876,13 +1095,13 @@ func (s *Server) handleMakeParty(w http.ResponseWriter, r *http.Request) {
 		fail(w, code, "%v", err)
 		return
 	}
-	if err := s.bookParty(ctx, id); err != nil {
-		fail(w, http.StatusServiceUnavailable, "party %s is made, and the farm book did not take its record (%v), so it has no members yet: make it again the same way to book it", body.Name, err)
+	if err := s.bookChecked(ctx, id, nil); err != nil {
+		fail(w, http.StatusServiceUnavailable, "party %s is made, and the farm book did not take its record (%v): make it again the same way to book it", body.Name, err)
 		return
 	}
 	msg := fmt.Sprintf("%s makes the %s %s (%s)", v.User, body.Kind, body.Name, body.DisplayName)
 	if body.Kind == c4v1.PartyOrganisation {
-		msg += fmt.Sprintf(", with %s its first admin", person)
+		msg += fmt.Sprintf(", naming %s its first admin, once they accept", body.FirstAdmin)
 	}
 	s.record(ctx, p, "Party", v.User, "Made", msg+"; record "+shortID(id), bookNote{actor: actorOf(r, v), kind: "make-party", record: id, booked: true})
 	s.answerParty(w, r, v, p, msg, id, false)
@@ -907,8 +1126,8 @@ func (s *Server) partyExists(w http.ResponseWriter, r *http.Request, v *api.View
 		return
 	}
 	msg := fmt.Sprintf("party %s is made already", old.Name)
-	if inForce(view, farmbook.ForceParty, farmbook.PartyKey(old.Name)) == nil {
-		if err := s.bookParty(ctx, old.Spec.Made.Record); err != nil {
+	if s.inForce(view, farmbook.ForceParty, farmbook.PartyKey(old.Name)) == nil {
+		if err := s.bookChecked(ctx, old.Spec.Made.Record, nil); err != nil {
 			fail(w, http.StatusServiceUnavailable, "party %s is made, and the farm book did not take its record: %v", old.Name, err)
 			return
 		}
@@ -948,9 +1167,9 @@ func (s *Server) partyFor(w http.ResponseWriter, r *http.Request, v *api.Viewer)
 	return p, st
 }
 
-// adminOf says how v may change p: as its admin (an organisation's admin,
-// or the person whose party it is), or as a farm admin; "" when v may
-// not.
+// adminOf says how v may change p's names and policy: as its admin (an
+// organisation's admin, or the person whose party it is), or as a farm
+// admin for a person's; "" when v may not.
 func (s *Server) adminOf(r *http.Request, v *api.Viewer, st *standing, p *c4v1.Party) string {
 	switch {
 	case p.Spec.Kind == c4v1.PartyOrganisation && st.holds(p.Name, PurposeAdmin):
@@ -1017,10 +1236,11 @@ func (s *Server) handleChangeParty(w http.ResponseWriter, r *http.Request) {
 	s.changeParty(w, r, v, p, next, authz, "change-party", change)
 }
 
-// handleSignIns answers PUT /api/v1/parties/{name}/sign-ins {signIns}
-// (set-sign-ins): a person's sign-in subjects, set by the person or a farm
-// admin. The person adds only the sign-in they are using; a farm admin,
-// who keeps the party list, may add any not already another's.
+// handleSignIns answers PUT /api/v1/parties/{name}/sign-ins {signIns,
+// idToken?} (set-sign-ins): a person's sign-in subjects, all of them. The
+// person adds their own, each just proved (R2): the name they are signed
+// in with, and a provider subject idToken proves. The person, or a farm
+// admin, removes one; nobody adds one for someone else.
 func (s *Server) handleSignIns(w http.ResponseWriter, r *http.Request) {
 	v := s.partyWriter(w, r)
 	if v == nil {
@@ -1028,7 +1248,7 @@ func (s *Server) handleSignIns(w http.ResponseWriter, r *http.Request) {
 	}
 	var body api.SignInsRequest
 	if err := decodeBody(r, &body); err != nil {
-		fail(w, http.StatusBadRequest, "send {signIns}: %v", err)
+		fail(w, http.StatusBadRequest, "send {signIns, idToken?}: %v", err)
 		return
 	}
 	p, st := s.partyFor(w, r, v)
@@ -1044,25 +1264,30 @@ func (s *Server) handleSignIns(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "%v", err)
 		return
 	}
-	authz := s.adminOf(r, v, st, p)
-	if authz == "" {
-		fail(w, http.StatusForbidden, "%s may not change %s's sign-ins: the person, or a farm admin, does", v.User, p.Name)
+	ctx := r.Context()
+	adds := added(p.Spec.SignIns, signIns)
+	authz := ""
+	switch {
+	case st.person == p.Name:
+		authz = "the person " + p.Name
+	case len(adds) == 0 && s.farmAdmin(ctx, r, v, p.Name):
+		authz = s.authorization(v, "update", "parties", "", p.Name)
+	case len(adds) > 0:
+		fail(w, http.StatusForbidden, "%s may not add to %s's sign-ins: the person adds their own, each proved by signing in with it", v.User, p.Name)
+		return
+	default:
+		fail(w, http.StatusForbidden, "%s may not change %s's sign-ins: the person, or a farm admin, removes one", v.User, p.Name)
 		return
 	}
-	if !s.farmAdmin(r.Context(), r, v, p.Name) {
-		// the person themselves
-		for _, x := range signIns {
-			if x != (c4v1.PartySignIn{Subject: v.User}) && !slices.Contains(p.Spec.SignIns, x) {
-				fail(w, http.StatusForbidden, "signIns: %s adds only the sign-in they are using (%s); a farm admin adds %s", v.User, v.User, signInWords(x))
-				return
-			}
-		}
+	if _, g := s.proveAdds(ctx, v, adds, body.IDToken); g != nil {
+		fail(w, g.code, "%s", g.msg)
+		return
 	}
-	if who, x := claimed(st.parties, p.Name, signIns); who != "" {
+	if who, x := claimed(st.parties, p.Name, adds); who != "" {
 		fail(w, http.StatusConflict, "signIns: %s is %s's already; one sign-in is one person's", x, who)
 		return
 	}
-	if who, x, err := s.standInHolder(r.Context(), st.parties, p.Name, signIns); err != nil || who != "" {
+	if who, x, err := s.standInHolder(ctx, st.parties, p.Name, adds); err != nil || who != "" {
 		standInRefusal(w, who, x, err)
 		return
 	}
@@ -1106,13 +1331,161 @@ func (s *Server) changeParty(w http.ResponseWriter, r *http.Request, v *api.View
 	s.answerParty(w, r, v, q, msg, id, false)
 }
 
+// handleAccept answers POST /api/v1/parties/{name}/accept (accept-admin):
+// the first admin an organisation's make-party named accepts, as
+// themselves, with their own touched act (R4). Until they do, the
+// organisation has no admin.
+func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
+	v := s.partyWriter(w, r)
+	if v == nil {
+		return
+	}
+	p, st := s.partyFor(w, r, v)
+	if p == nil {
+		return
+	}
+	ctx := r.Context()
+	if p.Spec.Kind != c4v1.PartyOrganisation {
+		fail(w, http.StatusBadRequest, "party %s is a person: it has no admin to accept", p.Name)
+		return
+	}
+	view, err := s.partyBook(ctx)
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "%v", err)
+		return
+	}
+	made, fa := madeBy(view, p.Name)
+	judge := func(view *farmbook.View) *errGrant {
+		_, now := madeBy(view, p.Name)
+		switch {
+		case now == "" || now != fa:
+			return &errGrant{http.StatusConflict, fmt.Sprintf("%s's make-party names no first admin to accept", p.Name)}
+		case farmbook.AdminAccepted(view.All(), p.Name) != nil:
+			return &errGrant{http.StatusConflict, fmt.Sprintf("%s accepted as %s's first admin already", fa, p.Name)}
+		}
+		return nil
+	}
+	if g := judge(view); g != nil {
+		fail(w, g.code, "%s", g.msg)
+		return
+	}
+	if st.person == "" || st.person != fa {
+		fail(w, http.StatusForbidden, "only %s, the first admin %s's make-party names, accepts, as themselves", fa, p.Name)
+		return
+	}
+	act, err := s.citeAct(ctx, r, v, partySubject(p), "accept-admin")
+	switch {
+	case err != nil:
+		fail(w, controlStatus(err), "%v", err)
+		return
+	case act == nil || act.grade != CustodyConfirmed:
+		fail(w, http.StatusForbidden, "accepting %s's admin takes your own touched act: sign accept-admin on the party with your device and touch key (X-C4-Act)", p.Name)
+		return
+	}
+	key := farmbook.MemberKey(p.Name, fa)
+	change := map[string]any{"party": p.Name, "member": fa, "purposes": firstAdmin, "follows": made.Entry.Record}
+	pred := s.partyPredicate(r, v, "the first admin "+p.Name+"'s make-party names, accepting", "accept-admin", key, change)
+	subject := onAct(act, provenance.Subject{Name: key, Digest: map[string]string{"sha256": sha256JSON(change)}}, &pred)
+	id, _, err := s.signRecord(ctx, subject, pred)
+	if err != nil {
+		fail(w, controlStatus(err), "control record: %v", err)
+		return
+	}
+	if err := s.bookChecked(ctx, id, judge); err != nil {
+		bookFailed(w, err, "the accept-admin record")
+		return
+	}
+	msg := fmt.Sprintf("%s accepts as %s's first admin", fa, p.Name)
+	s.record(ctx, p, "Party", v.User, "Membership", msg+"; record "+shortID(id), bookNote{actor: actorOf(r, v), kind: "accept-admin", record: id, booked: true})
+	s.answerParty(w, r, v, p, msg, id, false)
+}
+
+// memberWrite is one membership write, as judged against one view of the
+// book.
+type memberWrite struct {
+	action        string
+	party         *c4v1.Party
+	person, group string
+	purposes      []string
+}
+
+// judgeMember judges w against view, the actor v: who may make it, what
+// it changes, and the rules on top (R3, R5): an admin never grants for
+// themselves, nor copies a purpose they hold only by a group into their
+// own named membership; the last named admin is never removed. It
+// returns the membership the write changes, if any, and how v may.
+func (s *Server) judgeMember(ctx context.Context, v *api.Viewer, ps []c4v1.Party, view *farmbook.View, w *memberWrite) (*membership, string, *errGrant) {
+	p := w.party
+	st := s.standingAt(ctx, v, ps, view, nil)
+	ms, err := s.membersOf(ctx, view, p, ps)
+	if err != nil {
+		return nil, "", &errGrant{http.StatusInternalServerError, err.Error()}
+	}
+	who := w.person
+	if w.group != "" {
+		who = "group " + w.group
+	}
+	var cur *membership
+	admins := 0
+	for i := range ms {
+		if ms[i].person != "" && ms[i].lapsed == "" && slices.Contains(ms[i].purposes, PurposeAdmin) {
+			admins++
+		}
+		if ms[i].person == w.person && ms[i].group == w.group {
+			cur = &ms[i]
+		}
+	}
+	named := w.person != "" && st.person != "" && w.person == st.person
+	byGroup := w.group != "" && slices.Contains(v.Groups, w.group)
+	authz := ""
+	switch {
+	case st.holds(p.Name, PurposeAdmin):
+		authz = "an admin of " + p.Name
+	case w.action == "end-member" && named:
+		// a member ends their own membership: it only narrows
+		authz = "the member, leaving"
+	default:
+		return nil, "", &errGrant{http.StatusForbidden, fmt.Sprintf("%s is not an admin of %s: its admins change its members", v.User, p.Name)}
+	}
+	switch {
+	case w.action == "add-member" && cur != nil:
+		return nil, "", &errGrant{http.StatusConflict, fmt.Sprintf("%s is a member of %s already, holding %s: change its purposes (PUT)", who, p.Name, strings.Join(cur.purposes, ", "))}
+	case w.action != "add-member" && cur == nil:
+		return nil, "", &errGrant{http.StatusNotFound, fmt.Sprintf("%s is not a member of %s", who, p.Name)}
+	}
+	var had []string
+	if cur != nil {
+		had = cur.purposes
+	}
+	for _, x := range w.purposes {
+		switch {
+		case slices.Contains(had, x):
+		case named:
+			// Admins revoke, never grant for themselves: their own named
+			// membership gains nothing, and a purpose they hold only by a
+			// group is never copied into it.
+			return nil, "", &errGrant{http.StatusForbidden, fmt.Sprintf("%s may not grant %s to %s: an admin never grants for themselves; another admin of %s does", v.User, x, who, p.Name)}
+		case byGroup && !slices.Contains(st.named[p.Name], x):
+			// a group they are in gains only what they hold by name
+			return nil, "", &errGrant{http.StatusForbidden, fmt.Sprintf("%s may not grant %s to %s, a group they are in: an admin never grants for themselves; another admin of %s does", v.User, x, who, p.Name)}
+		}
+	}
+	if w.person != "" && slices.Contains(had, PurposeAdmin) && !slices.Contains(w.purposes, PurposeAdmin) && admins <= 1 {
+		return nil, "", &errGrant{http.StatusConflict, fmt.Sprintf("%s is the last admin of %s: add another admin first", w.person, p.Name)}
+	}
+	return cur, authz, nil
+}
+
 // handleMember answers the three membership writes, each {person | group,
-// purposes?}:
+// purposes?}, a person by their Party's name (R3):
 //   - POST /api/v1/parties/{name}/members: add-member;
 //   - PUT /api/v1/parties/{name}/members: set-purposes, of a membership in
 //     force;
 //   - POST /api/v1/parties/{name}/members/end: end-member. A membership
 //     ends, it is never deleted.
+//
+// Each is judged once to sign it, and again inside the book's append, on
+// the book as it then stands (R5).
 func (s *Server) handleMember(action string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		v := s.partyWriter(w, r)
@@ -1136,13 +1509,13 @@ func (s *Server) handleMember(action string) http.HandlerFunc {
 			fail(w, http.StatusBadRequest, "party %s is a person: a person's party has no members, and every purpose is theirs", p.Name)
 			return
 		case (body.Person == "") == (body.Group == ""):
-			fail(w, http.StatusBadRequest, "name a person or a group of the studio's own, not both")
+			fail(w, http.StatusBadRequest, "name a person's Party or a group of the studio's own, not both")
 			return
-		case body.Person != "" && !personName.MatchString(body.Person):
-			fail(w, http.StatusBadRequest, "person: a person's name, their party's or their sign-in's, without spaces, colons or slashes")
+		case body.Person != "" && !partyName.MatchString(body.Person):
+			fail(w, http.StatusBadRequest, "person: %s is no Party's name", body.Person)
 			return
-		case body.Person != "" && findParty(st.parties, body.Person) != nil && findParty(st.parties, body.Person).Spec.Kind != c4v1.PartyPerson:
-			fail(w, http.StatusBadRequest, "person: %s is an organisation, and only a person is a member", body.Person)
+		case body.Person != "" && action != "end-member" && findParty(st.parties, body.Person) == nil:
+			fail(w, http.StatusBadRequest, "person: %s is no Party: a membership names a Party, person or organisation, never a bare sign-in name", body.Person)
 			return
 		case body.Group != "" && !MembersByGroup:
 			fail(w, http.StatusBadRequest, "group: on this farm every member is named (membership by the studio's groups is off)")
@@ -1174,60 +1547,14 @@ func (s *Server) handleMember(action string) http.HandlerFunc {
 			fail(w, http.StatusServiceUnavailable, "%v", err)
 			return
 		}
-		ms, err := s.membersOf(ctx, view, p)
-		if err != nil {
-			fail(w, http.StatusInternalServerError, "%v", err)
+		mw := &memberWrite{action: action, party: p, person: body.Person, group: body.Group, purposes: purposes}
+		cur, authz, g := s.judgeMember(ctx, v, st.parties, view, mw)
+		if g != nil {
+			fail(w, g.code, "%s", g.msg)
 			return
 		}
-		var cur *membership
-		admins := 0
-		for i := range ms {
-			if ms[i].person != "" && slices.Contains(ms[i].purposes, PurposeAdmin) {
-				admins++
-			}
-			if ms[i].person == body.Person && ms[i].group == body.Group {
-				cur = &ms[i]
-			}
-		}
-		self := body.Person != "" && body.Person == st.person || body.Group != "" && slices.Contains(v.Groups, body.Group)
-		authz := ""
-		switch {
-		case st.holds(p.Name, PurposeAdmin):
-			authz = "an admin of " + p.Name
-		case action == "end-member" && body.Person != "" && self:
-			// a member ends their own membership: it only narrows
-			authz = "the member, leaving"
-		default:
-			fail(w, http.StatusForbidden, "%s is not an admin of %s: its admins change its members", v.User, p.Name)
-			return
-		}
-		switch {
-		case action == "add-member" && cur != nil:
-			fail(w, http.StatusConflict, "%s is a member of %s already, holding %s: change its purposes (PUT)", who, p.Name, strings.Join(cur.purposes, ", "))
-			return
-		case action != "add-member" && cur == nil:
-			fail(w, http.StatusNotFound, "%s is not a member of %s", who, p.Name)
-			return
-		case action == "set-purposes" && slices.Equal(cur.purposes, purposes):
+		if action == "set-purposes" && slices.Equal(cur.purposes, purposes) {
 			s.answerParty(w, r, v, p, fmt.Sprintf("%s holds %s for %s already", who, strings.Join(purposes, ", "), p.Name), "", true)
-			return
-		}
-		var had []string
-		if cur != nil {
-			had = cur.purposes
-		}
-		if self {
-			// Admins revoke, never grant for themselves: a membership that
-			// is the admin's own gives nothing they don't hold already.
-			for _, x := range purposes {
-				if !slices.Contains(had, x) && !st.holds(p.Name, x) {
-					fail(w, http.StatusForbidden, "%s may not grant %s to %s: an admin never grants for themselves; another admin of %s does", v.User, x, who, p.Name)
-					return
-				}
-			}
-		}
-		if body.Person != "" && slices.Contains(had, PurposeAdmin) && !slices.Contains(purposes, PurposeAdmin) && admins <= 1 {
-			fail(w, http.StatusConflict, "%s is the last admin of %s: add another admin first", body.Person, p.Name)
 			return
 		}
 		change := map[string]any{"party": p.Name, "purposes": purposes}
@@ -1239,8 +1566,10 @@ func (s *Server) handleMember(action string) http.HandlerFunc {
 		if purposes == nil {
 			change["purposes"] = []string{}
 		}
+		follows := ""
 		if cur != nil {
-			change["follows"] = cur.on.Entry.Record
+			follows = cur.on.Entry.Record
+			change["follows"] = follows
 		}
 		act, err := s.citeAct(ctx, r, v, partySubject(p), action)
 		if err != nil {
@@ -1254,8 +1583,19 @@ func (s *Server) handleMember(action string) http.HandlerFunc {
 			fail(w, controlStatus(err), "control record: %v", err)
 			return
 		}
-		if err := s.bookParty(ctx, id); err != nil {
-			fail(w, http.StatusServiceUnavailable, "the farm book did not take the %s record (%v), so nothing changed: try again", action, err)
+		err = s.bookChecked(ctx, id, func(view *farmbook.View) *errGrant {
+			// the same judgement, on the book as it stands now
+			now, _, g := s.judgeMember(ctx, v, st.parties, view, mw)
+			if g != nil {
+				return g
+			}
+			if (now == nil) != (cur == nil) || now != nil && now.on.Entry.Record != follows {
+				return &errGrant{http.StatusConflict, fmt.Sprintf("%s's membership of %s changed while you acted: look again", who, p.Name)}
+			}
+			return nil
+		})
+		if err != nil {
+			bookFailed(w, err, "the "+action+" record")
 			return
 		}
 		var msg string

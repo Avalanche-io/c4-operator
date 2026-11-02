@@ -174,6 +174,13 @@ type Server struct {
 	// stays one person's across both. nil on a farm with no people's
 	// issuer.
 	StandInSignIns people.SignIns
+	// ProveSignIn checks an ID token as the people's issuer's whoami does
+	// and answers the sign-in it proves: a provider subject goes on a
+	// person's Party only so (PEOPLE-KEYS-2 10.4 item 27 R2). nil on a
+	// farm with no people's issuer, which adds no provider subject.
+	ProveSignIn func(ctx context.Context, idToken string) (people.SignIn, error)
+	// partyMemo keeps what reading Parties' memberships costs (parties.go).
+	partyMemo partyCache
 	// HostIssuer is the farm's workload issuer for host runners, served at
 	// /workload/v1/certificate: a machine outside the cluster reaches the
 	// farm only at the HUD's address. It certifies on the runner's own
@@ -340,6 +347,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/parties/{name}/members", s.handleMember("add-member"))
 	mux.HandleFunc("PUT /api/v1/parties/{name}/members", s.handleMember("set-purposes"))
 	mux.HandleFunc("POST /api/v1/parties/{name}/members/end", s.handleMember("end-member"))
+	mux.HandleFunc("POST /api/v1/parties/{name}/accept", s.handleAccept)
 	mux.HandleFunc("POST /api/v1/installer/code", s.handleInstallerCode)
 	mux.HandleFunc("GET /installer", s.handleInstaller)
 	mux.HandleFunc("GET /api/v1/diagnose", s.handleDiagnose)
@@ -687,7 +695,7 @@ func (s *Server) expand(v *api.Viewer) *api.Viewer {
 	if !v.All || len(v.Projects) > 0 {
 		return v
 	}
-	out := &api.Viewer{User: v.User, All: true, Projects: []string{}, Role: v.Role, Parties: v.Parties}
+	out := &api.Viewer{User: v.User, All: true, Projects: []string{}, Role: v.Role, Parties: v.Parties, Groups: v.Groups}
 	if m := s.current(); m != nil {
 		for _, p := range m.projects {
 			out.Projects = append(out.Projects, p.Name)

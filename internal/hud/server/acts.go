@@ -138,9 +138,11 @@ func (s *Server) citeAct(ctx context.Context, r *http.Request, v *api.Viewer, su
 		return nil, fmt.Errorf("%w names %s and is signed by %s, not by a device of theirs", errAct, p.Chain.By.Person, vr.Identity)
 	case v == nil:
 		return nil, fmt.Errorf("%w is %s's, and no one signed in sent it", errAct, p.Chain.By.Person)
-	case v.User != p.Chain.By.Person && s.ownerFor(ctx, v) != p.Chain.By.Person:
+	case v.User != p.Chain.By.Person && s.ownerFor(ctx, v) != p.Chain.By.Person && s.partyPersonOf(ctx, v) != p.Chain.By.Person:
 		// The person is the viewer, or on a one-person farm the person a
-		// role's sign-in acts for (ownerFor): noor signs as artist.
+		// role's sign-in acts for (ownerFor): noor signs as artist; or the
+		// person Party whose sign-in the viewer is (R7): noor signs as
+		// noor@studio.example.
 		return nil, fmt.Errorf("%w is %s's, and %s sent it", errAct, p.Chain.By.Person, v.User)
 	}
 	if s.PeopleIndex != nil {
