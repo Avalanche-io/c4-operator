@@ -2412,10 +2412,11 @@ It is in force from its booked position (the one rule, `InForceAt`).
 under the binding in force for it: the one naming its identity exactly,
 byte for byte, else the farm binding (`<farm>/*`); no other prefix or glob
 counts. The leaf names the binding as a URI SAN, `urn:c4:binding:<C4 ID of
-its record>`, and never outlives its `end`. The controller, queue and HUD,
-certified in the manager's own process, re-certify within seconds when the
-binding in force for them changes. An identity no binding covers is still
-certified, naming none. Where the farm keeps a farm book, a binding is in
+its record>`, and never outlives its `end`. The controller, queue, HUD and people's issuer, certified in the
+manager's own process, each re-certify within seconds when the binding in
+force for them changes. An identity no binding covers is still certified,
+naming none, and so is any identity while the bindings can't be read: its
+records are labelled, never attributed to a binding that may have ended. Where the farm keeps a farm book, a binding is in
 force only while the book says so too; one made before the farm kept a
 book is judged by its object.
 

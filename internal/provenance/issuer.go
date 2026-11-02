@@ -87,9 +87,11 @@ func (i *Issuer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	var bound Bound
 	if i.Bind != nil {
+		// Bindings that can't be read certify it unbound, as an identity
+		// no binding covers: its records are labelled, never attributed
+		// to a binding that may have ended (label mode, before K8).
 		if bound, err = i.Bind(r.Context(), identity); err != nil {
-			http.Error(w, "the deployment bindings: "+err.Error(), http.StatusServiceUnavailable)
-			return
+			bound = Bound{}
 		}
 	}
 	cert, err := i.CA.IssueBound(ed25519.PublicKey(req.PublicKey), identity, bound, ttl, now)
@@ -168,9 +170,10 @@ func BoundLocalIssuer(ca *CA, identity string, ttl time.Duration, bind BindFunc)
 	return func(ctx context.Context, pub ed25519.PublicKey) ([]*x509.Certificate, error) {
 		var b Bound
 		if bind != nil {
-			var err error
-			if b, err = bind(ctx, identity); err != nil {
-				return nil, fmt.Errorf("the deployment bindings: %w", err)
+			// unreadable bindings certify it unbound, as the workload
+			// issuer does; it re-certifies once they read (RenewWhen)
+			if got, err := bind(ctx, identity); err == nil {
+				b = got
 			}
 		}
 		c, err := ca.IssueBound(pub, identity, b, ttl, time.Now())

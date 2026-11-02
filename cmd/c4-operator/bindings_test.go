@@ -161,3 +161,69 @@ func leafOf(t *testing.T, s *provenance.Signer) *provenanceLeaf {
 	}
 	return &provenanceLeaf{binding: provenance.CertBinding(leaf), notAfter: leaf.NotAfter}
 }
+
+// Each component re-checks its binding at its own pace: the controller,
+// queue and HUD signing in turn each re-certify under the farm binding at
+// their first signature after it, none starved by another's check.
+func TestEachComponentRechecksItsOwnBinding(t *testing.T) {
+	now := time.Now()
+	ca, err := provenance.NewCA(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheme := runtime.NewScheme()
+	if err := c4v1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	reader := fake.NewClientBuilder().WithScheme(scheme).Build()
+	sig := &signing{ca: ca}
+	for name, dst := range map[string]**provenance.Signer{"controller": &sig.controller, "queue": &sig.queue, "hud": &sig.hud} {
+		if *dst, err = provenance.NewSigner(context.Background(), provenance.BoundLocalIssuer(ca, provenance.ComponentIdentity(name), 24*time.Hour, sig.bind)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	defer func(d time.Duration) { componentRecheck = d }(componentRecheck)
+	componentRecheck = time.Hour
+	farmID := provtest.ID("the farm binding")
+	if err := reader.Create(context.Background(), testBinding("farm", "dana", "studio/*", farmID, now.Add(-time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	sig.useBindings(&bindings.Resolver{Client: reader})
+	for name, s := range map[string]*provenance.Signer{"controller": sig.controller, "queue": sig.queue, "hud": sig.hud} {
+		if l := leafOf(t, s); l.binding != farmID {
+			t.Errorf("the %s's leaf names %q, not the farm binding", name, l.binding)
+		}
+	}
+}
+
+// Bindings that can't be read never stop the farm signing: the issuer
+// certifies the identity unbound, as one no binding covers, so its
+// records are labelled, never attributed to a binding that may have ended.
+func TestUnreadableBindingsCertifyUnbound(t *testing.T) {
+	ca, err := provenance.NewCA(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	kube := kfake.NewSimpleClientset()
+	kube.PrependReactor("create", "tokenreviews", func(a ktesting.Action) (bool, runtime.Object, error) {
+		tr := a.(ktesting.CreateAction).GetObject().(*authnv1.TokenReview)
+		return true, &authnv1.TokenReview{Status: authnv1.TokenReviewStatus{Authenticated: true, Audiences: tr.Spec.Audiences,
+			User: authnv1.UserInfo{Username: "system:serviceaccount:c4-hosts:laptop-1"}}}, nil
+	})
+	// a reader that doesn't know DeploymentBindings: every list fails
+	reader := fake.NewClientBuilder().WithScheme(runtime.NewScheme()).Build()
+	sig := &signing{ca: ca}
+	sig.useBindings(&bindings.Resolver{Client: reader})
+	if _, err := sig.bind(context.Background(), provenance.RunnerIdentity("laptop-1")); err == nil {
+		t.Fatal("the bindings read")
+	}
+	srv := httptest.NewServer(http.StripPrefix("/workload", hostIssuer(sig, kube, reader, "c4-system")))
+	defer srv.Close()
+	s, err := provenance.NewSigner(context.Background(), provenance.RemoteIssuer(srv.URL+"/workload", func() (string, error) { return "runner", nil }, nil))
+	if err != nil {
+		t.Fatalf("refused while the bindings can't be read: %v", err)
+	}
+	if l := leafOf(t, s); l.binding != "" {
+		t.Errorf("the leaf names %q", l.binding)
+	}
+}

@@ -102,7 +102,7 @@ func newPeopleIssuer(ctx context.Context, s *signing, kube kubernetes.Interface,
 		book.sealer.Adopt = index.Adoption
 		index = &people.Index{Farm: farmOf(s), Roots: s.pool, Store: book.store, Head: index.Head, Book: book.reader}
 	}
-	iss := &people.Issuer{CA: s.ca,
+	iss := &people.Issuer{CA: s.ca, Bind: s.bind, Stale: s.newStale(),
 		Index:    index,
 		Provider: people.Provider{Issuer: o.provider, ClientID: o.clientID}, StepUp: people.StepUp{ACR: o.stepUpACR}, WebAuthn: rp,
 		SignIns: &secretSignIns{kube: kube, ns: signingNS}, Owner: owner, InstallerToken: o.installer, SoftwareTouchKeys: o.softwareTouchKeys,

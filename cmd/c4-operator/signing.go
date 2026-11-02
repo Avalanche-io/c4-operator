@@ -79,7 +79,7 @@ func (s *signing) useBindings(r *bindings.Resolver) {
 	s.bindings.Store(r)
 	for _, sg := range []*provenance.Signer{s.controller, s.queue, s.hud} {
 		if sg != nil {
-			sg.RenewWhen(r.Stale(componentRecheck))
+			sg.RenewWhen(s.newStale())
 		}
 	}
 }
@@ -414,3 +414,20 @@ type everyReplica func(ctx context.Context) error
 
 func (f everyReplica) Start(ctx context.Context) error { return f(ctx) }
 func (f everyReplica) NeedLeaderElection() bool        { return false }
+
+// newStale is one in-process component's renewal check, with its own
+// pace: its leaf is out of date with the binding in force for it, asked
+// at most every componentRecheck; never before the manager reads
+// bindings (useBindings).
+func (s *signing) newStale() func(leaf *x509.Certificate) bool {
+	var once sync.Once
+	var stale func(*x509.Certificate) bool
+	return func(leaf *x509.Certificate) bool {
+		r := s.bindings.Load()
+		if r == nil {
+			return false
+		}
+		once.Do(func() { stale = r.Stale(componentRecheck) })
+		return stale(leaf)
+	}
+}

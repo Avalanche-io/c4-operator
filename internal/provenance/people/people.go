@@ -59,6 +59,11 @@ type Issuer struct {
 	// CA is the farm's signing CA, which certifies device keys and the
 	// issuer's own key (component/issuer).
 	CA *provenance.CA
+	// Bind, when set, is the deployment binding in force for the issuer's
+	// own key (DESIGN 3.3): its leaf names it, and it re-certifies when
+	// Stale says the binding in force changed.
+	Bind  provenance.BindFunc
+	Stale func(leaf *x509.Certificate) bool
 	// Index is the farm's index of device records.
 	Index *Index
 	// Provider is the install's sign-in provider (--sign-in-provider,
@@ -129,8 +134,14 @@ func (i *Issuer) sign(ctx context.Context) (*provenance.Signer, error) {
 	if i.signer != nil {
 		return i.signer, nil
 	}
-	s, err := provenance.NewSigner(ctx, func(_ context.Context, pub ed25519.PublicKey) ([]*x509.Certificate, error) {
-		c, err := i.CA.Issue(pub, provenance.ComponentIdentity("issuer"), 24*time.Hour, i.now())
+	s, err := provenance.NewSigner(ctx, func(ctx context.Context, pub ed25519.PublicKey) ([]*x509.Certificate, error) {
+		var b provenance.Bound
+		if i.Bind != nil {
+			if got, err := i.Bind(ctx, provenance.ComponentIdentity("issuer")); err == nil {
+				b = got
+			}
+		}
+		c, err := i.CA.IssueBound(pub, provenance.ComponentIdentity("issuer"), b, 24*time.Hour, i.now())
 		if err != nil {
 			return nil, err
 		}
@@ -138,6 +149,9 @@ func (i *Issuer) sign(ctx context.Context) (*provenance.Signer, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+	if i.Stale != nil {
+		s.RenewWhen(i.Stale)
 	}
 	i.signer = s
 	return s, nil
