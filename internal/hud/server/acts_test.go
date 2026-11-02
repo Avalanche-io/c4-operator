@@ -163,4 +163,29 @@ func TestUnitActFromItsOwnToken(t *testing.T) {
 	if code, p := steer("unit3", ""); code != http.StatusOK || p.Act != nil {
 		t.Errorf("a unit's request with no act: %d, act %+v", code, p.Act)
 	}
+
+	// another job of the same owner: the unit's act names job B, sent from
+	// job A's unit, to A's route and to B's; neither is taken
+	b := s.m.byKey["show-a/sh050-comp-v001"]
+	b.job.UID = "9c1d2e7f-0000-4000-8000-00000000000b"
+	if b.job.Annotations == nil {
+		b.job.Annotations = map[string]string{}
+	}
+	b.job.Annotations[c4v1.AnnotationOwner] = "dana"
+	onB := provenance.ActSubject("workjob", "show-a", "sh050-comp-v001", string(b.job.UID), queue.SpecDigest(&b.job))
+	actOnB := func() string {
+		return base64.StdEncoding.EncodeToString(f.SignAct(t, three, provtest.Act{Subject: onB, Act: "steer", Params: params, SignedAt: time.Now()}))
+	}
+	for job, why := range map[string]string{
+		"sh040-light-v007": "or it is another job",                                 // A's route: the act is on another job
+		"sh050-comp-v001":  "may act only on its own job, show-a/sh040-light-v007", // B's route: a unit controls only its own job
+	} {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/show-a/"+job+"/steer?as=unit3", strings.NewReader(body))
+		r.Header.Set(ActHeader, actOnB())
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), why) {
+			t.Errorf("job A's unit acting on job B through %s's route: %d %s, want 403 with %q", job, w.Code, w.Body.String(), why)
+		}
+	}
 }
