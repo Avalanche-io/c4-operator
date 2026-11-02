@@ -204,6 +204,30 @@ func (k *fileKey) SPKI() []byte                    { return k.spki }
 func (k *fileKey) Sign(msg []byte) ([]byte, error) { return provenance.SignP256(k.key, msg) }
 func (k *fileKey) Protection() string              { return schema.ProtectionFile }
 
+// SignFor is Sign: a key file asks no one.
+func (k *fileKey) SignFor(msg []byte, _ string) ([]byte, error) { return k.Sign(msg) }
+
+// SignFor signs msg with k, asking for the person's presence, where k
+// asks, with reason: what the touch confirms.
+func SignFor(k Key, msg []byte, reason string) ([]byte, error) {
+	if r, ok := k.(interface {
+		SignFor([]byte, string) ([]byte, error)
+	}); ok {
+		return r.SignFor(msg, reason)
+	}
+	return k.Sign(msg)
+}
+
+// WithReason is k signing with reason for every signature it makes.
+func WithReason(k Key, reason string) Key { return reasoned{k, reason} }
+
+type reasoned struct {
+	Key
+	reason string
+}
+
+func (r reasoned) Sign(msg []byte) ([]byte, error) { return SignFor(r.Key, msg, r.reason) }
+
 // spkiOf is the DER SubjectPublicKeyInfo of an X9.63 uncompressed P-256
 // public key.
 func spkiOf(x963 []byte) ([]byte, error) {

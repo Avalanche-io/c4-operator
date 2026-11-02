@@ -20,6 +20,7 @@ import (
 
 	"github.com/go-logr/logr"
 
+	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/keystore"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
@@ -246,5 +247,38 @@ func TestActsNameTheFarmOfTheirKey(t *testing.T) {
 	}
 	if _, err := BookBrowserCode(ctx, o.client, st, "c4someotherfarm", "noor"); err == nil || !strings.Contains(err.Error(), "certified at") {
 		t.Errorf("an act for a farm the HUD named: %v", err)
+	}
+}
+
+// Probe P6, the subject: asked to revoke show-a/g1, the CLI signs nothing
+// on a subject the HUD served for another grant, and sends no revoke.
+func TestServedSubjectCheckedAgainstWhatWasNamed(t *testing.T) {
+	o := newOwnerIssuer(t)
+	ctx := context.Background()
+	st := keystore.Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
+	if _, err := EnrolOwner(ctx, o.client, st, "noor"); err != nil {
+		t.Fatal(err)
+	}
+	o.mux.HandleFunc("GET /api/v1/acts/needs", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(api.ActNeeds{Acts: map[string]api.ActNeed{"revoke": {Person: true}}})
+	})
+	o.mux.HandleFunc("GET /api/v1/grants", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(api.GrantList{Grants: []api.Grant{{Namespace: "show-a", Name: "g1",
+			ActOn: &api.ActOn{Name: "submitgrant:show-b/OTHER@uid", Digest: map[string]string{"sha256": strings.Repeat("0", 64)}}}}})
+	})
+	sent := false
+	o.mux.HandleFunc("DELETE /api/v1/grants/show-a/g1", func(w http.ResponseWriter, r *http.Request) {
+		sent = true
+		w.Write([]byte(`{"message":"ok"}`))
+	})
+	o.client.Acts = &Acts{Store: st, Present: true}
+	if err := Revoke(ctx, o.client, Out{W: new(strings.Builder)}, "show-a/g1"); err == nil || !strings.Contains(err.Error(), "refused, nothing was signed") || sent {
+		t.Errorf("another grant's subject: %v (sent %v)", err, sent)
+	}
+	if err := checkActOn(&api.ActOn{Name: "submitgrant:show-a/g1@9b0e0001", Digest: map[string]string{"sha256": strings.Repeat("ab", 32)}}, "submitgrant", "show-a", "g1"); err != nil {
+		t.Errorf("the grant itself: %v", err)
+	}
+	if err := checkActOn(&api.ActOn{Name: "project:show-b@u1", Digest: map[string]string{"sha256": strings.Repeat("ab", 32)}}, "project", "", "show-a"); err == nil {
+		t.Error("another project's subject")
 	}
 }

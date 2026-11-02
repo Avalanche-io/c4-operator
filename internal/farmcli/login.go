@@ -269,6 +269,11 @@ func Renew(ctx context.Context, c *Client, a LoginArgs) (*people.Certified, erro
 		if err != nil {
 			return nil, err
 		}
+		// never an unannounced touch during an ordinary command
+		if a.Say != nil {
+			a.Say("key       renewing your touch key for this farm: touch to continue\n")
+		}
+		touch = keystore.WithReason(touch, "c4: renew your touch key for this farm")
 		te, err := enrolment(touch, a.Farm.Farm, person, deviceID(key))
 		if err != nil {
 			return nil, err

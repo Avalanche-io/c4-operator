@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/keystore"
 )
 
 // Bind binds the farm to its owner (POST /farm/binding), as the caller,
@@ -32,10 +33,19 @@ func Bind(ctx context.Context, c *Client, req api.FarmBindingRequest) (api.FarmB
 
 // FarmActOn is the farm itself as an act names it (farm:<farm ID>), from
 // its people's issuer; nil when it has none.
+// It is the farm this machine's key was certified at, from its own chain,
+// so an act's subject and its farm are the same, whatever the HUD says.
 func FarmActOn(ctx context.Context, c *Client) *api.ActOn {
-	cfg, err := PeopleConfig(ctx, c)
-	if err != nil || cfg.Farm == "" {
+	if c.Acts == nil {
 		return nil
 	}
-	return &api.ActOn{Name: "farm:" + cfg.Farm, Digest: map[string]string{"c4": cfg.Farm}}
+	cert, err := LoadCert(c.Acts.Store, keystore.Device)
+	if err != nil || cert == nil {
+		return nil
+	}
+	f, err := certFarm(cert)
+	if err != nil {
+		return nil
+	}
+	return &api.ActOn{Name: "farm:" + f, Digest: map[string]string{"c4": f}}
 }

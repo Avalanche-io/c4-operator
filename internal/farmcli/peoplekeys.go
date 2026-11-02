@@ -204,7 +204,7 @@ func enrolOwner(ctx context.Context, c *Client, st keystore.Store, owner string,
 	case err != nil:
 		return nil, err
 	default:
-		t, err := enrolment(touch, cfg.Farm, owner, deviceID(dev))
+		t, err := enrolment(keystore.WithReason(touch, "c4: make your touch key for this farm"), cfg.Farm, owner, deviceID(dev))
 		if err != nil {
 			return nil, err
 		}
@@ -384,6 +384,7 @@ func ApproveDevice(ctx context.Context, c *Client, st keystore.Store, farm, devi
 	if err != nil {
 		return nil, err
 	}
+	touch = keystore.WithReason(touch, "c4: approve the machine "+ShortDevice(device)+" to act as you")
 	touchCert, err := LoadCert(st, keystore.Touch)
 	if err != nil || touchCert == nil {
 		return nil, fmt.Errorf("this machine's touch key is not enrolled: %v", err)
@@ -595,7 +596,7 @@ func EnrolTouchKey(ctx context.Context, c *Client, st keystore.Store) (*people.C
 		return nil, err
 	}
 	person := strings.TrimPrefix(dev.Identity, provenance.IdentityBase+"user/")
-	e, err := enrolment(touch, cfg.Farm, person, dev.Device)
+	e, err := enrolment(keystore.WithReason(touch, "c4: make your touch key for this farm"), cfg.Farm, person, dev.Device)
 	if err != nil {
 		return nil, err
 	}

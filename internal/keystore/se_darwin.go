@@ -7,12 +7,14 @@ package keystore
 // -tags c4se keeps key files (se_other.go).
 
 /*
-#cgo LDFLAGS: -L${SRCDIR}/c4se -lc4se -framework CryptoKit -framework Security -framework Foundation -L/usr/lib/swift
+#cgo LDFLAGS: -L${SRCDIR}/c4se -lc4se -framework CryptoKit -framework Security -framework Foundation -framework LocalAuthentication -L/usr/lib/swift
 #include <stdint.h>
 int32_t c4se_available(void);
 int32_t c4se_make(int32_t kind, uint8_t *blob, int32_t cap, uint8_t *pub, char *errbuf, int32_t errcap);
 int32_t c4se_public(const uint8_t *blob, int32_t blen, uint8_t *pub, char *errbuf, int32_t errcap);
 int32_t c4se_sign(const uint8_t *blob, int32_t blen, const uint8_t *msg, int32_t mlen, uint8_t *sig, char *errbuf, int32_t errcap);
+int32_t c4se_sign_for(const uint8_t *blob, int32_t blen, const uint8_t *msg, int32_t mlen, const char *reason, uint8_t *sig, char *errbuf, int32_t errcap);
+#include <stdlib.h>
 */
 import "C"
 
@@ -81,6 +83,20 @@ func (k *seKey) Sign(msg []byte) ([]byte, error) {
 	// never a null pointer, even for an empty message
 	buf := append(append([]byte(nil), msg...), 0)
 	if C.c4se_sign((*C.uint8_t)(&k.blob[0]), C.int32_t(len(k.blob)), (*C.uint8_t)(&buf[0]), C.int32_t(len(msg)), (*C.uint8_t)(&sig[0]),
+		(*C.char)(unsafe.Pointer(&errbuf[0])), C.int32_t(len(errbuf))) < 0 {
+		return nil, seError("the Secure Enclave did not sign", errbuf)
+	}
+	return lowS(sig), nil
+}
+
+// SignFor is Sign with the reason the person's touch is asked for, shown
+// in the system's prompt.
+func (k *seKey) SignFor(msg []byte, reason string) ([]byte, error) {
+	sig, errbuf := make([]byte, 64), make([]byte, 512)
+	buf := append(append([]byte(nil), msg...), 0)
+	cr := C.CString(reason)
+	defer C.free(unsafe.Pointer(cr))
+	if C.c4se_sign_for((*C.uint8_t)(&k.blob[0]), C.int32_t(len(k.blob)), (*C.uint8_t)(&buf[0]), C.int32_t(len(msg)), cr, (*C.uint8_t)(&sig[0]),
 		(*C.char)(unsafe.Pointer(&errbuf[0])), C.int32_t(len(errbuf))) < 0 {
 		return nil, seError("the Secure Enclave did not sign", errbuf)
 	}

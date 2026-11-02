@@ -122,6 +122,13 @@ func (a *Acts) header(ctx context.Context, c *Client, act string, on *api.ActOn,
 		if touch, err = a.Store.Key(keystore.Touch); err != nil {
 			return "", err
 		}
+		// what the touch confirms, shown by the CLI, the display a HUD
+		// doesn't control, and in the system's own prompt (4.3)
+		what := ActReason(act, on.Name, body)
+		if a.Say != nil {
+			a.Say("touch     %s: your Mac asks for your touch to confirm it\n", what)
+		}
+		touch = keystore.WithReason(touch, what)
 		d := deviceCert(tc)
 		touchCert, pa.Confirmed = &d, true
 	}
@@ -130,6 +137,19 @@ func (a *Acts) header(ctx context.Context, c *Client, act string, on *api.ActOn,
 		return "", fmt.Errorf("signing %s: %w", act, err)
 	}
 	return base64.StdEncoding.EncodeToString(b), nil
+}
+
+// ActReason is an act as the person is asked to confirm it: its verb, what
+// it is on, and its params, printable and short.
+func ActReason(act, on string, params []byte) string {
+	p := Printable(string(params))
+	if len(p) > 120 {
+		p = p[:120] + "…"
+	}
+	if p == "{}" || p == "" {
+		return "c4: " + Printable(act) + " " + Printable(on)
+	}
+	return "c4: " + Printable(act) + " " + Printable(on) + " " + p
 }
 
 func (a *Acts) once(kind, format string, v ...any) {
@@ -181,18 +201,38 @@ func JobActOn(j *api.Job) *api.ActOn {
 
 // ProjectActOn is a project as an act that makes something in it names
 // it, from the snapshot; nil when the farm serves none.
-func ProjectActOn(ctx context.Context, c *Client, project string) *api.ActOn {
+// A subject the farm serves is checked against what the person named: an
+// act on another project is refused before anything is signed.
+func ProjectActOn(ctx context.Context, c *Client, project string) (*api.ActOn, error) {
 	if c.Acts == nil || !c.Acts.Present || project == "" {
-		return nil
+		return nil, nil
 	}
 	s, err := Snapshot(ctx, c)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	for _, p := range s.Projects {
 		if p.Name == project {
-			return p.ActOn
+			return p.ActOn, checkActOn(p.ActOn, "project", "", project)
 		}
+	}
+	return nil, nil
+}
+
+// checkActOn checks a subject the farm served for an act on kind ns/name
+// (a project's: name alone) names that object, by its UID, at a spec
+// digest: never another, whatever the HUD says.
+func checkActOn(on *api.ActOn, kind, ns, name string) error {
+	if on == nil {
+		return nil
+	}
+	want := kind + ":" + ns + "/" + name + "@"
+	if kind == "project" {
+		want = "project:" + name + "@"
+	}
+	uid, ok := strings.CutPrefix(on.Name, want)
+	if !ok || uid == "" || strings.ContainsAny(uid, "/@: ") || len(on.Digest) != 1 || len(on.Digest["sha256"]) != 64 {
+		return fmt.Errorf("the farm served %q to sign for %s %s: refused, nothing was signed", Printable(on.Name), kind, strings.TrimPrefix(ns+"/"+name, "/"))
 	}
 	return nil
 }

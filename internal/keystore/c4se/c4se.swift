@@ -6,6 +6,7 @@
 // program running as the person can use too, so the blob is written 0600.
 import CryptoKit
 import Foundation
+import LocalAuthentication
 import Security
 
 // c4se_available says whether this Mac has a Secure Enclave.
@@ -71,6 +72,28 @@ public func c4se_sign(_ blob: UnsafePointer<UInt8>, _ blen: Int32, _ msg: Unsafe
                       _ sig: UnsafeMutablePointer<UInt8>, _ errbuf: UnsafeMutablePointer<CChar>, _ errcap: Int32) -> Int32 {
     do {
         let key = try SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: Data(bytes: blob, count: Int(blen)))
+        let raw = try key.signature(for: Data(bytes: msg, count: Int(mlen))).rawRepresentation
+        guard raw.count == 64 else {
+            return fail(errbuf, errcap, "the signature is \(raw.count) bytes")
+        }
+        raw.copyBytes(to: sig, count: 64)
+        return 64
+    } catch {
+        return fail(errbuf, errcap, "\(error)")
+    }
+}
+
+// c4se_sign_for is c4se_sign with the reason the person is asked for
+// their presence: the act itself, as the CLI shows it, so the prompt says
+// what the touch confirms (PEOPLE-KEYS-2 4.3), not only that one is asked.
+@_cdecl("c4se_sign_for")
+public func c4se_sign_for(_ blob: UnsafePointer<UInt8>, _ blen: Int32, _ msg: UnsafePointer<UInt8>, _ mlen: Int32,
+                          _ reason: UnsafePointer<CChar>,
+                          _ sig: UnsafeMutablePointer<UInt8>, _ errbuf: UnsafeMutablePointer<CChar>, _ errcap: Int32) -> Int32 {
+    do {
+        let ctx = LAContext()
+        ctx.localizedReason = String(cString: reason)
+        let key = try SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: Data(bytes: blob, count: Int(blen)), authenticationContext: ctx)
         let raw = try key.signature(for: Data(bytes: msg, count: Int(mlen))).rawRepresentation
         guard raw.count == 64 else {
             return fail(errbuf, errcap, "the signature is \(raw.count) bytes")
