@@ -77,3 +77,55 @@ func DevicesInForce(devs map[string]*DeviceState, at time.Time) map[string]*Devi
 	}
 	return out
 }
+
+// Agents' grants in force (PEOPLE-KEYS-2 5.2, P5): one rule, which the farm
+// book (InForceAt, ForceAgentGrant) and the people's index both use. A
+// grant is open from its entry until its end is booked, and lapses
+// AgentLapse after its last use, or after the grant itself where the agent
+// has made no act under it. Times are the book's, as for devices.
+
+// GrantEvent is one entry of an agent's grant, in book order: the grant
+// (KindAgentGrant), the agent's use of it (KindAgentUse) or its end
+// (KindGrantEnd).
+type GrantEvent struct {
+	Kind, Grant string
+	// Time is when the entry counts from.
+	Time time.Time
+	// Ref is the caller's own reference to the entry.
+	Ref int
+}
+
+// GrantState is one grant as the events leave it: the grant's own event
+// (Ref), when it was last used, and whether it ended.
+type GrantState struct {
+	Grant string
+	Ref   int
+	Last  time.Time
+	Ended bool
+}
+
+// GrantStates replays events, in book order, into each grant's state. A
+// use or an end before the grant counts for nothing, and a grant ended
+// stays ended: a fresh grant is a new one.
+func GrantStates(events []GrantEvent) map[string]*GrantState {
+	gs := map[string]*GrantState{}
+	for _, e := range events {
+		g := gs[e.Grant]
+		switch {
+		case e.Kind == KindAgentGrant && g == nil:
+			gs[e.Grant] = &GrantState{Grant: e.Grant, Ref: e.Ref, Last: e.Time}
+		case g == nil || g.Ended:
+		case e.Kind == KindAgentUse && e.Time.After(g.Last):
+			g.Last = e.Time
+		case e.Kind == KindGrantEnd:
+			g.Ended = true
+		}
+	}
+	return gs
+}
+
+// GrantInForce reports whether a grant is in force at time at: booked, not
+// ended, and used within AgentLapse of at.
+func GrantInForce(g *GrantState, at time.Time) bool {
+	return g != nil && !g.Ended && at.Sub(g.Last) <= AgentLapse
+}

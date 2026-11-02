@@ -90,6 +90,9 @@ type Entry struct {
 	// Ends is the binding a bind that follows another ends, by its subject:
 	// the two meet at this entry's position, the changeover.
 	Ends string `json:"ends,omitempty"`
+	// Grant is an agent's grant, by its ID, that an agent grant, an agent's
+	// use of it or its end is about (KindAgentGrant).
+	Grant string `json:"grant,omitempty"`
 }
 
 func (e *Entry) expires() time.Time {

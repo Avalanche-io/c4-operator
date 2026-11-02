@@ -472,7 +472,36 @@ const (
 	// renewal was sealed. A touch key's rules beside its device key are
 	// the people's issuer's (people.Index.DevicesAt).
 	ForceDevice = "device"
+	// ForceAgentGrant is an agent's grant (PEOPLE-KEYS-2 5.2), by its ID:
+	// opened by a person's confirmed grant naming the agent and its key,
+	// closed by its end (the integration removed, or its lapse booked), and
+	// lapsing AgentLapse after the agent's last booked use of it, or the
+	// grant itself where it has none (DESIGN 10's exception, P5).
+	ForceAgentGrant = "agent-grant"
 )
+
+// The people's issuer's entries for an agent's grant (PEOPLE-KEYS-2 5.2,
+// 10.4 item 14): the grant, an agent's act under it, and its end.
+const (
+	// KindAgentGrant books a person's grant act: the grant's ID is its
+	// record's C4 ID.
+	KindAgentGrant = "agent-grant"
+	// KindAgentUse books an act the agent made under the grant, at most one
+	// a day (AgentUseEvery): what keeps an agent in use from lapsing.
+	KindAgentUse = "agent-act"
+	// KindGrantEnd books a grant's end: the person's revoke when the
+	// integration is removed, or its lapse after AgentLapse unused.
+	KindGrantEnd = "grant-end"
+)
+
+// AgentLapse is how long an agent's grant lasts without the agent making
+// an act under it (P5): an abandoned agent's grant lapses, one in use
+// keeps it, and nothing else renews it.
+const AgentLapse = 90 * 24 * time.Hour
+
+// AgentUseEvery is how often an agent's use of its grant is booked: often
+// enough to judge AgentLapse by, rarely enough to keep the book small.
+const AgentUseEvery = 24 * time.Hour
 
 // DeviceLapse is how long a device may go without renewing before it
 // lapses (PEOPLE-KEYS-2 7).
@@ -531,12 +560,19 @@ func (v *View) InForceAt(kind, key string, pos int64, at time.Time) (*Sealed, er
 // nil. Each time-based end is judged at at, which the caller chooses: a
 // verifier the time its position was sealed, a live decision its clock.
 func InForceAt(es []*Sealed, kind, key string, at time.Time) (*Sealed, error) {
-	if kind == ForceDevice {
+	switch kind {
+	case ForceDevice:
 		return deviceInForce(es, key, at), nil
+	case ForceAgentGrant:
+		g := agentGrant(es, key)
+		if !GrantInForce(g, at) {
+			return nil, nil
+		}
+		return es[g.Ref], nil
 	}
 	open, ok := opens[kind]
 	if !ok {
-		return nil, fmt.Errorf("in force is asked of %s, %s, %s or %s, not %q", ForceGrant, ForceBinding, ForceMembership, ForceDevice, kind)
+		return nil, fmt.Errorf("in force is asked of %s, %s, %s, %s or %s, not %q", ForceGrant, ForceBinding, ForceMembership, ForceDevice, ForceAgentGrant, kind)
 	}
 	var on *Sealed
 	for _, s := range es {
@@ -560,6 +596,42 @@ func InForceAt(es []*Sealed, kind, key string, at time.Time) (*Sealed, error) {
 		return nil, nil
 	}
 	return on, nil
+}
+
+// agentGrant is grant's state as entries es book it, by the rule the
+// people's index uses too (GrantStates); nil where es book no such grant.
+func agentGrant(es []*Sealed, grant string) *GrantState {
+	var evs []GrantEvent
+	for k, s := range es {
+		if e := s.Entry; e.Grant == grant {
+			evs = append(evs, GrantEvent{Kind: e.Kind, Grant: e.Grant, Time: s.Time, Ref: k})
+		}
+	}
+	return GrantStates(evs)[grant]
+}
+
+// GrantLapses is when an agent's grant lapses if the agent makes no act,
+// as the entries sealed to pos leave it: AgentLapse after its last use.
+// The zero time for a grant not booked, or ended.
+func (b *Book) GrantLapses(grant string, pos int64) (time.Time, error) {
+	if pos < 0 || pos > int64(len(b.entries)) {
+		return time.Time{}, fmt.Errorf("%w: position %d, the book is sealed to %d", ErrNotSealed, pos, len(b.entries))
+	}
+	return grantLapses(agentGrant(b.entries[:pos], grant)), nil
+}
+
+// GrantLapses is when an agent's grant lapses unused, as the entries to
+// pos leave it, pending entries counted.
+func (v *View) GrantLapses(grant string, pos int64) (time.Time, error) {
+	es := append(append([]*Sealed(nil), v.Book.entries...), v.pending...)
+	return grantLapses(agentGrant(es[:max(0, min(pos, int64(len(es))))], grant)), nil
+}
+
+func grantLapses(g *GrantState) time.Time {
+	if g == nil || g.Ended {
+		return time.Time{}
+	}
+	return g.Last.Add(AgentLapse)
 }
 
 // deviceInForce is the device's latest entry in force at time at, by the
