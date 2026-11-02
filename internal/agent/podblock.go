@@ -17,6 +17,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/needs"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
+	"github.com/Avalanche-io/c4-operator/internal/unitact"
 )
 
 // A block in a unit pod (c4-agent block-pod): the same block a host runner
@@ -52,6 +55,21 @@ type PodBlock struct {
 	// (default 2 s).
 	AskPoll time.Duration
 	Logf    func(format string, args ...any)
+	// Issue certifies the unit's key for what the block reports (default
+	// the issuer at $C4_SIGNER; tests).
+	Issue provenance.IssueFunc
+}
+
+// unit is the block's unit, which signs what the block reports about
+// itself (its needs, a re-check's withdrawal) as c4-unit does.
+func (b *PodBlock) unit() unitact.Unit { return unitact.Unit{Getenv: b.Env, Issue: b.Issue} }
+
+// logWriter writes each line to the block's log.
+type logWriter struct{ b *PodBlock }
+
+func (w logWriter) Write(p []byte) (int, error) {
+	w.b.logf("%s", strings.TrimSpace(string(p)))
+	return len(p), nil
 }
 
 // Exit codes of a block's attempt: done, yielded at a safe point (also a
@@ -286,6 +304,11 @@ func (b *PodBlock) holdForAnswer(ctx context.Context, p *corev1.Pod, u UnitDirs,
 // text is the container's termination message, and the status 12 tells
 // the farm (c4-unit needs does the same).
 func (b *PodBlock) needsInformation(m *Member, msg string) (int, error) {
+	// cut to fit a termination message, and signed as the unit, as
+	// c4-unit needs does: the farm reads exactly what the unit signed
+	text, why, about := needs.Fit(needs.Parse(msg))
+	msg = needs.Message(text, why, about)
+	b.unit().Report(b.Out, "needs", map[string]any{"what": text, "why": why, "about": about}, logWriter{b})
 	b.logf("%s: needs information: %s", m.Name, strings.ReplaceAll(msg, "\n", "; "))
 	if err := os.WriteFile(b.terminationLog(), []byte(msg), 0o644); err != nil {
 		return 1, err

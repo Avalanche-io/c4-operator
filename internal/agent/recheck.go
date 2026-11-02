@@ -163,6 +163,9 @@ func (b *PodBlock) recheck(ctx context.Context, m *Member, u UnitDirs, args []st
 	if !withdrawn {
 		return b.needsInformation(m, text)
 	}
+	// signed as the unit, as c4-unit withdraw does
+	text = strings.TrimSpace(text)
+	b.unit().Report(b.Out, "withdraw", map[string]any{"why": text}, logWriter{b})
 	if err := os.WriteFile(b.terminationLog(), []byte(c4v1.WithdrawnPrefix+text), 0o644); err != nil {
 		return 1, err
 	}

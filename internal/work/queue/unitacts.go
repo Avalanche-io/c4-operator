@@ -15,6 +15,7 @@ import (
 	"github.com/Avalanche-io/c4"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/needs"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 )
 
@@ -178,7 +179,9 @@ func (q *Queue) answerReport(ctx context.Context, v *view, p *corev1.Pod, n unit
 
 // needsReport is how the needs pod p ended on stands against its act.
 func (q *Queue) needsReport(ctx context.Context, v *view, p *corev1.Pod, now time.Time) (map[string]any, error) {
-	text, why, about, _ := needsOf(p)
+	// as written, before the farm names an empty question for it
+	msg, _ := needsMessage(p)
+	text, why, about := needs.Parse(msg)
 	return q.unitControl(ctx, v, p, "needs", anyOne, map[string]any{"what": text, "why": why, "about": about}, now)
 }
 

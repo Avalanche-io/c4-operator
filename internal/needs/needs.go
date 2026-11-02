@@ -91,3 +91,35 @@ func cut(s string, n int) string {
 	}
 	return strings.TrimRightFunc(s[:min(n, len(s))], unicode.IsSpace) + CutMark
 }
+
+// Parse reads a needs message (Message): the text, the why, and what it
+// is about (a last line "about: unit:schema, path:schema/"; a bare value
+// is a path). The farm reads a unit's question with it.
+func Parse(msg string) (text, why string, about []string) {
+	msg = strings.TrimSpace(msg)
+	if k := strings.LastIndex(msg, "\n"); k >= 0 || strings.HasPrefix(msg, "about: ") {
+		if line := strings.TrimSpace(msg[k+1:]); strings.HasPrefix(line, "about: ") {
+			about = parseAbout(strings.TrimPrefix(line, "about: "))
+			msg = strings.TrimSpace(msg[:max(k, 0)])
+		}
+	}
+	text, why, _ = strings.Cut(msg, "\nwhy: ")
+	return strings.TrimSpace(text), strings.TrimSpace(why), about
+}
+
+// parseAbout reads an about line: typed refs, path:, unit: or job:,
+// separated by commas; a bare value is a path.
+func parseAbout(s string) []string {
+	var out []string
+	for _, r := range strings.Split(s, ",") {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
+		}
+		if !strings.HasPrefix(r, "path:") && !strings.HasPrefix(r, "unit:") && !strings.HasPrefix(r, "job:") {
+			r = "path:" + r
+		}
+		out = append(out, r)
+	}
+	return out
+}

@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/needs"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
 )
 
@@ -93,7 +94,19 @@ func isNeeds(p *corev1.Pod) bool {
 // needsOf reads a failed pod's NeedsInformation: the information, why,
 // and what it is about (a last line "about: unit:schema, path:schema/").
 func needsOf(p *corev1.Pod) (text, why string, about []string, ok bool) {
-	msg := ""
+	msg, ok := needsMessage(p)
+	if !ok {
+		return "", "", nil, false
+	}
+	text, why, about = needs.Parse(msg)
+	if text == "" {
+		text = "information the brief lacked (the unit did not say which)"
+	}
+	return text, why, about, true
+}
+
+// needsMessage is a failed pod's NeedsInformation message as it stands.
+func needsMessage(p *corev1.Pod) (msg string, ok bool) {
 	switch {
 	case p.Status.Reason == c4v1.NeedsInformation:
 		msg, ok = p.Status.Message, true
@@ -105,39 +118,7 @@ func needsOf(p *corev1.Pod) (text, why string, about []string, ok bool) {
 			}
 		}
 	}
-	if !ok {
-		return "", "", nil, false
-	}
-	msg = strings.TrimSpace(msg)
-	if k := strings.LastIndex(msg, "\n"); k >= 0 || strings.HasPrefix(msg, "about: ") {
-		if line := strings.TrimSpace(msg[k+1:]); strings.HasPrefix(line, "about: ") {
-			about = parseAbout(strings.TrimPrefix(line, "about: "))
-			msg = strings.TrimSpace(msg[:max(k, 0)])
-		}
-	}
-	text, why, _ = strings.Cut(msg, "\nwhy: ")
-	text = strings.TrimSpace(text)
-	if text == "" {
-		text = "information the brief lacked (the unit did not say which)"
-	}
-	return text, strings.TrimSpace(why), about, true
-}
-
-// parseAbout reads an about line: typed refs, path:, unit: or job:,
-// separated by commas; a bare value is a path.
-func parseAbout(s string) []string {
-	var out []string
-	for _, r := range strings.Split(s, ",") {
-		r = strings.TrimSpace(r)
-		if r == "" {
-			continue
-		}
-		if !strings.HasPrefix(r, "path:") && !strings.HasPrefix(r, "unit:") && !strings.HasPrefix(r, "job:") {
-			r = "path:" + r
-		}
-		out = append(out, r)
-	}
-	return out
+	return msg, ok
 }
 
 // noteNeeds fails unit idx, whose pod p stopped for information, without
