@@ -140,7 +140,11 @@ report on the node's word, not an act.
   person's device or an agent's grant in a further one:
   `urn:c4:device:<device ID>`, `urn:c4:grant:<grant ID>`. A host unit's leaf
   names the host runner its key was issued through and is held by,
-  `urn:c4:runner:<node>`: its acts are what that runner vouches for.
+  `urn:c4:runner:<node>`: its acts are what that runner vouches for. A
+  deployment's leaf names the deployment binding in force for it when it was
+  certified, `urn:c4:binding:<the binding record's C4 ID>`, which a verifier
+  follows to the binding's owner, and the leaf never outlives the binding's
+  end. A leaf certified while no binding was in force names none.
 - **A device key is ECDSA P-256.** Its signature is raw `r||s`, 64 bytes,
   with a low S, so a signature has exactly one form. Farm parts stay Ed25519.
 - **A confirmed act has two signatures over its one payload,** the device
