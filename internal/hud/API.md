@@ -2299,7 +2299,7 @@ person runs. Revoking is a person's too (DESIGN 6: an agent never takes
 authority away either): `DELETE /grants/{ns}/{name}` through MCP, naming
 an agent, or carrying an agent's act, is refused `403`, "an agent cannot
 revoke for you: ask the person to revoke it in the HUD or with c4 farm
-revoke", and MCP's `c4_revoke_grant` only plans, answering the `c4 farm
+revoke", and MCP's `c4_plan_revoke` only plans, answering the `c4 farm
 revoke` command. Those headers are what an honest client says of itself; a unit's own pod token is
 known whatever it says, so a unit can neither grant (the same `403`)
 nor revoke a person's grant (`403`, "a unit cannot revoke a person's

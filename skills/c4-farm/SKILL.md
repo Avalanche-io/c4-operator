@@ -84,8 +84,9 @@ For failures:
   `c4_disable_node` (running units finish) and tell the person who owns the node.
 
 For capacity: `c4_capacity_and_cost` shows burst requests and what each needs.
-`c4_approve_capacity` provisions paid capacity; state its cost and the jobs it is
-for, and approve only when the user has asked you to.
+Approving it is paid spend, the person's own act with their touch:
+`c4_plan_approve_capacity` says where they approve it; state its cost and the
+jobs it is for.
 
 ## Data questions
 

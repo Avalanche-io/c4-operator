@@ -294,7 +294,7 @@ func TestToolsAreNamedAndAnnotated(t *testing.T) {
 		}
 		readOnly := strings.HasPrefix(tl.Name, "c4_list") || strings.HasPrefix(tl.Name, "c4_get") || tl.Name == "c4_farm_status" ||
 			tl.Name == "c4_cache_tiers" || tl.Name == "c4_capacity_and_cost" || tl.Name == "c4_dependency_graph" || tl.Name == "c4_diff_views" || tl.Name == "c4_trace_file" || tl.Name == "c4_verify_custody" || tl.Name == "c4_read_book" ||
-			tl.Name == "c4_suggest_deadline" || tl.Name == "c4_deadline_options" || tl.Name == "c4_describe_tool" || tl.Name == "c4_needs_me" || tl.Name == "c4_grant" || tl.Name == "c4_revoke_grant"
+			tl.Name == "c4_suggest_deadline" || tl.Name == "c4_deadline_options" || tl.Name == "c4_describe_tool" || tl.Name == "c4_needs_me" || tl.Name == "c4_grant" || strings.HasPrefix(tl.Name, "c4_plan_")
 		if tl.Annotations.ReadOnlyHint != readOnly {
 			t.Errorf("tool %s: readOnlyHint %v", tl.Name, tl.Annotations.ReadOnlyHint)
 		}
@@ -632,7 +632,7 @@ func TestGrantTools(t *testing.T) {
 	}
 	// An agent plans a revoke and never performs one either: the person
 	// revokes (DESIGN 6), and the HUD refuses an agent's.
-	res, out = call(t, cs, "c4_revoke_grant", map[string]any{"namespace": "show-a", "name": "github-ab12"})
+	res, out = call(t, cs, "c4_plan_revoke", map[string]any{"namespace": "show-a", "name": "github-ab12"})
 	if res.IsError || out["performed"] != false || out["command"] != "c4 farm revoke show-a/github-ab12" ||
 		!strings.Contains(fmt.Sprint(out["message"]), "an agent cannot revoke for you") {
 		t.Fatalf("revoke plan: %v %q", out, text(res))
@@ -681,7 +681,8 @@ func TestCapacityForecastTool(t *testing.T) {
 	}
 }
 
-// A held tracker write, found and answered through the HUD.
+// A held tracker write is found through the HUD, and its answer planned
+// for the person, never sent: what happened in the tracker is their word.
 func TestHeldWriteTools(t *testing.T) {
 	hud := &fakeHUD{}
 	cs := session(t, hud, "tok-maya")
@@ -689,13 +690,13 @@ func TestHeldWriteTools(t *testing.T) {
 	if hs, _ := out["held"].([]any); res.IsError || len(hs) != 1 {
 		t.Fatalf("held: %v %q", out, text(res))
 	}
-	res, _ = call(t, cs, "c4_confirm_write", map[string]any{"namespace": "show-a", "link": "gh-issue-7", "field": "comment", "happened": false, "note": "not on the issue"})
-	if res.IsError {
-		t.Fatalf("confirm: %q", text(res))
+	res, out = call(t, cs, "c4_plan_confirm_write", map[string]any{"namespace": "show-a", "link": "gh-issue-7", "field": "comment", "happened": false, "note": "not on the issue"})
+	if res.IsError || out["performed"] != false || !strings.Contains(fmt.Sprint(out["message"]), "the person answers it") {
+		t.Fatalf("confirm plan: %v %q", out, text(res))
 	}
 	hud.mu.Lock()
 	defer hud.mu.Unlock()
-	want := []string{"GET /api/v1/held?mine=1", `/api/v1/held/show-a/gh-issue-7/comment {"happened":false,"note":"not on the issue"}`}
+	want := []string{"GET /api/v1/held?mine=1"}
 	if !slices.Equal(hud.posts, want) {
 		t.Fatalf("requests %q, want %q", hud.posts, want)
 	}

@@ -23,7 +23,7 @@ var Version = "dev"
 // Instructions are sent to clients when they connect.
 const Instructions = `This server operates a farm on Kubernetes that runs render, CI, ML and agents' work, the same farm the HUD shows. Jobs are named namespace/name.
 Start with c4_farm_status, then c4_list_jobs (at_risk_only for trouble). New work goes in through a published tool: c4_list_tools, c4_describe_tool, then c4_run_<tool> for one job or c4_submit_job for a submission of several (dry_run first, either way). Your own Claude Code agents run as a bundle: c4_run_bundle (dry_run first), then c4_list_bundles and c4_stop_bundle. A lead starts workers as it would start subagents with c4_agent (each a fresh session on a branch of its own from your commit), waits for them with c4 farm wait as a background command, plans ahead in its job with c4_plan (planned workers held until released, split, merged or withdrawn as it learns), and closes its job with c4_close_lead. There are no priorities: to make a job finish sooner, set its deadline (c4_set_deadline) or boost it (c4_boost_job); the queue works out the rest from estimates. A job with needsPerson waits on someone: requeue its failed units (c4_requeue_units), take or accept them (c4_acknowledge_units), or decide what waits for a person, a ruling or an escalated unit (c4_decide). Before choosing a time, c4_deadline_options says what it would take (boost, burst cost, jobs made late); a job without a deadline gets one suggested by the farm (c4_suggest_deadline). Holding a job stops new units; c4_hold_job with stop_running also stops running ones.
-Every change is made as you, checked against your Kubernetes permissions, and recorded as an Event. Costs: c4_approve_capacity provisions paid burst capacity.`
+Every change is made as you, checked against your Kubernetes permissions, and recorded as an Event. What only a person may do (grant or revoke, approve paid burst capacity, say whether a held tracker write happened) you plan with c4_grant and the c4_plan_ tools, and the person does it themselves.`
 
 func boolPtr(b bool) *bool { return &b }
 
@@ -152,7 +152,7 @@ func Tools(c *Client) []Tool {
 			destructive, c.requeue),
 		tool("c4_acknowledge_units", "Take, assign or accept failed units", "Say a person has failed units in hand so the farm stops asking: acknowledge (you take them), assign (to assignee), or accept (the failure stands; the units count as done, so nothing waits on them). Recorded with who and when, and signed in the book. A requeue clears it. Units is a set like \"14\" or \"0-9,14\"; only failed units are taken.",
 			idempotent, c.acknowledge),
-		tool("c4_needs_me", "What needs me", "Only what waits for the person you act for, most urgent first: questions units of their jobs stopped on (raised, or pressing once the plan says an answer is due, with answer_by, the latest an answer keeps the job on time), decisions a wait addresses to them or a party they speak for, and burst capacity waiting for their approval. Each item names the control that answers it: c4_supply or c4_withdraw_needs for a question, c4_decide with one of its choices for a decision, c4_approve_capacity for a burst. Use it to tell the person what is waiting for them; answer only what they tell you to.",
+		tool("c4_needs_me", "What needs me", "Only what waits for the person you act for, most urgent first: questions units of their jobs stopped on (raised, or pressing once the plan says an answer is due, with answer_by, the latest an answer keeps the job on time), decisions a wait addresses to them or a party they speak for, and burst capacity waiting for their approval. Each item names the control that answers it: c4_supply or c4_withdraw_needs for a question, c4_decide with one of its choices for a decision (only a wait addressed to you, the agent), c4_plan_approve_capacity for a burst, which the person approves. Use it to tell the person what is waiting for them; answer only what they tell you to.",
 			readOnly, c.needsMe),
 		tool("c4_decide", "Decide what waits for a person", "Decide a job's wait for a person (a ruling, an approval, an outside party's answer): do is approve, one of the wait's choices, or fail. A wait that asks for a reply (reply in c4_get_job's waits) takes one with the decision, reply_text or reply_view, which the units it holds up read. Or decide a unit a review escalated: accept (it stands), rework (it runs again) or fail. The job's waits, and whether each holds up work, are in c4_get_job. Signed and recorded in the book.",
 			idempotent, c.decide),
@@ -188,21 +188,21 @@ func Tools(c *Client) []Tool {
 			&mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(false)}, c.submitJob).withSchema(submitSchema()),
 		tool("c4_get_capacity_forecast", "Capacity forecast", "What the farm's forecast jobs (work a tracker expects, from a bid or a schedule, not yet submitted) would need among the real work, as of the last forecast pass: burst slots per pool with the forecasts and as planned now, what the difference would cost an hour, and the real jobs the forecast work would put at more risk. Nothing is requested for a forecast; use it to plan capacity and budget before the work arrives.",
 			readOnly, c.capacityForecast),
-		tool("c4_approve_capacity", "Approve burst capacity", "Approve the burst capacity request waiting in a pool. This provisions paid capacity; check c4_capacity_and_cost first for its cost and the jobs it is for.",
-			&mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(true)}, c.approveCapacity),
+		tool("c4_plan_approve_capacity", "Plan approving burst capacity", "Plan approving the burst capacity request waiting in a pool. It plans, never performs: approving paid capacity is spend, which only the person approves, with their touch. It says where the person approves it; check c4_capacity_and_cost first for its cost and the jobs it is for, and tell the person both.",
+			readOnly, c.planApproveCapacity),
 		tool("c4_grant", "Plan a grant to a tracker", "Plan a grant that would let a production tracker's sync (a Tracker: GitHub, Flow, ...) submit work for the person you act for, so jobs it makes from their issues or tasks are theirs and what is theirs (a lease of their own sign-in) serves them. It plans, never performs: an agent cannot grant for a person. It checks the tracker and returns what the grant would allow and the exact c4 farm grant command; show both to the person, who grants it as themselves, in the HUD or with that command. Optionally limit it to pools and job classes; it ends at until (30d by default, at most 90d). Granting again renews it.",
 			readOnly, c.grant),
-		tool("c4_list_held_writes", "List held tracker writes", "Writes to a production tracker (a comment, a status) that were interrupted where nothing can tell whether they happened, so they are held: never sent again on a guess. Each names the tracker entity (with its URL), the job, what it said and since when, and whether it is yours to confirm. Filter by job (namespace/name) or mine. Look in the tracker, then answer with c4_confirm_write.",
+		tool("c4_list_held_writes", "List held tracker writes", "Writes to a production tracker (a comment, a status) that were interrupted where nothing can tell whether they happened, so they are held: never sent again on a guess. Each names the tracker entity (with its URL), the job, what it said and since when, and whether it is yours to confirm. Filter by job (namespace/name) or mine. Look in the tracker, then plan the answer with c4_plan_confirm_write, which the person gives.",
 			readOnly, c.listHeld),
-		tool("c4_confirm_write", "Confirm a held tracker write", "Say whether a held tracker write happened, after looking in the tracker: happened true and it is taken as written; false and it is written again on the sync's next pass (so say false only when it is not there, or it is made twice). The job's owner, or one allowed to change the job, answers; signed and recorded in the book.",
-			&mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(true)}, c.confirmWrite),
+		tool("c4_plan_confirm_write", "Plan answering a held tracker write", "Plan the answer to a held tracker write, after looking in the tracker: happened true and it is taken as written; false and it is written again on the sync's next pass (so false only when it is not there, or it is made twice). It plans, never performs: saying what happened is the person's own word. It says where the person answers it; show them what you saw.",
+			readOnly, c.planConfirmWrite),
 		tool("c4_list_people_map", "List tracker logins and who they are", "The people maps of the trackers in projects you can see: each tracker login the project offers as a C4 person (or party), whether that person has confirmed it, and what confirming lets the login do (its decisions in the tracker relayed as that person's). Filter by tracker (namespace/name) or mine. Only the person confirms their own login, in the HUD, on their own page; an agent never confirms or accepts one for them, so tell the person what is offered and where to confirm it.",
 			readOnly, c.listPeople),
 		tool("c4_list_trackers", "List trackers", "The trackers (GitHub, Flow, ...) in the projects you can see: what each connects to, what it turns into jobs, whether it is connected and why not, how many people have let it submit work for them, and the person you act for's own grant to it. Use it to find the tracker to name in c4_grant.",
 			readOnly, c.listTrackers),
 		tool("c4_list_grants", "List grants", "Grants to trackers: by default the person you act for's own, or with tracker (namespace/name) who has let that tracker submit for them. Each shows its pools, classes, end, record, and whether it serves now and why not.",
 			readOnly, c.listGrants),
-		tool("c4_revoke_grant", "Plan revoking a grant", "Plan taking back a grant to a tracker: once revoked, the tracker submits nothing more for that person, and units of their jobs not yet started do not get their lease; units running now finish. It plans, never performs: taking authority away is a person's, never an agent's. It returns the exact c4 farm revoke command; show it to the person, who revokes it as themselves, in the HUD or with that command.",
+		tool("c4_plan_revoke", "Plan revoking a grant", "Plan taking back a grant to a tracker: once revoked, the tracker submits nothing more for that person, and units of their jobs not yet started do not get their lease; units running now finish. It plans, never performs: taking authority away is a person's, never an agent's. It returns the exact c4 farm revoke command; show it to the person, who revokes it as themselves, in the HUD or with that command.",
 			readOnly, c.revokeGrant),
 	}
 }
@@ -898,11 +898,24 @@ type ApproveIn struct {
 	Pool string `json:"pool" jsonschema:"the burst pool whose waiting request to approve"`
 }
 
-func (c *Client) approveCapacity(ctx context.Context, _ *mcp.CallToolRequest, in ApproveIn) (*mcp.CallToolResult, Done, error) {
+// PersonPlan is what an agent plans and the person does: never performed
+// by the server (DESIGN 6; provenance.ActNeeds marks it a person's).
+type PersonPlan struct {
+	// Performed is always false.
+	Performed bool `json:"performed"`
+	// What it is, and Where the person does it.
+	What    string `json:"what"`
+	Where   string `json:"where"`
+	Message string `json:"message"`
+}
+
+func (c *Client) planApproveCapacity(_ context.Context, _ *mcp.CallToolRequest, in ApproveIn) (*mcp.CallToolResult, PersonPlan, error) {
 	if in.Pool == "" {
-		return nil, Done{}, fmt.Errorf("give the pool; c4_capacity_and_cost lists requests waiting for approval")
+		return nil, PersonPlan{}, fmt.Errorf("give the pool; c4_capacity_and_cost lists requests waiting for approval")
 	}
-	return c.control(ctx, "/capacity/"+url.PathEscape(in.Pool)+"/approve", map[string]any{})
+	return nil, PersonPlan{What: "approve the burst capacity request waiting in pool " + in.Pool,
+		Where:   "the HUD: Capacity, pool " + in.Pool + ", where their device's touch confirms it",
+		Message: "an agent cannot approve paid capacity for you: the person approves it in the HUD (Capacity, pool " + in.Pool + ")"}, nil
 }
 
 type TraceIn struct {
@@ -1158,11 +1171,18 @@ type ConfirmWriteIn struct {
 	Note      string `json:"note,omitempty" jsonschema:"what you saw, for the record"`
 }
 
-func (c *Client) confirmWrite(ctx context.Context, _ *mcp.CallToolRequest, in ConfirmWriteIn) (*mcp.CallToolResult, Done, error) {
-	var out Done
-	err := c.do(ctx, "POST", "/held/"+url.PathEscape(in.Namespace)+"/"+url.PathEscape(in.Link)+"/"+url.PathEscape(in.Field),
-		api.ConfirmRequest{Happened: &in.Happened, Note: in.Note}, &out)
-	return nil, out, err
+func (c *Client) planConfirmWrite(_ context.Context, _ *mcp.CallToolRequest, in ConfirmWriteIn) (*mcp.CallToolResult, PersonPlan, error) {
+	if in.Namespace == "" || in.Link == "" || in.Field == "" {
+		return nil, PersonPlan{}, fmt.Errorf("name the held write: namespace, link and field, from c4_list_held_writes")
+	}
+	answer := "it did not happen (it is written again)"
+	if in.Happened {
+		answer = "it happened (it is taken as written)"
+	}
+	held := in.Namespace + "/" + in.Link + " " + in.Field
+	return nil, PersonPlan{What: "answer held write " + held + ": " + answer,
+		Where:   "the HUD: Held writes, " + held,
+		Message: "an agent cannot say for you what happened in the tracker: the person answers it in the HUD (Held writes, " + held + ")"}, nil
 }
 
 type ListPeopleIn struct {
