@@ -14,14 +14,16 @@ import (
 
 // A signed request (request/v1, X-C4-Request) is one HTTP request signed
 // by the client that isn't a browser and sent it: a host runner, a unit,
-// an agent's MCP server, a person's CLI. It proves who calls, at the call;
-// it is never an act, so it carries out nothing a person decides, and a
-// request bundle never verifies as one.
+// an agent's MCP server, a person's CLI, a tracker's relay. It proves who
+// calls, at the call; it is never an act, so it carries out nothing a
+// person decides, and a request bundle never verifies as one.
 
 // requestSigners are the identities that may sign a request: the farm's
-// clients. The farm's own parts (nodes, components, importers) call
-// nothing as a client and sign no request.
-var requestSigners = []string{"user/", "agent/", "unit/", "runner/"}
+// clients. The farm's own parts (nodes, components) call nothing as a
+// client and sign no request. An sa/ signer verifies here as a tracker's
+// relay; that its account is bound to a Tracker is the caller's to check,
+// as for a relayed act, since an importer's account is sa/ too.
+var requestSigners = []string{"user/", "agent/", "unit/", "runner/", "sa/"}
 
 // checkRequest checks a verified request/v1 envelope's statement: its
 // shape, its signer the leaf's identity, its farm the leaf's farm, a

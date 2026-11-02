@@ -77,6 +77,10 @@ func TestVerifyRequest(t *testing.T) {
 	if _, _, err := provenance.VerifyRequest(b, f.Roots, f.Now, seen); err == nil {
 		t.Fatal("the same request taken twice")
 	}
+	relay := f.Relay(t, "saltmarsh", "flow-sync", "flow", "noor.k")
+	if v, _, err := provenance.VerifyRequest(decode(f.SignRequest(t, relay, "GET", "/api/v1/jobs/saltmarsh/sm0140-comp-v003", nil)), f.Roots, f.Now, seen); err != nil || v.Identity != relay.Identity {
+		t.Fatalf("a relay's read: %v", err)
+	}
 	for name, k := range map[string]*provtest.Key{
 		"a node":      f.Part(t, provenance.NodeIdentity("w1")),
 		"a component": f.Part(t, provenance.ComponentIdentity("hud")),
