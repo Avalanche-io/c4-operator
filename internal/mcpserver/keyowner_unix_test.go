@@ -4,8 +4,10 @@ package mcpserver
 
 import (
 	"os"
+	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // otherOwner is a file's details as another user owns it.
@@ -26,5 +28,31 @@ func TestKeyOwnedByAnotherUserRefused(t *testing.T) {
 	}
 	if err := ownedByMe(dir, otherOwner{fi}); err == nil {
 		t.Error("another user's is taken")
+	}
+}
+
+// A FIFO planted where the key file belongs is refused at once, never
+// opened: opening it would block the server until someone writes a key
+// into it.
+func TestKeyFileFIFORefused(t *testing.T) {
+	dir := keyDir(t)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(filepath.Join(dir, "workload-claude-code.key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := KeyFiles{Dir: dir}.Key(Workload("claude-code"))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a FIFO was used as the key file")
+		}
+	case <-time.After(3 * time.Second):
+		t.Error("the server blocked opening a FIFO planted as its key file")
 	}
 }
