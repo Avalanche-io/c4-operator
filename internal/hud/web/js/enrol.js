@@ -76,6 +76,9 @@ const real = {
   onVisibility: (fn) => document.addEventListener('visibilitychange', fn),
   offVisibility: (fn) => document.removeEventListener('visibilitychange', fn),
   local: () => globalThis.localStorage,
+  // the farm book after a position (book.js reads it too), and a pause
+  book: (since) => api().then((m) => m.get(`/book/farm?since=${since}`)),
+  pause: () => new Promise((ok) => setTimeout(ok, 3000)),
   changed: () => document.dispatchEvent(new CustomEvent('hud:refresh')),
 };
 let deps = real;
@@ -261,7 +264,10 @@ export function refreshed(r) { rec = r; deps.changed(); }
 function use(r, fresh) {
   const c = r.certified;
   useSigner({ key: r.key, chain: c.chain.map(unb64), farm: c.farm, user: c.person, identity: c.identity, device: c.device, as: as || undefined });
-  set({ state: 'signing', device: c.device, expires: c.expires, person: c.person, message: null });
+  // provisional: the issuer booked it, and the farm's book hasn't sealed
+  // it yet: until then nothing outside the farm counts its acts
+  set({ state: 'signing', device: c.device, expires: c.expires, person: c.person, message: null, provisional: !!c.provisional, seal: c.provisional ? 'pending' : null });
+  if (c.provisional) watchSeal(c);
   notices();
   clearTimeout(timer);
   clearTimeout(lapse);
@@ -274,6 +280,53 @@ async function certified(c, renews) {
   rec = await deps.saveCertified(cfg.farm, { ...c, person, renews });
   use(rec, true);
 }
+
+// SEAL_FOR: how long the page watches for the seal, about twice the
+// longest a farm takes to seal; SEAL_BACK: how far before the position
+// the issuer gave it reads, since a refusal ahead of it moves it earlier
+const SEAL_FOR = 60 * 1000;
+// refusedIn: the entries a farm book segment refused at the seal (its
+// book/v1 predicate, read, not verified)
+const refusedIn = (seg) => {
+  try { return JSON.parse(atob(seg.dsseEnvelope.payload)).predicate.refused || []; } catch (e) { return []; }
+};
+const SEAL_BACK = 64;
+
+// watchSeal: the enrolment's entry in the farm book, matched by its
+// record (a provisional position can still move): sealed (seal null), or
+// refused at the seal (seal refused), or not seen sealed within a minute
+// (seal unknown), so the page never spins
+let sealing = null;
+function watchSeal(c) {
+  if (sealing) return sealing;
+  const since = Math.max(0, (c.position || 0) - SEAL_BACK);
+  const until = deps.now() + SEAL_FOR;
+  sealing = (async () => {
+    let id = null;
+    try {
+      while (deps.now() < until) {
+        const page = await deps.book(since).catch((e) => (e.status === 404 ? 'none' : null));
+        if (page === 'none') return set({ provisional: false, seal: null });
+        if (page) {
+          const sealed = (page.entries || []).find((pe) => pe.entry && pe.entry.record === c.record);
+          if (sealed) return set({ provisional: false, seal: null });
+          const pending = (page.pending || []).find((pe) => pe.entry && pe.entry.record === c.record);
+          if (pending) id = pending.id;
+          const refused = id && (page.segments || []).some((seg) => refusedIn(seg).some((r) => r.submission === id));
+          if (refused) return set({ seal: 'refused' });
+        }
+        await deps.pause();
+      }
+      set({ seal: 'unknown' });
+    } finally {
+      sealing = null;
+    }
+  })();
+  return sealing;
+}
+
+// again: forget a key whose enrolment the book refused, and enrol anew
+export const again = () => gone(new Error('The farm’s book refused this browser’s enrolment: enrolling a new key.'));
 
 // gone: the issuer will not renew this key (removed, lapsed or unknown):
 // forget it and enrol a new one

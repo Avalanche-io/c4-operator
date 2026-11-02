@@ -87,6 +87,7 @@ document.addEventListener('click', async (e) => {
   e.preventDefault();
   if (b.dataset.device === 'sign-in') return enrol.signInNow();
   if (b.dataset.device === 'touch-copy') return navigator.clipboard.writeText(b.dataset.cmd).catch(() => {});
+  if (b.dataset.device === 'enrol-again') return enrol.again();
   b.disabled = true;
   try {
     if (b.dataset.device === 'touch-begin') await touch.begin({ others: await touch.others(dv.list || []) });
@@ -110,7 +111,11 @@ const EVIDENCE = { 'id-token': 'on your sign-in', installer: 'when the farm was 
 function thisBrowser() {
   const s = enrol.status;
   switch (s.state) {
-    case 'signing': return h('p', null, `This browser signs your acts. Its key is certified until ${f.clock(s.expires)} and renews on its own.`);
+    case 'signing': return h('p', null, `This browser signs your acts. Its key is certified until ${f.clock(s.expires)} and renews on its own.`,
+      s.seal === 'pending' ? h('span', { class: 'dim' }, ' Its enrolment isn’t sealed in the farm’s book yet: until it is, nothing outside the farm counts its acts.') : null,
+      s.seal === 'unknown' ? h('span', { class: 'dim' }, ' The farm’s book hasn’t shown its enrolment sealed yet; look again later.') : null,
+      s.seal === 'refused' ? h('span', { class: 't-fail' }, ' The farm’s book refused this enrolment, so its acts don’t count. ') : null,
+      s.seal === 'refused' ? h('button', { class: 'btn small primary', 'data-device': 'enrol-again' }, 'Enrol again') : null);
     case 'enrolling': return h('p', { class: 'dim' }, s.message || 'This browser is getting its key certified.');
     case 'open': return h('p', null, 'This browser doesn’t sign your acts yet. On the farm’s machine, run ', h('code', null, 'c4 farm open'), ': it opens the HUD with a one-time code that certifies this browser’s key.');
     case 'sign-in': return h('p', null, 'This browser doesn’t sign your acts yet: your sign-in provider wants you to sign in first. ',
@@ -143,6 +148,12 @@ function touchLine() {
   if (touch.ready()) return h('p', null, `Your touch key is this browser’s passkey. ${TOUCH_LIST}, with your fingerprint, face or PIN.`);
   if (w.why === 'no-origin') return h('p', { class: 'dim' }, 'This farm doesn’t take passkeys yet: its admin sets the HUD’s address (--hud-origin) first. Until then, acts that need a touch are taken without one.');
   if (w.why === 'other-origin') return h('p', { class: 'dim' }, `A passkey works only at the address it was made for: open the HUD at ${w.origin} to make your touch key.`);
+  // a one-person farm whose owner has no touch key: the passkey can't be
+  // approved, so the page says how to make one, while the farm allows it
+  const o = !pk && w.via === 'approval' ? touch.ownerTouch(enrol.current().cfg) : null;
+  if (o && o.closed) return h('p', { class: 'dim' }, `You have no touch key, and the time to make one closed at ${f.clock(o.closed)}: acts that need a touch can’t be confirmed on this farm.`);
+  if (o) return h('p', null, 'You have no touch key: at a terminal on the farm’s machine, run ', h('code', null, 'c4 farm touch-key'),
+    ` within ${f.dur(o.left / 1000)}. ${TOUCH_LIST}, and without one they can’t be confirmed.`);
   // a one-person farm: the farm's machine approves the passkey
   if (pk && !pk.certified && w.via === 'approval') touch.awaitApproval();
   if (s.touch === 'approve' && pk) {

@@ -191,6 +191,8 @@ enrol.stubs({
   hidden: () => true,
   dirty: () => false,
   changed: () => {},
+  // the seal of a provisional enrolment is the farm book's; no book here
+  book: async () => { throw Object.assign(new Error('no book'), { status: 404 }); }, pause: async () => {},
   local: () => ({ getItem: () => null, setItem: () => {} }),
 });
 const out = {};

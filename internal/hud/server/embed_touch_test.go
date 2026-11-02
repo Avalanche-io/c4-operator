@@ -192,6 +192,8 @@ enrol.stubs({
   session: () => ({ getItem: (k) => session.get(k) ?? null, setItem: (k, v) => session.set(k, v), removeItem: (k) => session.delete(k) }),
   local: () => ({ getItem: () => null, setItem: () => {} }),
   now: () => Date.now(), hidden: () => true, dirty: () => false, changed: () => {},
+  // the seal of a provisional enrolment is the farm book's; no book here
+  book: async () => { throw Object.assign(new Error('no book'), { status: 404 }); }, pause: async () => {},
 });
 touch.stubs({ create: authenticator.create, get: authenticator.get, origin: () => ORIGIN,
   save: async (farm, pk) => { const r = keys.get(farm); r.passkey = pk; return r; } });

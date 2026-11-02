@@ -106,6 +106,18 @@ export async function begin({ others = [] } = {}) {
   return enrol.stepUpFor(pk.device);
 }
 
+// ownerTouch: on a one-person farm whose owner has no touch key (c4 farm
+// up ran without a terminal), the window to make one with c4 farm touch-key
+// (config.touchKeyUntil, present only then, kept after it closes):
+// { left } (milliseconds) while it is open, { closed } (when it closed)
+// after; null when the owner has one, or on a farm with a sign-in provider.
+// Without one, a browser's passkey can't be approved either.
+export function ownerTouch(cfg, now = Date.now()) {
+  if (!cfg || cfg.provider || !cfg.touchKeyUntil) return null;
+  const left = Date.parse(cfg.touchKeyUntil) - now;
+  return left > 0 ? { left } : { closed: cfg.touchKeyUntil };
+}
+
 // awaitApproval: watch the people's index for the approval naming this
 // browser's passkey; found, the passkey waits for the person's press
 // (finish). One watch at a time, while the page is open.
