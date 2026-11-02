@@ -332,17 +332,15 @@ func farmAdmins(reader client.Reader, book *farmBook) func(ctx context.Context, 
 		if err != nil {
 			return false
 		}
-		if on, err := view.InForceAt(farmbook.ForceParty, farmbook.PartyKey(owner.Name), view.Position(), view.Now); err != nil {
-			return false
-		} else if on == nil {
-			// made, its record not booked yet: the binding's owner still
-			return b.Spec.Owner == person
-		}
 		if owner.Spec.Kind == c4v1.PartyPerson {
+			// the owner's own Party: the owner, booked or not
 			return owner.Name == person
 		}
 		if farmbook.AdminAccepted(view.All(), owner.Name) == nil {
-			// named, not accepted: the binding's owner still
+			// not made in the book, or its first admin not accepted: the
+			// binding's owner still, as before Parties (an acceptance
+			// comes after its make-party in the book, so this is booked
+			// and accepted both)
 			return b.Spec.Owner == person
 		}
 		ok, _ := farmbook.HoldsByName(ctx, view, book.store, book.roots, owner.Name, person, server.PurposeAdmin)

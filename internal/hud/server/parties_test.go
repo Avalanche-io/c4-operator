@@ -1257,3 +1257,27 @@ func TestPartyMembershipChangedWhileActing(t *testing.T) {
 	}
 	p.seal(t)
 }
+
+// What is in force is kept per view of the book, never across views: a
+// membership read as none at one view is read again at the next.
+func TestPartyMemoFollowsTheBook(t *testing.T) {
+	p := newPartyRig(t)
+	ctx := context.Background()
+	p.people(t, "ines", "noor")
+	key := farmbook.MemberKey("kestrel", "noor")
+	before, err := p.s.partyBook(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.s.inForce(before, farmbook.ForceMembership, key) != nil {
+		t.Fatal("noor is a member before kestrel is made")
+	}
+	p.org(t, "kestrel", "noor", "noor")
+	after, err := p.s.partyBook(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.s.inForce(after, farmbook.ForceMembership, key) == nil {
+		t.Error("noor's acceptance is not read at the next view of the book")
+	}
+}
