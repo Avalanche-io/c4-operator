@@ -284,6 +284,12 @@ func TestTouchKeyWindowReopens(t *testing.T) {
 	r := onePerson(t)
 	cli := newDev(t)
 	r.up(cli, nil)
+	inWindow := func() (int, string) {
+		return r.call("POST", "/v1/people/owner/touch/reopen", local, struct{}{}, nil, people.InstallerHeader, installerToken)
+	}
+	if code, body := inWindow(); code != http.StatusConflict || !strings.Contains(body, "enrol the touch key now") {
+		t.Errorf("a reopen inside the window: %d %s", code, body)
+	}
 	r.now = r.now.Add(people.TouchKeyWindow + time.Hour)
 	if code, body := r.call("POST", "/v1/people/renew", "", r.enrolment(cli, "noor", "", "mac"), nil); code != http.StatusOK {
 		t.Fatalf("renewing: %d %s", code, body)

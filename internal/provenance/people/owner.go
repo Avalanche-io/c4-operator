@@ -283,8 +283,8 @@ func (x *Index) reopened(device string) *Entry {
 // handleTouchReopen opens one fresh TouchKeyWindow for a one-person farm
 // owner's first touch key (c4 farm touch-key --reopen, which rotates the
 // installer token first and sends the new one): on the installer token,
-// from the farm's own machine, only while the owner key never had a touch
-// key. The reopening is booked, so the owner's page and the CLI show it.
+// from the farm's own machine, once the window has closed, and only while
+// the owner key never had a touch key. The reopening is booked, so the owner's page and the CLI show it.
 func (i *Issuer) handleTouchReopen(w http.ResponseWriter, r *http.Request) {
 	ctx, now := r.Context(), i.now()
 	owner := i.owner(ctx)
@@ -310,6 +310,10 @@ func (i *Issuer) handleTouchReopen(w http.ResponseWriter, r *http.Request) {
 			return nil, refuse(http.StatusForbidden, "the owner's key %.16s is not in force: a removed key gets no touch key", oe.Device)
 		case x.touchKeyFor(oe.Device):
 			return nil, refuse(http.StatusConflict, "the owner's key has a touch key already: a touch on it enrols another")
+		case now.Before(x.touchKeyUntil(oe)):
+			// a reopening is for after the close: one in the window would
+			// push it out again and again, and pad the book
+			return nil, refuse(http.StatusConflict, "the window is open until %s: enrol the touch key now (c4 farm touch-key)", x.touchKeyUntil(oe).UTC().Format(time.RFC3339))
 		}
 		until = now.Add(TouchKeyWindow)
 		return []pending{{entry: &Entry{Kind: KindTouchWindow, Device: oe.Device, Person: owner, Addr: i.addr(r)}}}, nil
