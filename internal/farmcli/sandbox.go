@@ -120,6 +120,11 @@ func SandboxOff(added SandboxRecord) error {
 // A settings file that isn't JSON is left alone, and said.
 func editSettings(change func(map[string]any)) error {
 	p := claudeSettings()
+	// a settings file that is a link (one config folder pointing at
+	// another's) is changed where it points, and stays a link
+	if real, err := filepath.EvalSymlinks(p); err == nil {
+		p = real
+	}
 	s := map[string]any{}
 	b, err := os.ReadFile(p)
 	switch {
@@ -196,4 +201,75 @@ func tidy(s map[string]any) {
 			delete(s, k)
 		}
 	}
+}
+
+// SandboxQuestion asks whether to turn Claude Code's sandbox on, saying
+// plainly what it does beyond the farm's agent.
+const SandboxQuestion = "Also turn on Claude Code's sandbox? It confines Bash in every Claude Code session you run, not only the farm's agent: " +
+	"writes to the project folder, the network to an allowlist, and a command outside that fails rather than asks. " +
+	"With it on, scripts the agent runs can't read C4's key directory either."
+
+// sandboxRecordKey is how an entry c4 added is kept in the integration's
+// record, so integrate off takes out exactly that.
+const sandboxRecordKey = "sandbox:"
+
+// sandboxOn denies the agent the farm's directory, always, and turns
+// Claude Code's sandbox on only with the person's own yes (DESIGN 10:
+// consent is never inferred, so no terminal is no).
+func (in *Integration) sandboxOn(o Out) {
+	enable := in.AskSandbox != nil && in.AskSandbox(SandboxQuestion)
+	added, err := SandboxOn(in.SandboxFarm, enable)
+	if err != nil {
+		o.printf("sandbox   C4's key directory is not denied to the agent: %v\n", err)
+		return
+	}
+	for k := range added {
+		in.Record[sandboxRecordKey+k] = true
+	}
+	s, _ := sandboxState()
+	switch {
+	case s.enabled && !s.escape:
+		o.printf("sandbox   C4's key directory (%s) is denied to the agent, its scripts included: Claude Code's sandbox is on\n", tildePath(filepath.Dir(KeysFor(in.SandboxFarm).Dir)))
+	default:
+		o.printf("sandbox   C4's key directory is denied to Claude's own tools, but not to scripts the agent runs; the agent's key is protected from scripts only with Claude Code's sandbox on\n")
+	}
+}
+
+// sandboxOff takes out what sandboxOn added, and nothing else.
+func (in *Integration) sandboxOff(o Out) {
+	added := SandboxRecord{}
+	for k, v := range in.Record {
+		if rest, ok := strings.CutPrefix(k, sandboxRecordKey); ok && v {
+			added[rest] = true
+		}
+	}
+	if len(added) == 0 {
+		return
+	}
+	if err := SandboxOff(added); err != nil {
+		o.printf("sandbox   what c4 added to Claude Code's settings is still there: %v\n", err)
+		return
+	}
+	for k := range added {
+		delete(in.Record, sandboxRecordKey+k)
+	}
+	o.printf("sandbox   what c4 added to Claude Code's settings is taken out\n")
+}
+
+// sandboxState is whether Claude Code's sandbox is on in the person's user
+// settings, and whether commands can still run outside it.
+func sandboxState() (struct{ enabled, escape bool }, error) {
+	var out struct{ enabled, escape bool }
+	b, err := os.ReadFile(claudeSettings())
+	if err != nil {
+		return out, err
+	}
+	var s map[string]any
+	if err := json.Unmarshal(b, &s); err != nil {
+		return out, err
+	}
+	sb, _ := s["sandbox"].(map[string]any)
+	out.enabled = sb["enabled"] == true
+	out.escape = sb["allowUnsandboxedCommands"] != false
+	return out, nil
 }

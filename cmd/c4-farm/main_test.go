@@ -192,3 +192,11 @@ func TestUpWithNoTerminalInstallsNothing(t *testing.T) {
 		}
 	}
 }
+
+// Never the person's own Claude Code settings: a test that integrates
+// changes a scratch copy.
+func init() {
+	if d, err := os.MkdirTemp("", "c4-claude-config-"); err == nil {
+		os.Setenv("CLAUDE_CONFIG_DIR", d)
+	}
+}

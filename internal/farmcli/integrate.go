@@ -75,6 +75,12 @@ type Integration struct {
 	// Agent grants the agent its own key at the farm (on) or ends the
 	// grant (off), when set (K5).
 	Agent func(ctx context.Context, o Out, on bool)
+	// SandboxFarm, when set, is the farm whose directory the agent's
+	// sandbox denies it (K5 item 7); AskSandbox asks the person whether to
+	// turn Claude Code's sandbox on as well: nil where no one is at a
+	// terminal, and then it is no.
+	SandboxFarm string
+	AskSandbox  func(question string) bool
 	// Service is the agent service off removes (default the machine's).
 	Service *AgentService
 	// Record is where On notes what it added (the person's Config's
@@ -120,6 +126,9 @@ func (in *Integration) On(ctx context.Context, o Out) error {
 		o.printf("claude    not on this machine, so it has no farm tools yet: install Claude Code (https://claude.com/claude-code), then c4 farm integrate on\n")
 	} else {
 		in.mcpOn(ctx, o)
+		if in.SandboxFarm != "" {
+			in.sandboxOn(o)
+		}
 		if in.Agent != nil {
 			in.Agent(ctx, o, true)
 		}
@@ -217,6 +226,7 @@ func (in *Integration) Off(ctx context.Context, o Out) error {
 	if in.Agent != nil {
 		in.Agent(ctx, o, false)
 	}
+	in.sandboxOff(o)
 	switch {
 	case in.ClaudeBin == "":
 	case !in.Record["claude.mcp"]:

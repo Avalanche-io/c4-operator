@@ -289,7 +289,8 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		}
 		fmt.Fprintf(stdout, "signed in to %s as %s · projects %s\n", n, s.Viewer.User, strings.Join(s.Viewer.Projects, ", "))
 		loginKey(ctx, c, farmcli.KeysFor(n), *port, isTerminal(stdin) && !farmcli.InsideAgent(), stdout)
-		switch in := (&farmcli.Integration{Record: cfg.Integrations, Agent: agentHook(cfg, n, isTerminal(stdin) && !farmcli.InsideAgent())}); {
+		switch in := (&farmcli.Integration{Record: cfg.Integrations, Agent: agentHook(cfg, n, isTerminal(stdin) && !farmcli.InsideAgent()),
+			SandboxFarm: n, AskSandbox: askSandbox(stdin, stdout)}); {
 		case slices.Contains(on, farmcli.Claude):
 			// a farm signed in to, not made here: its tools in Claude Code,
 			// and no runner (that is the farm admin's to enroll)
@@ -1160,7 +1161,10 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			}
 		} else {
 			// Consent above: a person at a terminal, never an agent
-			in := farmcli.Integration{Record: cfg.Integrations, Agent: agentHook(cfg, cm.farm, terminal)}
+			in := farmcli.Integration{Record: cfg.Integrations, Agent: agentHook(cfg, cm.farm, terminal), AskSandbox: askSandbox(stdin, stdout)}
+			if n, _, err := cfg.Resolve(cm.farm); err == nil {
+				in.SandboxFarm = n
+			}
 			_, f, ferr := cfg.Resolve(cm.farm)
 			runner := ferr == nil && f.Local && on
 			if !*yes {
@@ -1310,7 +1314,8 @@ func (u upIntegration) choose(cfg *farmcli.Config) (on []string, wasOn bool, err
 
 // apply does what the answers say, keeps them, and says what it did.
 func (u upIntegration) apply(ctx context.Context, cfg *farmcli.Config, on []string, wasOn bool) error {
-	in := farmcli.Integration{Record: cfg.Integrations, Agent: agentHook(cfg, cfg.Current, isTerminal(u.stdin) && !farmcli.InsideAgent())}
+	in := farmcli.Integration{Record: cfg.Integrations, Agent: agentHook(cfg, cfg.Current, isTerminal(u.stdin) && !farmcli.InsideAgent()),
+		SandboxFarm: cfg.Current, AskSandbox: askSandbox(u.stdin, u.stdout)}
 	switch {
 	case slices.Contains(on, farmcli.Claude):
 		// the runner only on its own yes: one given at login named no service
@@ -1392,6 +1397,16 @@ func bindFarm(ctx context.Context, o localfarm.Options, present bool, stdout io.
 		return fmt.Errorf("the farm is up, but not bound to its owner %s: %v", o.Owner, err)
 	}
 	return nil
+}
+
+// askSandbox asks the person whether to turn Claude Code's sandbox on: at
+// a terminal, outside an agent; anywhere else nil, and the answer is no.
+func askSandbox(stdin io.Reader, stdout io.Writer) func(string) bool {
+	if !isTerminal(stdin) || farmcli.InsideAgent() {
+		return nil
+	}
+	in := bufio.NewReader(stdin)
+	return func(q string) bool { return farmcli.Ask(farmcli.Out{W: stdout, In: in}, q) }
 }
 
 // agentHook is an integration's grant of the agent's own key at farm (the

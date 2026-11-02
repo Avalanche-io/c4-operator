@@ -203,6 +203,11 @@ func init() {
 	for _, k := range agentVars {
 		os.Unsetenv(k)
 	}
+	// never the person's own Claude Code settings: a test that changes them
+	// changes a scratch copy
+	if d, err := os.MkdirTemp("", "c4-claude-config-"); err == nil {
+		os.Setenv("CLAUDE_CONFIG_DIR", d)
+	}
 }
 
 // Nothing that changes this machine runs from inside an agent, even with
@@ -348,5 +353,57 @@ func TestSandboxDeniesTheFarmsDirectory(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(cfgDir, "settings.json")); string(b) != "{oops" {
 		t.Error("broken settings were rewritten")
+	}
+}
+
+// A settings file that is a link is changed where it points, and stays a
+// link: one config folder pointing at another's keeps doing so.
+func TestSandboxFollowsALinkedSettingsFile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	real := filepath.Join(t.TempDir(), "real")
+	os.MkdirAll(real, 0o700)
+	os.WriteFile(filepath.Join(real, "settings.json"), []byte(`{"model":"opus"}`), 0o600)
+	linked := filepath.Join(t.TempDir(), "linked")
+	os.MkdirAll(linked, 0o700)
+	if err := os.Symlink(filepath.Join(real, "settings.json"), filepath.Join(linked, "settings.json")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", linked)
+	if _, err := SandboxOn("c4-local", false); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Lstat(filepath.Join(linked, "settings.json"))
+	if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("the link was replaced: %v %v", err, fi.Mode())
+	}
+	if b, _ := os.ReadFile(filepath.Join(real, "settings.json")); !strings.Contains(string(b), "~/.c4/c4-local/**") || !strings.Contains(string(b), "opus") {
+		t.Errorf("the linked file: %s", b)
+	}
+}
+
+// integrate's sandbox step: the deny rules always; the sandbox itself only
+// on the person's own yes, and with no one to ask, no, said plainly; off
+// takes out exactly what c4 added.
+func TestIntegrateSandboxOnlyOnAYes(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	var out strings.Builder
+	o := Out{W: &out}
+	in := &Integration{Record: map[string]bool{}, SandboxFarm: "c4-local"}
+	in.sandboxOn(o)
+	if s, _ := sandboxState(); s.enabled || !strings.Contains(out.String(), "but not to scripts the agent runs") {
+		t.Errorf("no terminal: sandbox %v, said %q", s.enabled, out.String())
+	}
+	asked := ""
+	in.AskSandbox = func(q string) bool { asked = q; return true }
+	out.Reset()
+	in.sandboxOn(o)
+	if s, _ := sandboxState(); !s.enabled || s.escape || !strings.Contains(asked, "every Claude Code session you run") || !strings.Contains(out.String(), "its scripts included") {
+		t.Errorf("yes: %+v, asked %q, said %q", s, asked, out.String())
+	}
+	in.sandboxOff(o)
+	b, _ := os.ReadFile(claudeSettings())
+	if strings.TrimSpace(string(b)) != "{}" || len(in.Record) != 0 {
+		t.Errorf("off left %s, record %v", b, in.Record)
 	}
 }
