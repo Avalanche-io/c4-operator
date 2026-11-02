@@ -783,8 +783,8 @@ answers `404`.
 ```
 { farm, since, head: { segment, number, position, entry },
   segments: [ <book/v1 bundle> ],
-  entries: [ { id, position, segment, entry, private?, redacted? } ],
-  pending: [ { id, position, entry, private?, redacted? } ],
+  entries: [ { id, position, segment, entry, private?, redacted?, act? } ],
+  pending: [ { id, position, entry, private?, redacted?, act? } ],
   more?, next }
 ```
 
@@ -813,6 +813,12 @@ answers `404`.
   ID its entry names. An adopted entry from before private parts, with its
   address in it, is withheld whole from anyone else (`entry: null`,
   `redacted: ["entry"]`).
+- `act` is the person's act the entry's record cites ([A person's
+  act](#a-persons-act)), sealed or pending: a removal, approval, code or
+  countersignature the people's issuer booked (its record is the act), or
+  a control record that cites one. It is served beside the entry, never in
+  it, so the entry's ID is the same with or without it. An entry withheld
+  whole has none.
 - A segment's `refused` lists each entry it refused by its C4 ID and a
   `reason`: `missing`, `malformed`, `not-pending`, `other-farm`,
   `unknown-kind`, `unsigned`, `booked`, `record-missing`, `unverified`,
@@ -837,6 +843,40 @@ ID. The Secret `c4-farm-book` in the signing namespace holds the State, the
 sealed head and the pending entries' IDs, written by resourceVersion; the
 Secret `c4-farm-book-sealer` holds the sealer's own head, which the HUD
 reads the book to. Any HUD replica serves it.
+
+## A person's act
+
+Wherever the HUD shows a record that carried out a person's signed act
+(Signed acts, under Controls), it serves the act beside it in one shape:
+
+```
+act?: { grade: signed | confirmed, kind, label?, protection, as? }
+```
+
+- `grade` is the act's own: `confirmed` when its bundle carries both the
+  device key's signature and the person's touch key's, else `signed`.
+- `kind`, `label` and `protection` are the device record in force for the
+  device that signed it (`GET /v1/people/devices` names the same fields),
+  judged as a verifier judges the act: by the farm book's entries before
+  the entry that books it, at the time that entry counts from (its seal;
+  a pending entry's, now), by the book's one rule for devices in force.
+- `as` is the role the person acted in, when the act names one: noor as
+  artist on her one-person farm.
+- It names no addresses: anyone who may read the record may read it.
+- It is left out, never guessed, for a record that cites no person's act
+  (one the HUD signed for a person before personal keys, shown as "signed
+  by the HUD for dana"; a unit's, an agent's or a relay's), and wherever
+  the act's bundle, its device record or the farm book entry that books it
+  can't be found or doesn't verify.
+
+It is served on a farm book entry (`GET /book/farm`), a grant and its
+revocation (`GET /grants`, the answers of `POST /grants` and `DELETE
+/grants/{ns}/{name}`, a Tracker's `mine` in `GET /trackers`), and a
+people-map confirmation and its revocation (`GET /people`, the answers of
+`POST /people` and `DELETE /people/{ns}/{name}`). Each is judged by the farm
+book entry that books its record, so a farm that keeps no farm book shows
+none. A wait's decision in a job's `waits` is not booked in the farm book
+and shows none yet.
 
 ## GET /needs-me
 
@@ -1119,7 +1159,9 @@ in `X-C4-Act`: each job control, and the endpoints below.
   answers in `record`. A plan (`dryRun`, `explain`) takes no act.
 - **The control record cites it** (`act`: its payload hash and record), is on
   its subject, and carries its `params` and grade (`custody: signed` or
-  `confirmed`).
+  `confirmed`). A farm-level act's record is kept in the farm book's store
+  with the act beside it, which the HUD then shows wherever the record is
+  shown ([A person's act](#a-persons-act)).
 - **An act that doesn't verify or doesn't match** is `403`, and nothing is
   written. A request without one is taken as before.
 
@@ -2210,7 +2252,8 @@ grant: the person, or a project admin, revokes it").
 | `GET /trackers`              |                                                                 | `{ trackers }`: the Trackers in projects the viewer sees, to choose one to grant                                                                                                                                 |
 
 A grant is `{ namespace, name, project, person, tracker, pools?, classes?,
-until, record, revoked?: { by, at, record }, active, why? }`; `why` says
+until, record, act?, revoked?: { by, at, record, act? }, active, why? }`
+(`act`: [A person's act](#a-persons-act)); `why` says
 why it does not serve now. The work queue checks it again each time it
 releases a unit of a job made under it (or of a unit's job under that
 job), whether or not the unit mounts the person's credential lease: a unit
@@ -2326,7 +2369,8 @@ tell the person what is offered, and the person confirms it.
 | `DELETE /people/{ns}/{name}` |                                              | `{ ok, message, entry, record }`: the person, a party member or a project admin takes it back, signed as `people-revoke`; the entry is kept, marked. `409` when revoked already                                                                                                               |
 
 An entry is `{ namespace, project, tracker, login, person, state, name?,
-confirmed?: { by, at, record }, revoked?, yours, lets }`; `lets` says what
+confirmed?: { by, at, record, act? }, revoked?: { by, at, record, act? },
+yours, lets }` (`act`: [A person's act](#a-persons-act)); `lets` says what
 confirming lets the login do. A relayed decision's control record carries
 its `chain` (chain/1): `by` the tracker user, `for` the mapped person, and
 `under` the confirmation it rests on (`{ record, kind: people-map }`),
@@ -2413,7 +2457,7 @@ position, order, chain, expires }`.
 | `POST /v1/people/browser`     | `Enrolment` with `code`, kind `browser`            | `Certified`, evidence `owner`: the code the owner's key booked, within a minute, once. A device key only: `403` for any `touchFor`                                                                                                                                                                                                                                                                                           | the web app opened by `c4 farm open` (K3)    |
 | `GET /v1/people/codes/{hash}` |                                                    | `{ state: waiting \| enrolled \| lapsed, expires, device?, record?, position?, key?, label? }` for the SHA-256 of a code: the key the code enrolled, for the CLI to compare with the one it saw made. Signed in, or on `X-C4-Installer`                                                                                                                                                                                      | `c4 farm open` (K4)                          |
 | `POST /v1/people/acts`        | an `act/v1` bundle                                 | `{ record, position, grade, entry }`: the act booked in the index (below)                                                                                                                                                                                                                                                                                                                                                    | the HUD's device page (K3), the CLI (K4)     |
-| `GET /v1/people/index`        | `?from={position}`                                 | `{ farm, order, position, head?, signed?, entries: [{ id, entry, private?, redacted? }] }`: the entries after `from`, in order, and the head as the issuer signed it, which a client keeps so it can refuse a head that goes back                                                                                                                                                                                            | the CLI's new-device notices (K4), verifiers |
+| `GET /v1/people/index`        | `?from={position}`                                 | `{ farm, order, position, head?, signed?, entries: [{ id, entry, private?, redacted? }] }`: the entries after `from`, in order, to `position`, and the head as the issuer signed it, which a client keeps so it can refuse a head that goes back. `from` past the end, or before the start, is read as the end or the start: `position` is always the index's end (with a farm book, its sealed head), never the `from` asked for                                                                                                                                                                                            | the CLI's new-device notices (K4), verifiers |
 | `GET /v1/people/records/{id}` |                                                    | a record or entry the index books, by C4 ID, as stored; or `{ record, redacted, device? \| entry? }` without what the caller may not read                                                                                                                                                                                                                                                                                    | verifiers                                    |
 | `GET /v1/people/devices`      | `?person={name}`                                   | `{ farm, position, devices: [{ device, record, person, kind, label?, protection, evidence, touchFor?, enrolled, renewed, renewedAt, countersigned?, flags? }] }`: the devices in force now                                                                                                                                                                                                                                   | each person's device page (K3)               |
 
