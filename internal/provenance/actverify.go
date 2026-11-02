@@ -58,6 +58,7 @@ var actNeeds = map[string]ActNeed{
 	"extend-grant":    touched,
 	"add-member":      touched, // memberships
 	"set-purposes":    touched, // and purposes
+	"make-party":      touched, // a Party, with an organisation's first admin
 	"bind":            touched, // DESIGN 6: accept a deployment binding
 	"people-confirm":  touched, // a tracker login may speak for the person (6.1)
 	"stand-in-policy": touched, // decide.by
@@ -82,6 +83,10 @@ var actNeeds = map[string]ActNeed{
 	// and silent (DESIGN 6: revoke).
 	"revoke":        personOnly,
 	"people-revoke": personOnly,
+	"end-member":    personOnly, // a membership ended (ORGANIZATION 2)
+	// A Party's display or legal name, or its per-person views policy: the
+	// party list is people's to keep (DESIGN 6: no agent is a party).
+	"change-party": personOnly,
 	// What a person saw in the tracker: a held write happened, or didn't.
 	// A person's attestation, which sends and gives away nothing, so
 	// silent.

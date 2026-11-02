@@ -22,7 +22,14 @@ import (
 //   - people-confirm and people-revoke: the people map, a tracker login
 //     confirmed as a person and that confirmation ended;
 //   - enroll-offer and enroll: a host node offered and enrolled;
-//   - disable and enable: a node taken out of scheduling and put back.
+//   - disable and enable: a node taken out of scheduling and put back;
+//   - make-party, change-party and set-sign-ins: a Party made, its names
+//     or policy changed, and a person's sign-in subjects set
+//     (ORGANIZATION 1); make-party names an organisation's first admin;
+//   - add-member, set-purposes and end-member: a membership of a Party,
+//     by a person's name or by a group of the studio's own, its purposes
+//     changed, and ended (ORGANIZATION 2). A group's record names no
+//     person.
 //
 // Only signed acts are booked. A change made around C4 isn't, and comes
 // in slice 2's violations as one (S2c). Tool publishing and Project, Pool
@@ -38,6 +45,12 @@ var ControlActs = map[string]string{
 	"enroll":         "for",
 	"disable":        "",
 	"enable":         "",
+	"make-party":     "member",
+	"change-party":   "",
+	"set-sign-ins":   "",
+	"add-member":     "member",
+	"set-purposes":   "member",
+	"end-member":     "member",
 }
 
 // controlRecord is what a control record (control/v1) says that its entry

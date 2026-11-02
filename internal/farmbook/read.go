@@ -5,7 +5,9 @@ import (
 	"context"
 	"crypto/x509"
 	"fmt"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -462,10 +464,19 @@ const (
 	// end-binding or by a bind that follows it (its Ends), and ending at
 	// its end.
 	ForceBinding = "binding"
-	// ForceMembership is a tracker login confirmed as a person, the people
-	// map: opened by people-confirm, closed by people-revoke. An
-	// organization's members join with Parties (ORGANIZATION O1).
+	// ForceMembership is a membership, by its subject:
+	//   - a tracker login confirmed as a person, the people map: opened by
+	//     people-confirm, closed by people-revoke;
+	//   - a Party's member, by name (MemberKey) or by a group of the
+	//     studio's own (GroupKey): opened by add-member, opened again with
+	//     other purposes by set-purposes, closed by end-member. An
+	//     organisation's make-party opens its first admin's (ORGANIZATION
+	//     2), but only the party's first make-party: a name is never
+	//     reused. The purposes are the opening record's change.
 	ForceMembership = "membership"
+	// ForceParty is a Party, by PartyKey: opened by its first make-party.
+	// A party never ends.
+	ForceParty = "party"
 	// ForceDevice is a person's device key, by its device ID: opened by
 	// its device record, closed by a removal of it or of all its person's
 	// devices enrolled before, and lapsing DeviceLapse after its last
@@ -509,9 +520,21 @@ const DeviceLapse = 90 * 24 * time.Hour
 
 // opens and closes are the control acts that open and close each kind.
 var (
-	opens  = map[string]string{ForceGrant: "grant", ForceBinding: "bind", ForceMembership: "people-confirm"}
-	closes = map[string]string{ForceGrant: "revoke", ForceBinding: "end-binding", ForceMembership: "people-revoke"}
+	opens = map[string][]string{ForceGrant: {"grant"}, ForceBinding: {"bind"},
+		ForceMembership: {"people-confirm", "add-member", "set-purposes"}, ForceParty: {"make-party"}}
+	closes = map[string][]string{ForceGrant: {"revoke"}, ForceBinding: {"end-binding"}, ForceMembership: {"people-revoke", "end-member"}}
 )
+
+// The keys a Party's entries are booked by: the party, a member by name
+// and a member by a group of the studio's own. A party's name has no
+// slash, so a group's name, whatever it holds, is read after the first.
+func PartyKey(party string) string          { return "party:" + party }
+func MemberKey(party, person string) string { return PartyKey(party) + "/person:" + person }
+func GroupKey(party, group string) string   { return PartyKey(party) + "/group:" + group }
+func partyOf(subject string) (string, bool) {
+	p, ok := strings.CutPrefix(subject, "party:")
+	return p, ok && !strings.Contains(p, "/")
+}
 
 // InForce is the entry that put key in force at sealed position pos, or
 // nil if it wasn't in force there: what a verifier judges a record by,
@@ -572,9 +595,10 @@ func InForceAt(es []*Sealed, kind, key string, at time.Time) (*Sealed, error) {
 	}
 	open, ok := opens[kind]
 	if !ok {
-		return nil, fmt.Errorf("in force is asked of %s, %s, %s, %s or %s, not %q", ForceGrant, ForceBinding, ForceMembership, ForceDevice, ForceAgentGrant, kind)
+		return nil, fmt.Errorf("in force is asked of %s, %s, %s, %s, %s or %s, not %q", ForceGrant, ForceBinding, ForceMembership, ForceParty, ForceDevice, ForceAgentGrant, kind)
 	}
 	var on *Sealed
+	made := map[string]bool{}
 	for _, s := range es {
 		e := s.Entry
 		if kind == ForceBinding && e.Kind == KindControl && e.Act == "bind" && e.Ends == key {
@@ -582,13 +606,32 @@ func InForceAt(es []*Sealed, kind, key string, at time.Time) (*Sealed, error) {
 			on = nil
 			continue
 		}
-		if e.Kind != KindControl || e.Subject != key {
+		if e.Kind != KindControl {
 			continue
 		}
-		switch e.Act {
-		case open:
+		if e.Act == "make-party" {
+			// Only a party's first make-party counts: a name is never
+			// reused, so a second can neither make it again nor name
+			// another first admin.
+			first := !made[e.Subject]
+			made[e.Subject] = true
+			p, isParty := partyOf(e.Subject)
+			switch {
+			case !first || !isParty:
+			case kind == ForceParty && e.Subject == key:
+				on = s
+			case kind == ForceMembership && e.Person != "" && MemberKey(p, e.Person) == key:
+				on = s
+			}
+			continue
+		}
+		if e.Subject != key {
+			continue
+		}
+		switch {
+		case slices.Contains(open, e.Act):
 			on = s
-		case closes[kind]:
+		case slices.Contains(closes[kind], e.Act):
 			on = nil
 		}
 	}
