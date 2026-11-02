@@ -127,6 +127,20 @@ func (l *Lookup) Signer(identity, id string) *api.SignerBinding {
 	return out
 }
 
+// SignerOf is Signer for a verified record: its own leaf's binding, or,
+// for a host unit whose leaf names its runner and no binding of its own
+// (provenance.HeldBy), its runner's binding in force now.
+func (l *Lookup) SignerOf(v *provenance.Verified) *api.SignerBinding {
+	identity, id := v.Identity, v.Binding
+	if runner, ok := provenance.HeldBy(v); ok {
+		identity, id = runner, ""
+		if b := l.For(runner); b != nil {
+			id = b.Spec.Record
+		}
+	}
+	return l.Signer(identity, id)
+}
+
 // Bound is a binding as the issuer certifies under it.
 func Bound(b *c4v1.DeploymentBinding) provenance.Bound {
 	if b == nil {

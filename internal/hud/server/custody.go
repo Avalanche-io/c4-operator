@@ -357,7 +357,7 @@ func (c *custody) signer(v *provenance.Verified) *api.SignerBinding {
 	if c.bound == nil || provenance.IdentityDeployment(v.Identity) == "" {
 		return nil
 	}
-	return c.bound.Signer(v.Identity, v.Binding)
+	return c.bound.SignerOf(v)
 }
 
 func predicate[T any](v *provenance.Verified) T {

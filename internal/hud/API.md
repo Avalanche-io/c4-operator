@@ -2423,6 +2423,8 @@ a restart, within the farm book's seal interval (`--farm-book-seal`, 2
 seconds by default). An identity no binding covers is still certified,
 naming none, and so is any identity while the bindings can't be read: its
 records are labelled, never attributed to a binding that may have ended.
+Both are certified unbound only until strict accountability (K8), which
+refuses them.
 Where the farm keeps a farm book, a binding is in force only while the
 book says so too; one made before the farm kept a book is judged by its
 object.
@@ -2442,6 +2444,12 @@ served, never part of the record:
   issued before it, isn't caught until project books exist: that window is
   the rest of that certificate's hour or day. The record's own `signedAt`
   is never used to close it, since it is the signer's claim.
+- A host unit's leaf names the host runner that holds its key
+  (`urn:c4:runner:<node>`) and no binding of its own: its record takes
+  `runner/<node>`'s binding in force, by book order on a book entry and now
+  on a custody link (one rule for both, `provenance.HeldBy`), so it accrues
+  to the runner's owner, or to the farm binding's where the runner has
+  none.
 - The label is `unattributed: deployment has no owner` (a leaf naming no
   binding, one not in force for it, not booked, or another deployment's)
   or `revoked`. Before strict accountability (K8) a label never refuses a

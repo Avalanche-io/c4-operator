@@ -122,3 +122,32 @@ func TestTheBookEndsABinding(t *testing.T) {
 		}
 	}
 }
+
+// A host unit's record in a chain of custody is bound through the runner
+// that holds its key (provenance.HeldBy), by the bindings in force now:
+// the runner's own where it has one, else the farm binding.
+func TestHostUnitBoundThroughItsRunner(t *testing.T) {
+	now := time.Now()
+	farmID, runnerID := provtest.ID("farm"), provtest.ID("laptop-1's runner")
+	l := &bindings.Lookup{Now: now, Items: []c4v1.DeploymentBinding{
+		binding("farm", "dana", "studio/*", farmID, now.Add(-time.Hour)),
+		binding("runner-laptop-1", "noor", "studio/runner/laptop-1", runnerID, now.Add(-time.Minute)),
+	}}
+	unit := provenance.UnitIdentity("show-a", "sh040", "3", "9b2e4d71", 1)
+	for _, c := range []struct {
+		name           string
+		v              provenance.Verified
+		owner, dep, id string
+	}{
+		{"held by noor's Mac", provenance.Verified{Identity: unit, Runner: "laptop-1"}, "noor", "runner/laptop-1", runnerID},
+		{"held by a runner with no binding of its own", provenance.Verified{Identity: unit, Runner: "laptop-2"}, "dana", "*", farmID},
+	} {
+		got := l.SignerOf(&c.v)
+		if got.Owner != c.owner || got.Deployment != c.dep || got.Binding != c.id || got.Label != "" {
+			t.Errorf("%s: %+v", c.name, got)
+		}
+	}
+	if got := l.SignerOf(&provenance.Verified{Identity: unit}); got.Label != farmbook.LabelUnattributed {
+		t.Errorf("a unit no runner holds, with no binding: %+v", got)
+	}
+}

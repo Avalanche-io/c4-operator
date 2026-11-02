@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/x509"
 	"os"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/provtest"
+	"github.com/Avalanche-io/c4-operator/schema"
 )
 
 func recordID(rec []byte) string { return c4.Identify(bytes.NewReader(rec)).String() }
@@ -223,5 +225,54 @@ func TestBindingToPatternIsTheCRDs(t *testing.T) {
 	}
 	if !bytes.Contains(crd, []byte("pattern: "+c4v1.BindingToPattern+"\n")) {
 		t.Errorf("the CRD's pattern for to is not c4v1.BindingToPattern")
+	}
+}
+
+// hostUnitAct is an act a host unit signs with the key its runner on node
+// holds: its leaf names the runner (urn:c4:runner:<node>) and no binding.
+func hostUnitAct(t *testing.T, f *provtest.Farm, node, note string) []byte {
+	t.Helper()
+	pub, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const uid = "9b2e4d71-0c3a-4f8e-a6d2-5b1e7c9f3a10"
+	id := provenance.UnitIdentity("show-a", "sh040", "3", uid, 1)
+	leaf, err := f.CA.IssueHostUnit(pub, id, node, time.Hour, f.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := &provtest.Key{Identity: id, Ed25519: key, Chain: []*x509.Certificate{leaf, f.CA.Cert}}
+	chain := &schema.ActChain{By: schema.Actor{Unit: schema.UnitRef("show-a", "sh040", uid, "3"), Grade: schema.GradeSigned},
+		For: schema.For{Party: "dana", Grade: schema.GradeSigned}}
+	return f.SignAct(t, k, provtest.Act{Act: "note", Params: map[string]any{"note": note}, Chain: chain})
+}
+
+// A host unit's record is bound through the runner that holds its key: by
+// book order, its runner's binding in force at the record's position, the
+// runner's own where it has one, else the farm binding.
+func TestHostUnitBoundThroughItsRunner(t *testing.T) {
+	r := newRig(t)
+	r.book(r.control(r.hud, "bind", "deploymentbinding:farm", bindChange("dana", "studio/*", "task/v1"), r.now), nil)
+	r.seal()
+	r.book(r.control(r.hud, "bind", "deploymentbinding:runner-1", bindChange("noor", "studio/runner/laptop-1", "task/v1"), r.now), nil)
+	r.seal()
+	for _, a := range [][]byte{hostUnitAct(t, r.farm, "laptop-1", "on noor's Mac"), hostUnitAct(t, r.farm, "laptop-2", "on a farm machine")} {
+		e := &farmbook.Entry{Kind: "removal", Record: recordID(a), Order: farmbook.OrderPending, At: r.now.Format(time.RFC3339Nano)}
+		if _, err := r.writer.Append(r.ctx, farmbook.Submission{Entry: e, Record: a}); err != nil {
+			t.Fatal(err)
+		}
+		r.seal()
+	}
+	rd := r.reader()
+	v, err := rd.View(r.ctx, r.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for pos, want := range map[int64][2]string{3: {"noor", "runner/laptop-1"}, 4: {"dana", "*"}} {
+		got := rd.Signer(r.ctx, v, pos)
+		if got == nil || got.Owner != want[0] || got.Deployment != want[1] || got.Label != "" || got.Binding == "" {
+			t.Errorf("entry %d: %+v, want %s's %s", pos, got, want[0], want[1])
+		}
 	}
 }

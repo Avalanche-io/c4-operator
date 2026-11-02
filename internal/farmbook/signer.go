@@ -3,6 +3,7 @@ package farmbook
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
@@ -39,7 +40,50 @@ func (r *Reader) Signer(ctx context.Context, v *View, pos int64) *api.SignerBind
 	if rec == nil {
 		return nil
 	}
-	return r.judgeBinding(ctx, v, rec.Identity, rec.Binding, pos, s)
+	identity, id := rec.Identity, rec.Binding
+	if runner, ok := provenance.HeldBy(rec); ok {
+		// a host unit: its runner's binding in force at pos
+		identity, id = runner, r.boundAt(ctx, v, runner, pos, s.Time)
+	}
+	return r.judgeBinding(ctx, v, identity, id, pos, s)
+}
+
+// boundAt is the binding in force for identity at pos, by the entries
+// before it at the time pos counts from, the most specific: the one naming
+// its deployment exactly, else the farm binding; "" for none.
+func (r *Reader) boundAt(ctx context.Context, v *View, identity string, pos int64, at time.Time) string {
+	want := provenance.IdentityDeployment(identity)
+	exact, farm := "", ""
+	for p := int64(1); p < pos; p++ {
+		e := v.at(p)
+		if e == nil || e.Entry.Kind != KindControl || e.Entry.Act != "bind" {
+			continue
+		}
+		in, err := v.InForceAt(ForceBinding, e.Entry.Subject, pos-1, at)
+		if err != nil || in == nil || in.Entry.Record != e.Entry.Record {
+			continue
+		}
+		br := r.verified(ctx, e.Entry.Record)
+		if br == nil {
+			continue
+		}
+		var c struct {
+			Change bindingChange `json:"change"`
+		}
+		if json.Unmarshal(br.Predicate, &c) != nil || !bindingTo.MatchString(c.Change.To) {
+			continue
+		}
+		switch c4v1.DeploymentOf(c.Change.To) {
+		case want:
+			exact = e.Entry.Record
+		case "*":
+			farm = e.Entry.Record
+		}
+	}
+	if exact != "" {
+		return exact
+	}
+	return farm
 }
 
 func (r *Reader) judgeBinding(ctx context.Context, v *View, identity, id string, pos int64, s *Sealed) *api.SignerBinding {

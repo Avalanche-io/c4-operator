@@ -27,6 +27,19 @@ func IdentityDeployment(identity string) string {
 	return dep
 }
 
+// HeldBy is the deployment a record's signer is bound through when its
+// leaf names no binding of its own: a host unit's key is held by its host
+// runner (RunnerURN), so the unit's records take runner/<node>'s binding
+// in force (DESIGN 3.3). ok is false for any other signer, bound through
+// its own identity. Every verifier path asks this one rule, so the farm
+// book's and the chain of custody's can't differ.
+func HeldBy(v *Verified) (identity string, ok bool) {
+	if v.Binding != "" || v.Runner == "" {
+		return "", false
+	}
+	return RunnerIdentity(v.Runner), true
+}
+
 // deploymentKinds is the signer policy's record kinds for each kind of
 // deployment a binding may name alone: what CheckSigner lets it sign.
 var deploymentKinds = map[string][]string{
