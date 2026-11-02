@@ -272,7 +272,7 @@ func TestPartiesAndMembers(t *testing.T) {
 	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "maya", withFirst("noor"), nil); code != http.StatusForbidden || !says(out, "a farm admin keeps the party list") {
 		t.Fatalf("an artist makes an organisation: %d %v", code, out)
 	}
-	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", kestrel(), nil); code != http.StatusBadRequest || !says(out, "firstAdmin") {
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", kestrel(), nil); code != http.StatusBadRequest || !says(out, "makes no one its admin") {
 		t.Errorf("an organisation with no first admin: %d %v", code, out)
 	}
 	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", withFirst("ines"), nil); code != http.StatusForbidden || !says(out, "never makes its maker its admin") {
@@ -876,6 +876,11 @@ func TestPartySignInsAgainstTheSecret(t *testing.T) {
 	if code, out := mk("dana", "dana", peopletest.DanaSub); code != http.StatusOK {
 		t.Errorf("dana's own Party takes her Secret subject: %d %v", code, out)
 	}
+	// nor added to a Party later
+	p.own(t, "lee", "lee")
+	if code, out := p.call(t, http.MethodPut, "/api/v1/parties/lee/sign-ins", "lee", map[string]any{"signIns": ins("lee", sso+" "+peopletest.NoorSub), "idToken": p.token(peopletest.NoorSub)}, nil); code != http.StatusConflict || !says(out, "is kai's in the c4-sign-ins Secret") {
+		t.Errorf("lee adds a subject the Secret gives kai: %d %v", code, out)
+	}
 	// kai has a Party now, so the Secret's line for kai signs in no one; kai
 	// leaves the Secret by proving another subject of theirs
 	p.s.DevViewers["kai"] = &api.Viewer{User: "kai", Role: "artist", All: true}
@@ -1118,6 +1123,9 @@ func TestPartySpelledOneWay(t *testing.T) {
 	if err != nil || len(got) != 1 || got[0].Issuer != "https://sso.studio.example" {
 		t.Errorf("an issuer kept as written: %v %v", got, err)
 	}
+	if _, err := validSignIns(ins("ftp://sso.studio.example 00u-x")); err == nil {
+		t.Error("an issuer that is no http(s) URL")
+	}
 	// two spellings of one subject are one person's
 	p.own(t, "noor", "noor", sso+" "+peopletest.NoorSub)
 	body := map[string]any{"name": "lee", "kind": "person", "displayName": "Lee", "signIns": ins("lee", "HTTPS://SSO.Studio.Example/ "+peopletest.NoorSub), "idToken": p.token(peopletest.NoorSub)}
@@ -1212,4 +1220,40 @@ func TestPartyViewerRights(t *testing.T) {
 	if v := viewer("ines", nil); v.MakeParties || v.MakeOwnParty {
 		t.Errorf("rights on a farm with no book: %+v", v)
 	}
+}
+
+// Two admins changing one membership at once: the second is judged on the
+// book after the first, and refused, since the membership it was signed
+// to follow is no longer the one in force (R5).
+func TestPartyMembershipChangedWhileActing(t *testing.T) {
+	p := newPartyRig(t)
+	p.people(t)
+	p.org(t, "kestrel", "noor", "noor")
+	for _, body := range []map[string]any{{"person": "lee", "purposes": []string{"member", "admin"}}, {"person": "dana", "purposes": []string{"member"}}} {
+		if code, out := p.call(t, http.MethodPost, "/api/v1/parties/kestrel/members", "noor", body, nil); code != http.StatusOK {
+			t.Fatalf("%v: %d %v", body, code, out)
+		}
+	}
+	bs := &barrierStore{Store: p.store, release: make(chan struct{})}
+	p.s.FarmBook = &farmbook.Writer{Store: bs, Pointer: p.ptr}
+	bs.armed.Store(true)
+	var wg sync.WaitGroup
+	codes := make([]int, 2)
+	for i, c := range []struct {
+		as       string
+		purposes []string
+	}{{"noor", []string{"member", "view-spend"}}, {"lee", []string{"member", "approve-spend"}}} {
+		wg.Add(1)
+		go func(i int, as string, purposes []string) {
+			defer wg.Done()
+			codes[i], _ = p.call(t, http.MethodPut, "/api/v1/parties/kestrel/members", as, map[string]any{"person": "dana", "purposes": purposes}, nil)
+		}(i, c.as, c.purposes)
+	}
+	wg.Wait()
+	bs.armed.Store(false)
+	slices.Sort(codes)
+	if codes[0] != http.StatusOK || codes[1] != http.StatusConflict {
+		t.Errorf("two changes of dana's membership at once: %v, want one 200 and one 409", codes)
+	}
+	p.seal(t)
 }
