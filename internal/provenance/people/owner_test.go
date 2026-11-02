@@ -328,3 +328,50 @@ func TestTouchKeyWindowReopens(t *testing.T) {
 		t.Errorf("another index reading the book: %v", err)
 	}
 }
+
+// With a farm book, the first-touch-key routes see entries still pending:
+// two owner/touch requests before the queue seals give 200 then 409, and
+// a reopening books an entry the queue seals with the rest.
+func TestOwnerTouchBeforeTheSeal(t *testing.T) {
+	r := onePerson(t)
+	b := inBook(r, nil)
+	cli := newDev(t)
+	if code, body, _ := r.up(cli, nil); code != http.StatusOK {
+		t.Fatalf("up: %d %s", code, body)
+	}
+	touch := func() (int, string) {
+		return r.call("POST", "/v1/people/owner/touch", local, r.enrolment(newDev(t), "noor", cli.id, "mac"), nil, people.InstallerHeader, installerToken)
+	}
+	if code, body := touch(); code != http.StatusOK {
+		t.Fatalf("the first, pending: %d %s", code, body)
+	}
+	if code, body := touch(); code != http.StatusConflict {
+		t.Errorf("a second before the seal: %d %s", code, body)
+	}
+	if res := b.seal(); len(res.Refused) != 0 {
+		t.Errorf("the seal refused %+v", res.Refused)
+	}
+
+	// another farm: up, the window closes, a reopening is booked, sealed
+	r2 := onePerson(t)
+	b2 := inBook(r2, nil)
+	cli2 := newDev(t)
+	r2.up(cli2, nil)
+	b2.seal()
+	r2.now = r2.now.Add(people.TouchKeyWindow + time.Hour)
+	if code, body := r2.call("POST", "/v1/people/renew", "", r2.enrolment(cli2, "noor", "", "mac"), nil); code != http.StatusOK {
+		t.Fatalf("renewing: %d %s", code, body)
+	}
+	reopen := func() (int, string) {
+		return r2.call("POST", "/v1/people/owner/touch/reopen", local, struct{}{}, nil, people.InstallerHeader, installerToken)
+	}
+	if code, body := reopen(); code != http.StatusOK {
+		t.Fatalf("reopening: %d %s", code, body)
+	}
+	if code, body := reopen(); code != http.StatusConflict {
+		t.Errorf("a second reopening before the seal: %d %s", code, body)
+	}
+	if res := b2.seal(); len(res.Refused) != 0 {
+		t.Errorf("the seal refused %+v", res.Refused)
+	}
+}

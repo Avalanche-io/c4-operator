@@ -211,7 +211,7 @@ func (i *Issuer) handleOwnerTouch(w http.ResponseWriter, r *http.Request) {
 			return nil, refuse(http.StatusForbidden, "this farm's owner is not enrolled yet: c4 farm up enrols them")
 		case p.TouchFor != oe.Device:
 			return nil, refuse(http.StatusForbidden, "the touch key confirms for the owner's key %.16s, and the request names %.16s", oe.Device, p.TouchFor)
-		case x.inForce(int64(len(x.entries)), now)[oe.Device] == nil:
+		case x.inForce(x.pos, now)[oe.Device] == nil:
 			// a removed or lapsed owner key gets no touch key
 			return nil, refuse(http.StatusForbidden, "the owner's key %.16s is not in force: a removed key gets no touch key", oe.Device)
 		case x.touchKeyFor(oe.Device):
@@ -246,7 +246,7 @@ func (i *Issuer) handleOwnerTouch(w http.ResponseWriter, r *http.Request) {
 
 // ownerEntry is the index entry that enrolled the owner's key, or nil.
 func (x *Index) ownerEntry() *Entry {
-	for _, e := range x.entries {
+	for _, e := range x.all() {
 		if d := x.devices[e.Record]; e.Kind == KindDevice && d != nil && d.Predicate.Evidence == schema.EvidenceInstaller && d.Predicate.TouchFor == "" {
 			return e
 		}
@@ -262,8 +262,8 @@ func (x *Index) touchKeyUntil(oe *Entry) time.Time {
 	if r := x.reopened(oe.Device); r != nil {
 		from = r
 	}
-	at, err := time.Parse(time.RFC3339, from.At)
-	if err != nil {
+	at := from.at()
+	if at.IsZero() {
 		return time.Time{}
 	}
 	return at.Add(TouchKeyWindow)
@@ -272,7 +272,7 @@ func (x *Index) touchKeyUntil(oe *Entry) time.Time {
 // reopened is the last reopening of device's touch-key window, or nil.
 func (x *Index) reopened(device string) *Entry {
 	var last *Entry
-	for _, e := range x.entries {
+	for _, e := range x.all() {
 		if e.Kind == KindTouchWindow && e.Device == device {
 			last = e
 		}
@@ -306,7 +306,7 @@ func (i *Issuer) handleTouchReopen(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case oe == nil:
 			return nil, refuse(http.StatusForbidden, "this farm's owner is not enrolled yet: c4 farm up enrols them")
-		case x.inForce(int64(len(x.entries)), now)[oe.Device] == nil:
+		case x.inForce(x.pos, now)[oe.Device] == nil:
 			return nil, refuse(http.StatusForbidden, "the owner's key %.16s is not in force: a removed key gets no touch key", oe.Device)
 		case x.touchKeyFor(oe.Device):
 			return nil, refuse(http.StatusConflict, "the owner's key has a touch key already: a touch on it enrols another")
@@ -332,7 +332,7 @@ type TouchWindow struct {
 
 // touchKeyFor reports whether a touch key was ever enrolled for device.
 func (x *Index) touchKeyFor(device string) bool {
-	for _, e := range x.entries {
+	for _, e := range x.all() {
 		if d := x.devices[e.Record]; e.Kind == KindDevice && d != nil && d.Predicate.TouchFor == device {
 			return true
 		}

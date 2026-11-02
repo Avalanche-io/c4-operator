@@ -516,7 +516,7 @@ func (x *Index) loadKind(ctx context.Context, e *Entry, pending bool) error {
 		}
 		return nil
 	case KindTouchWindow:
-		if e.Record != "" || e.Person == "" || e.Device == "" || x.at(int64(len(x.entries)))[e.Device] == nil {
+		if e.Record != "" || e.Person == "" || e.Device == "" || x.at(e.Position - 1)[e.Device] == nil {
 			return errors.New("a touch window is a person's, for an owner key the index books, and books no record")
 		}
 		return nil

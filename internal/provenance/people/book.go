@@ -26,7 +26,7 @@ import (
 // peopleKinds are the kinds of entry the index books, in the book beside
 // the HUD's control entries.
 var peopleKinds = map[string]bool{KindDevice: true, KindProviderKey: true, KindSetting: true, KindRemoval: true,
-	KindCode: true, KindCountersign: true, KindApproval: true, KindSignIns: true, KindFlag: true}
+	KindCode: true, KindCountersign: true, KindApproval: true, KindSignIns: true, KindFlag: true, KindTouchWindow: true}
 
 // inBook reports whether an entry was written for a farm book: pending,
 // or sealed in the book's order. The entries of the issuer's own index,
@@ -92,7 +92,7 @@ func (x *Index) loadPrivate(ctx context.Context, e *Entry) error {
 	if e.Private == "" {
 		return nil
 	}
-	if e.Kind != KindDevice && e.Kind != KindFlag {
+	if e.Kind != KindDevice && e.Kind != KindFlag && e.Kind != KindTouchWindow {
 		return fmt.Errorf("a %s entry has no private part", e.Kind)
 	}
 	b, err := x.Store.Get(ctx, e.Private)
