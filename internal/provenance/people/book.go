@@ -406,6 +406,13 @@ func NewBookChecker(farm string, roots *x509.CertPool, store Store) *BookChecker
 	return &BookChecker{x: &Index{Farm: farm, Roots: roots, Store: store}}
 }
 
+// WithAdmin says who the farm's admins are, for the rules the queue holds
+// an entry to as the issuer does: an admin may revoke anyone's agent grant.
+func (c *BookChecker) WithAdmin(admin func(ctx context.Context, person string) bool) *BookChecker {
+	c.x.Admin = admin
+	return c
+}
+
 func (c *BookChecker) Kinds() []string {
 	var out []string
 	for k := range peopleKinds {

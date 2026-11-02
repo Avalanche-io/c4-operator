@@ -213,6 +213,13 @@ func TestAgentGrantLapsesUnused(t *testing.T) {
 	if code, body, _ := a.certify(assistant, a.agent, a.agent); code != http.StatusForbidden {
 		t.Fatalf("on day 91, unused: %d %s", code, body)
 	}
+	// The refusal books nothing; the leader's sweep books the lapse.
+	if n := len(a.pending(people.KindGrantEnd)); n != 0 {
+		t.Errorf("a refusal booked %d lapses", n)
+	}
+	if es, err := a.iss.BookLapses(context.Background()); err != nil || len(es) != 1 {
+		t.Fatalf("the sweep booked %d lapses: %v", len(es), err)
+	}
 	if res := a.seal(); len(refusals(res)) > 0 {
 		t.Fatalf("the queue refused the lapse: %v", refusals(res))
 	}
@@ -275,6 +282,9 @@ func TestAgentUseKeepsItsGrant(t *testing.T) {
 	}
 	if _, err := a.iss.AgentGrantFor(context.Background(), v); !errors.Is(err, people.ErrNoGrant) {
 		t.Errorf("the HUD's check of the lapsed grant: %v", err)
+	}
+	if _, err := a.iss.BookLapses(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 	if res := a.seal(); len(refusals(res)) > 0 {
 		t.Fatalf("the queue refused the lapse: %v", refusals(res))
@@ -431,7 +441,7 @@ func (a *agents) signedAs(identity, predicateType string, subject provenance.Sub
 // A grant past 90 days of the agent's disuse is refused live, at the
 // issuer's clock, on a quiet book where nothing has been sealed since and
 // its lapse isn't booked yet: judged at the last seal it would still be
-// in force. The lapse is booked after.
+// in force. The refusal books nothing; the sweep books the lapse.
 func TestAgentGrantRefusedLiveBeforeItsLapseIsBooked(t *testing.T) {
 	a := agentFarm(t)
 	grant := a.granted()
@@ -455,7 +465,10 @@ func TestAgentGrantRefusedLiveBeforeItsLapseIsBooked(t *testing.T) {
 	if _, err := a.iss.AgentGrantFor(context.Background(), v); !errors.Is(err, people.ErrNoGrant) {
 		t.Fatalf("91 days unused, before its lapse is booked: %v", err)
 	}
-	if n := len(a.pending(people.KindGrantEnd)); n != 1 {
-		t.Errorf("the refusal booked %d lapses, want one", n)
+	if n := len(a.pending(people.KindGrantEnd)); n != 0 {
+		t.Errorf("the refusal booked %d lapses, want none", n)
+	}
+	if es, err := a.iss.BookLapses(context.Background()); err != nil || len(es) != 1 {
+		t.Errorf("the sweep booked %d lapses: %v", len(es), err)
 	}
 }

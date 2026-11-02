@@ -330,6 +330,10 @@ type Index struct {
 	Book *farmbook.Reader
 	// Now is the clock pending entries are judged at; nil is time.Now.
 	Now func() time.Time
+	// Admin reports whether a person is one of the farm's admins, for the
+	// rules the book holds an entry to as the issuer does (an admin may
+	// revoke anyone's agent grant). nil: no one is.
+	Admin func(ctx context.Context, person string) bool
 
 	mu sync.Mutex
 	// entries are the entries read, sealed in the book's order with a book,
@@ -559,6 +563,9 @@ func (x *Index) loadKind(ctx context.Context, e *Entry, pending bool) error {
 		if (e.TouchFor != "" || inBook(e)) && e.TouchFor != d.Predicate.TouchFor {
 			return fmt.Errorf("the entry names touchFor %.16s, its record %.16s", e.TouchFor, d.Predicate.TouchFor)
 		}
+		if x.agentKey(e.Device, e.Position-1) {
+			return farmbook.Refuse(farmbook.ReasonRejected, fmt.Errorf("key %.16s was granted to an agent: an agent's key is never a person's device", e.Device))
+		}
 		if x.devices == nil {
 			x.devices, x.raw = map[string]*schema.Device{}, map[string][]byte{}
 		}
@@ -576,7 +583,7 @@ func (x *Index) loadKind(ctx context.Context, e *Entry, pending bool) error {
 			return fmt.Errorf("the entry names key %q of %q, its JWK %q", e.KeyID, e.Issuer, k.KeyID)
 		}
 	case KindAgentGrant, KindAgentUse, KindGrantEnd:
-		return x.loadAgent(e, b, pending)
+		return x.loadAgent(ctx, e, b, pending)
 	default:
 		return x.loadAct(e, b, pending)
 	}

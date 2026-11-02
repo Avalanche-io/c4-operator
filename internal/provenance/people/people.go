@@ -110,6 +110,9 @@ type Issuer struct {
 	// Now is the issuer's clock; nil is time.Now.
 	Now func() time.Time
 
+	// agentRefusals counts refused agent certificate requests (agents.go).
+	agentRefusals refusals
+
 	mu        sync.Mutex
 	signer    *provenance.Signer
 	providers map[Provider]*provider

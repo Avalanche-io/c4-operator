@@ -525,6 +525,9 @@ func (x *Index) signInsAt(pos int64) string {
 // unseen refuses a key the index has seen before: one in force renews,
 // and a removed or lapsed one never comes back.
 func (x *Index) unseen(device string) error {
+	if x.agentKey(device, x.pos) {
+		return refuse(http.StatusForbidden, "key %.16s was granted to an agent: an agent's key is never a person's device; make a new key", device)
+	}
 	d := x.at(x.pos)[device]
 	switch {
 	case d == nil:

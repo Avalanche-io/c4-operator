@@ -82,7 +82,7 @@ func newFarmBook(ctx context.Context, s *signing, kube kubernetes.Interface, mgr
 		Log: ctrl.Log.WithName("farm-book"),
 		Checkers: func() []farmbook.Checker {
 			return []farmbook.Checker{&farmbook.ControlChecker{Farm: farm, Roots: s.pool, Store: b.store},
-				people.NewBookChecker(farm, s.pool, b.store)}
+				people.NewBookChecker(farm, s.pool, b.store).WithAdmin(farmAdmin(mgr.GetAPIReader()))}
 		}}
 	return b, nil
 }

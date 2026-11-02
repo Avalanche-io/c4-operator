@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/internal/farmbook"
@@ -61,6 +62,10 @@ const (
 	EndRemoved = "removed"
 	// EndLapsed: the agent made no act under it for farmbook.AgentLapse.
 	EndLapsed = "lapsed"
+	// EndReplaced: the person granted the same key to the same agent again
+	// (a fresh c4 farm integrate). One grant per person, key and agent is
+	// in force, so revoking the one in use never falls back to an older one.
+	EndReplaced = "replaced"
 )
 
 // ErrNoGrant means an agent's key has no grant in force: never granted,
@@ -133,7 +138,7 @@ func (x *Index) lastUse(grant string, pos int64) time.Time {
 // grant booked and not ended, signed by the key and grant its leaf names;
 // or the person's revoke of a live grant. Each was booked within ActSkew
 // of being signed, and each act is booked once.
-func (x *Index) loadAgent(e *Entry, b []byte, pending bool) error {
+func (x *Index) loadAgent(ctx context.Context, e *Entry, b []byte, pending bool) error {
 	if e.Kind == KindGrantEnd && e.End == EndLapsed {
 		return x.loadLapse(e, b)
 	}
@@ -188,12 +193,20 @@ func (x *Index) loadAgent(e *Entry, b []byte, pending bool) error {
 		if err == nil && x.at(before)[device] != nil {
 			err = farmbook.Refuse(farmbook.ReasonRejected, fmt.Errorf("key %.16s is a person's device: an agent's key is its own", device))
 		}
+		if err == nil {
+			err = x.keyFree(device, by, agent, before, at)
+		}
 		if err != nil {
 			return err
 		}
 	case KindAgentUse:
 		g := x.liveGrant(e.Grant, before)
+		gs, _ := x.grants(before)
 		switch {
+		case g != nil && !farmbook.GrantInForce(gs[e.Grant], e.time()):
+			// The live rule's: a grant past its lapse takes no act, so no use
+			// revives it, booked or not.
+			return farmbook.Refuse(farmbook.ReasonNotInForce, fmt.Errorf("an agent's act under grant %.16s, past its %s without one", e.Grant, farmbook.AgentLapse))
 		case g == nil:
 			return farmbook.Refuse(farmbook.ReasonNotInForce, fmt.Errorf("an agent's act under grant %.16s, which is not booked or has ended", e.Grant))
 		case v.Grant != e.Grant || agentOf(v.Identity) != g.Agent || v.Device != g.Device:
@@ -206,6 +219,12 @@ func (x *Index) loadAgent(e *Entry, b []byte, pending bool) error {
 		if err := x.checkAct(v, before, at); err != nil {
 			return err
 		}
+		if e.End == EndReplaced {
+			if h := provenance.PayloadHash(v.Payload); x.acts[h] || x.pendActs[h] {
+				return farmbook.Refuse(farmbook.ReasonBooked, fmt.Errorf("a replacement books grant act %.16s, booked already", h))
+			}
+			return x.loadReplaced(e, a, by, before)
+		}
 		id := grantSubject(a.Subject[0])
 		g := x.liveGrant(id, before)
 		if g == nil {
@@ -214,6 +233,11 @@ func (x *Index) loadAgent(e *Entry, b []byte, pending bool) error {
 		if err := says(p.Act == ActRevoke && by != "" && e.By == by && e.Grant == id && e.End == EndRemoved &&
 			e.Agent == g.Agent && e.Device == g.Device && e.Person == g.Person, "the grant it ends"); err != nil {
 			return err
+		}
+		if by != g.Person && !x.admin(ctx, by) {
+			// The issuer's rule, at the seal too: the grant's person removes
+			// it, or an admin, who revokes and never grants.
+			return farmbook.Refuse(farmbook.ReasonWrongSigner, fmt.Errorf("%s revokes %s's grant %.16s, and is neither its person nor an admin", by, g.Person, id))
 		}
 	}
 	hash := provenance.PayloadHash(v.Payload)
@@ -263,6 +287,85 @@ func (x *Index) loadLapse(e *Entry, b []byte) error {
 	return nil
 }
 
+// loadReplaced checks a grant's end by the person's fresh grant of the
+// same key to the same agent: the entry books that grant act, which the
+// verifier and checkAct have checked, and ends a grant live before it of
+// the same person, key and agent. The act is booked as the new grant's,
+// right after: this end doesn't book it.
+func (x *Index) loadReplaced(e *Entry, a *schema.Act, by string, before int64) error {
+	agent, device, err := grantParams(a.Predicate.Params)
+	if err != nil {
+		return err
+	}
+	g := x.liveGrant(e.Grant, before)
+	switch {
+	case a.Predicate.Act != ActGrant || by == "" || e.By != by || e.Person != by || e.Agent != agent || e.Device != device:
+		return farmbook.Refuse(farmbook.ReasonDisagrees, errors.New("a grant's replacement books the person's new grant of the same key to the same agent"))
+	case g == nil:
+		return farmbook.Refuse(farmbook.ReasonNotInForce, fmt.Errorf("a replacement of grant %.16s, which is not booked or has ended", e.Grant))
+	case g.Person != by || g.Agent != agent || g.Device != device || g.Grant == e.Record:
+		return farmbook.Refuse(farmbook.ReasonDisagrees, fmt.Errorf("grant %.16s is %s's of key %.16s to %s: another person's, key or agent", e.Grant, g.Person, g.Device, g.Agent))
+	}
+	return nil
+}
+
+// keyFree refuses a grant of key to agent by person while the book holds,
+// before position pos, a grant of the key that isn't ended and is either
+// the same person's to the same agent (one grant per person, key and
+// agent: the older is ended first, EndReplaced) or another person's in
+// force at time at (no one takes over another person's agent key).
+func (x *Index) keyFree(key, person, agent string, pos int64, at time.Time) error {
+	gs, es := x.grants(pos)
+	for id, st := range gs {
+		g := es[st.Ref]
+		switch {
+		case st.Ended || g.Device != key:
+		case g.Person == person && g.Agent == agent:
+			return farmbook.Refuse(farmbook.ReasonDisagrees, fmt.Errorf("grant %.16s of key %.16s to %s is live: a new grant ends it first", id, key, agent))
+		case g.Person != person && farmbook.GrantInForce(st, at):
+			return farmbook.Refuse(farmbook.ReasonRejected, fmt.Errorf("key %.16s is %s's agent's, under grant %.16s in force: no one grants another person's agent key", key, g.Person, id))
+		}
+	}
+	return nil
+}
+
+// agentKey reports whether key was ever granted to an agent, by a grant
+// booked up to pos, ended or not: an agent's key is never a person's
+// device, as a person's device is never an agent's key.
+func (x *Index) agentKey(key string, pos int64) bool {
+	for _, e := range x.upTo(pos) {
+		if e.Kind == KindAgentGrant && e.Device == key {
+			return true
+		}
+	}
+	return false
+}
+
+// admin reports whether person is an admin, by the index's Admin; with
+// none, no one is.
+func (x *Index) admin(ctx context.Context, person string) bool {
+	return x.Admin != nil && person != "" && x.Admin(ctx, person)
+}
+
+// agentReplaced makes, for a person's new grant, the ends of their live
+// grants of the same key to the same agent, each booking the new grant
+// act, ahead of the grant itself.
+func (i *Issuer) agentReplaced(data []byte) func(*Entry) []pending {
+	x := i.Index
+	return func(n *Entry) []pending {
+		var ps []pending
+		gs, es := x.grants(x.pos)
+		for id, st := range gs {
+			g := es[st.Ref]
+			if st.Ended || g.Person != n.Person || g.Device != n.Device || g.Agent != n.Agent {
+				continue
+			}
+			ps = append(ps, pending{entry: &Entry{Kind: KindGrantEnd, End: EndReplaced, Grant: id, Agent: g.Agent, Device: g.Device, Person: g.Person, By: n.By}, record: data})
+		}
+		return ps
+	}
+}
+
 // grantParams reads a grant's params: the agent and its key's device ID,
 // and nothing else.
 func grantParams(raw json.RawMessage) (agent, device string, err error) {
@@ -283,7 +386,7 @@ func grantParams(raw json.RawMessage) (agent, device string, err error) {
 
 // agentGrant books a person's grant of an agent's key: confirmed (the
 // verifier has checked the touch), on the key, naming it and the agent.
-func (i *Issuer) agentGrant(data []byte, by, device string, params map[string]string) (func() (*Entry, error), error) {
+func (i *Issuer) agentGrant(data []byte, by, device string, params map[string]string, now time.Time) (func() (*Entry, error), error) {
 	raw, _ := json.Marshal(params)
 	agent, key, err := grantParams(raw)
 	if err != nil {
@@ -299,6 +402,15 @@ func (i *Issuer) agentGrant(data []byte, by, device string, params map[string]st
 	return func() (*Entry, error) {
 		if x.at(x.pos)[device] != nil {
 			return nil, refuse(http.StatusForbidden, "key %.16s is a person's device: an agent's key is its own", device)
+		}
+		// Another person's agent key, under their grant in force, is theirs.
+		// The same person's older grants of it to this agent are ended
+		// ahead of this one (agentReplaced).
+		gs, es := x.grants(x.pos)
+		for id, st := range gs {
+			if g := es[st.Ref]; !st.Ended && g.Device == device && g.Person != by && farmbook.GrantInForce(st, now) {
+				return nil, refuse(http.StatusForbidden, "key %.16s is %s's agent's, under grant %.16s in force: no one grants another person's agent key", device, g.Person, id)
+			}
 		}
 		return &Entry{Kind: KindAgentGrant, Agent: agent, Device: device, Person: by, Grant: c4id(data)}, nil
 	}, nil
@@ -416,7 +528,6 @@ func (i *Issuer) AgentGrantFor(ctx context.Context, v *provenance.Verified) (*Ag
 		return nil, err
 	}
 	if g == nil {
-		i.BookLapses(ctx)
 		return nil, fmt.Errorf("%w: grant %.16s has ended or lapsed: a person renews it with a touched c4 farm integrate", ErrNoGrant, v.Grant)
 	}
 	if g.Agent != agent || g.Device != v.Device {
@@ -547,17 +658,73 @@ type AgentCertified struct {
 }
 
 func (i *Issuer) handleAgent(w http.ResponseWriter, r *http.Request) {
+	addr := i.addr(r)
+	if !i.agentRefusals.allow(addr, i.now()) {
+		w.Header().Set("Retry-After", "60")
+		fail(w, refuse(http.StatusTooManyRequests, "%d refused agent certificates from %s in a minute: wait, then ask once the person has granted the key", AgentRefusalsPerMinute, addr))
+		return
+	}
 	var e AgentEnrolment
 	if err := decode(r, &e); err != nil {
+		i.agentRefusals.add(addr, i.now())
 		fail(w, err)
 		return
 	}
 	c, err := i.CertifyAgent(r.Context(), e)
 	if err != nil {
+		i.agentRefusals.add(addr, i.now())
 		fail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, c)
+}
+
+// AgentRefusalsPerMinute bounds the refused agent certificate requests
+// the issuer answers from one address in a minute; past it, 429 without
+// reading the book. An agent with no grant asks again at most once a
+// minute (the MCP server's retryEvery), so only a misbehaving client
+// reaches it.
+const AgentRefusalsPerMinute = 10
+
+// refusals counts refused requests by address, per minute.
+type refusals struct {
+	mu sync.Mutex
+	m  map[string]*refusalWindow
+}
+
+type refusalWindow struct {
+	start time.Time
+	n     int
+}
+
+// allow reports whether addr may be answered now.
+func (f *refusals) allow(addr string, now time.Time) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	w := f.m[addr]
+	return w == nil || now.Sub(w.start) >= time.Minute || w.n < AgentRefusalsPerMinute
+}
+
+// add counts a refusal for addr.
+func (f *refusals) add(addr string, now time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.m == nil {
+		f.m = map[string]*refusalWindow{}
+	}
+	if len(f.m) > 4096 {
+		for a, w := range f.m {
+			if now.Sub(w.start) >= time.Minute {
+				delete(f.m, a)
+			}
+		}
+	}
+	w := f.m[addr]
+	if w == nil || now.Sub(w.start) >= time.Minute {
+		w = &refusalWindow{start: now}
+		f.m[addr] = w
+	}
+	w.n++
 }
 
 // CertifyAgent certifies an agent's key on its proof of possession and
@@ -613,7 +780,6 @@ func (i *Issuer) CertifyAgent(ctx context.Context, e AgentEnrolment) (*AgentCert
 		}
 	}
 	if g == nil {
-		i.BookLapses(ctx)
 		return nil, refuse(http.StatusForbidden, "%v: agent %s's key %.16s is granted by no one now: a person grants it with a touched c4 farm integrate", ErrNoGrant, q.Agent, device)
 	}
 	ttl := min(LeafTTL, g.Lapses.Sub(now))

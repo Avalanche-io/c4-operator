@@ -108,10 +108,10 @@ func newPeopleIssuer(ctx context.Context, s *signing, kube kubernetes.Interface,
 		SignIns: &secretSignIns{kube: kube, ns: signingNS}, Owner: owner, InstallerToken: o.installer, SoftwareTouchKeys: o.softwareTouchKeys,
 		// The farm owner's admins: before ORGANIZATION's Parties and their
 		// purposes, the farm binding's owner.
-		Admin: func(ctx context.Context, person string) bool {
-			b := farmBinding(ctx, reader)
-			return b != nil && b.Spec.Owner == person
-		}}
+		Admin: farmAdmin(reader)}
+	// The index holds a booked entry to the issuer's own rules, an admin's
+	// revoke included.
+	index.Admin = iss.Admin
 	return iss, nil
 }
 
@@ -128,6 +128,16 @@ func passkeyRP(origin string) (*people.WebAuthnRP, error) {
 		return nil, fmt.Errorf("--hud-origin %q is not an origin: write https://<the HUD's host>, or http://localhost:<port>", origin)
 	}
 	return &people.WebAuthnRP{ID: strings.ToLower(u.Hostname()), Origin: u.Scheme + "://" + strings.ToLower(u.Host)}, nil
+}
+
+// farmAdmin reports whether a person is one of the farm owner's admins:
+// before ORGANIZATION's Parties and their purposes, the farm binding's
+// owner.
+func farmAdmin(reader client.Reader) func(ctx context.Context, person string) bool {
+	return func(ctx context.Context, person string) bool {
+		b := farmBinding(ctx, reader)
+		return b != nil && b.Spec.Owner == person
+	}
 }
 
 func farmOf(s *signing) string { return provenance.FarmID(s.ca.Cert) }

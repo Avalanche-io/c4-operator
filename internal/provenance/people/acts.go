@@ -119,6 +119,9 @@ func (i *Issuer) takeAct(r *http.Request, data []byte) (*Booked, error) {
 		device = id
 	}
 	var build func() (*Entry, error)
+	// before makes the entries booked ahead of the act's own: a grant's
+	// end of the older grants it replaces.
+	var before func(*Entry) []pending
 	switch verb {
 	case ActRemoveDevice:
 		build, err = i.removal(r, by, device, farmSubject, params)
@@ -127,7 +130,8 @@ func (i *Issuer) takeAct(r *http.Request, data []byte) (*Booked, error) {
 	case ActBrowserCode, ActCountersign:
 		build, err = i.ownerAct(r, v, verb, by, device, farmSubject, params, now)
 	case ActGrant:
-		build, err = i.agentGrant(data, by, device, params)
+		build, err = i.agentGrant(data, by, device, params, now)
+		before = i.agentReplaced(data)
 	case ActRevoke:
 		build, err = i.agentRevoke(r, by, grantSubject(subject), params)
 	default:
@@ -172,12 +176,16 @@ func (i *Issuer) takeAct(r *http.Request, data []byte) (*Booked, error) {
 			taken = true
 		}
 		e.By = by
-		return []pending{{entry: e, record: data}}, nil
+		var ps []pending
+		if before != nil {
+			ps = before(e)
+		}
+		return append(ps, pending{entry: e, record: data}), nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	e := es[0]
+	e := es[len(es)-1] // the act's own entry, after any it ends
 	return &Booked{Record: e.Record, Position: e.Position, Provisional: e.Order == OrderPending, Grade: grade, Entry: e}, nil
 }
 
