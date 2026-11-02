@@ -309,8 +309,8 @@ type Config struct {
 	// TouchKeyReopened is when the owner last reopened that window (c4
 	// farm touch-key --reopen), as booked; absent if never.
 	TouchKeyReopened string `json:"touchKeyReopened,omitempty"`
-	LeafTTL       string `json:"leafTTL"`
-	Lapse         string `json:"lapse"`
+	LeafTTL          string `json:"leafTTL"`
+	Lapse            string `json:"lapse"`
 	// SoftwareTouchKeys says this farm takes a touch key that states a
 	// software protection (--software-touch-keys); otherwise a touch key
 	// states hardware or is a passkey.
