@@ -2536,7 +2536,9 @@ booked, yours?, actOn }`.
   provider's subject ID, which the people's issuer certifies their devices
   on; without, a name the HUD signs them in as (a token username, an SSO
   header's value, a development name). One subject is one person's across
-  every Party. They go only to the person and to farm admins.
+  every Party and the `c4-sign-ins` Secret: a provider subject the Secret
+  gives someone with no person Party of their own is `409`. They go only
+  to the person and to farm admins.
 - `members` and `groups` are the organisation's memberships in force, each
   `{ person | group, purposes, inEffect, by, record, since, pending? }`:
   who granted it, its record, and when its book entry counts from. An
@@ -2565,6 +2567,10 @@ hold `member` and nothing more, so a rule for either is `400`.
 **Who may:**
 - Make a party: a farm admin (one who may create `parties`, or a
   development viewer in the farm-admin role on the installer's secret).
+  The farm binding's owner may also make their own person Party while it
+  doesn't exist, signed in as themselves and naming only that sign-in, so
+  the owner's Party, which the people's issuer's admins come from, can
+  always be made.
 - Change a party: an organisation's `admin`; for a person's party, the
   person, or for its sign-ins a farm admin.
 - Change members: the organisation's `admin`. A member may end their own
@@ -2798,11 +2804,12 @@ the index already books is `409` at any replica, after any restart.
   enrolled before it.
 - **From a removal's position on,** the device's certificates are no longer
   in force. A removed key never comes back.
-- **An admin** is, on a farm with Parties, a person holding `admin` by
-  name in the farm owner's Party, in force in the farm book (for a
-  person's Party, that person); with Parties and no Party of the farm
-  owner's name, no one. On a farm with no Parties yet, the farm binding's
-  owner. The same admins read others' ID tokens and addresses.
+- **An admin** is, once the farm owner's Party (the binding owner's name)
+  exists and its `make-party` is in the farm book, a person holding
+  `admin` by name in it, in force in the book (for a person's Party, that
+  person). Until then, whatever other Parties exist, the farm binding's
+  owner, as before Parties. Parties or a book that can't be read make no
+  one an admin. The same admins read others' ID tokens and addresses.
 - **`set-sign-in-provider` is refused** (`403`) until a touch can confirm
   it (K9). Until then the provider changes only by redeploying the farm
   with `--sign-in-provider` and `--sign-in-client-id`.
@@ -2928,14 +2935,17 @@ its C4 ID:
     `azp`);
   - the sign-ins in force there (`sub`).
 
-**Sign-ins** are matched by subject, never by email. They are the person
-Parties' `signIns` that name a provider (`{ issuer, subject }`, see
-Parties). A farm with no Parties yet reads the Secret `c4-sign-ins` in the
-signing namespace instead: one key per person, each line `<issuer URL>
-<subject ID>`, which ships empty with the install and a cluster
-administrator fills in. With Parties the Secret is never read. One subject
-is one person's: a subject in two people's sign-ins signs in no one
-(`409`).
+**Sign-ins** are matched by subject, never by email, and go over to
+Parties person by person. A person who has a person Party signs in by its
+`signIns` that name a provider (`{ issuer, subject }`, see Parties), and
+the Secret's lines for them are ignored. A person who has none yet keeps
+their lines in the Secret `c4-sign-ins` in the signing namespace: one key
+per person, each line `<issuer URL> <subject ID>`, which ships empty with
+the install and a cluster administrator fills in. The Secret so drops out
+as people get Parties. One subject is one person's across both: a
+subject in a Party and in another person's Secret lines, or in two
+people's, signs in no one (`409`). Parties that can't be read sign no one
+in.
 
 **The sign-in provider** is the install's: `--sign-in-provider` and
 `--sign-in-client-id`, booked with grade `install`, and booked again when
