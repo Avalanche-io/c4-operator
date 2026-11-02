@@ -126,8 +126,19 @@ func (s Store) load(kind Kind) (Key, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A touch key is the Secure Enclave's, never a file, and where the
+	// Secure Enclave keeps keys no key is a file: a file there is planted,
+	// or left from a build without it. Only C4_KEYS=file (FileOnly) reads
+	// one.
+	if !s.FileOnly && (kind == Touch || seAvailable()) {
+		return nil, fmt.Errorf("%w: %s (remove it, or set C4_KEYS=file to keep keys in files)", ErrFileKey, s.path(kind, fileExt))
+	}
 	return loadFile(b)
 }
+
+// ErrFileKey means a key file was found where only the Secure Enclave
+// keeps that kind of key.
+var ErrFileKey = errors.New("a key file where the Secure Enclave keeps this key")
 
 // writePrivate writes a key's file, readable only by the person, without
 // replacing one that is there.

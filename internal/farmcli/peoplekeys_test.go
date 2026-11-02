@@ -328,3 +328,25 @@ func TestShortDeviceIsTheHUDsForm(t *testing.T) {
 		t.Errorf("short form %q", got)
 	}
 }
+
+// Review probe P5: a touch.key file planted in the keys directory is not
+// enrolled as the touch key.
+func TestPlantedTouchKeyNotEnrolled(t *testing.T) {
+	o := newOwnerIssuer(t)
+	ctx := context.Background()
+	st := keystore.Store{Dir: filepath.Join(t.TempDir(), "keys")}
+	if _, err := UpKeys(ctx, o.client, st, "noor", "", false); err != nil {
+		t.Fatal(err)
+	}
+	src := keystore.Store{Dir: filepath.Join(t.TempDir(), "src"), FileOnly: true}
+	if _, err := src.Key(keystore.Device); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(filepath.Join(src.Dir, "device.key"))
+	if err := os.WriteFile(filepath.Join(st.Dir, "touch.key"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if cert, err := EnrolTouchKey(ctx, o.client, st); err == nil || !errors.Is(err, keystore.ErrFileKey) {
+		t.Errorf("a planted touch key was enrolled: %v %+v", err, cert)
+	}
+}

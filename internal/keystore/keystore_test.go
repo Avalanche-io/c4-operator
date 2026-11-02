@@ -117,3 +117,31 @@ func TestAWorkloadHasAKeyOfItsOwn(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+// A planted touch.key file is never the touch key, and is not replaced:
+// a touch key is the Secure Enclave's. Only a file store (C4_KEYS=file)
+// reads one.
+func TestPlantedTouchKeyFileRefused(t *testing.T) {
+	src := Store{Dir: filepath.Join(t.TempDir(), "src"), FileOnly: true}
+	if _, err := src.Key(Device); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(src.Dir, "device.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := Store{Dir: filepath.Join(t.TempDir(), "keys")}
+	os.MkdirAll(s.Dir, 0o700)
+	if err := os.WriteFile(filepath.Join(s.Dir, "touch.key"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Key(Touch); !errors.Is(err, ErrFileKey) || s.Has(Touch) {
+		t.Errorf("a planted touch key: %v (has %v)", err, s.Has(Touch))
+	}
+	if got, _ := os.ReadFile(filepath.Join(s.Dir, "touch.key")); string(got) != string(b) {
+		t.Error("the planted file was replaced")
+	}
+	if _, err := (Store{Dir: s.Dir, FileOnly: true}).Key(Touch); err != nil {
+		t.Errorf("C4_KEYS=file reads its touch key file: %v", err)
+	}
+}
