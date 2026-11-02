@@ -452,22 +452,22 @@ func (i *Issuer) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	from, _ := strconv.ParseInt(r.URL.Query().Get("from"), 10, 64)
-	es, ids, err := i.Index.Entries(r.Context(), from)
+	x := i.Index
+	p, err := x.page(r.Context(), from)
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	x := i.Index
-	page := IndexPage{Farm: i.Farm(), Order: x.Order(), Position: from + int64(len(es)), Entries: []IndexEntry{}}
+	es, ids := p.entries, p.ids
+	// The position the entries reach, from clamped to the index: a page
+	// from past the end, or before the start, answers the true end.
+	page := IndexPage{Farm: i.Farm(), Order: x.Order(), Position: p.end, Entries: []IndexEntry{}}
 	if x.Book != nil {
 		// The book's head segment, signed by the queue: a client keeps it
 		// (farmbook.LastHead) and refuses one that goes back.
-		x.mu.Lock()
-		page.Position = x.sealed
-		if x.head != nil {
-			page.Head, page.Signed = x.head.ID, x.head.Signed
+		if p.head != nil {
+			page.Head, page.Signed = p.head.ID, p.head.Signed
 		}
-		x.mu.Unlock()
 	} else {
 		h, err := x.Head.Read(r.Context())
 		if err != nil {

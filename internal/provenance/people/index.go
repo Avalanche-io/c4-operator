@@ -990,19 +990,38 @@ var ErrTouchKey = errors.New("not the signer's touch key")
 // Entries returns the entries after position from, with their IDs: with a
 // farm book, the sealed ones, at their book positions.
 func (x *Index) Entries(ctx context.Context, from int64) ([]*Entry, []string, error) {
+	p, err := x.page(ctx, from)
+	return p.entries, p.ids, err
+}
+
+// indexPage is the entries after a position, read at once with the
+// position they reach and, with a farm book, its head segment.
+type indexPage struct {
+	entries []*Entry
+	ids     []string
+	// end is the position the entries reach: the last entry's, sealed
+	// only with a farm book.
+	end  int64
+	head *farmbook.Segment
+}
+
+// page is Entries with its end and head, all read under one lock, so a
+// page never names a position other than the one its entries reach: a
+// page from past the end holds none and answers the end, as one from
+// before the start holds all and does (from clamped to [0, end]).
+func (x *Index) page(ctx context.Context, from int64) (indexPage, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	if err := x.sync(ctx); err != nil {
-		return nil, nil, err
+		return indexPage{}, err
 	}
-	var es []*Entry
-	var ids []string
+	p := indexPage{end: x.sealed, head: x.head}
 	for k, e := range x.entries {
 		if e.Position > from {
-			es, ids = append(es, e), append(ids, x.ids[k])
+			p.entries, p.ids = append(p.entries, e), append(p.ids, x.ids[k])
 		}
 	}
-	return es, ids, nil
+	return p, nil
 }
 
 // entryByID is the entry with this C4 ID, sealed or pending.
