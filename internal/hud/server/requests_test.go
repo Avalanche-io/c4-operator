@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -85,5 +86,49 @@ func TestHostRunnerSignsItsRequests(t *testing.T) {
 		if w.Code != c.code {
 			t.Errorf("%s: %d %s", name, w.Code, w.Body.String())
 		}
+	}
+}
+
+// The HUD's issuer route takes a burst from one address, then one every
+// few seconds, and a few a second from everyone; past that, 429 with when
+// to come back.
+func TestHostIssuerRouteIsLimited(t *testing.T) {
+	var q issuerLimits
+	now := time.Now()
+	for i := range issuerBurst {
+		if ok, _ := q.allow("10.0.0.1", now); !ok {
+			t.Fatalf("request %d of a burst refused", i+1)
+		}
+	}
+	if ok, wait := q.allow("10.0.0.1", now); ok || wait <= 0 || wait > issuerPerClient {
+		t.Fatalf("past the burst: %v, wait %v", ok, wait)
+	}
+	if ok, _ := q.allow("10.0.0.1", now.Add(issuerPerClient)); !ok {
+		t.Fatal("refused after waiting")
+	}
+	// everyone together: the rest of the shared bucket, then refused
+	n := 0
+	for i := range 100 {
+		if ok, _ := q.allow(fmt.Sprintf("10.0.1.%d", i), now.Add(issuerPerClient)); ok {
+			n++
+		}
+	}
+	if n >= 100 || n > issuerAllBurst {
+		t.Fatalf("%d addresses at once were all taken", n)
+	}
+
+	s := hostFarm(t)
+	calls := 0
+	s.HostIssuer = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++ })
+	h := s.Handler()
+	code := 0
+	var retry string
+	for range issuerBurst + 1 {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/workload/v1/certificate", strings.NewReader("{}")))
+		code, retry = w.Code, w.Header().Get("Retry-After")
+	}
+	if code != http.StatusTooManyRequests || retry == "" || calls != issuerBurst {
+		t.Fatalf("past the burst: %d, Retry-After %q, %d reached the issuer", code, retry, calls)
 	}
 }
