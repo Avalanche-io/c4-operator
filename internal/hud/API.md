@@ -2398,12 +2398,25 @@ the installer token once and then the owner's own key.
 **Where it is.** It runs in the manager beside the workload issuer, and is
 served only at the HUD's own origin, as `/issuer/v1/people/`, outside
 `/api/v1`. The workload issuer's listener (`--signer-addr`, the `c4-signer`
-Service) stays the workloads'. The web app's key lives in the HUD's
-storage, so it enrols without leaving the origin. The HUD certifies
-nothing: it tells the issuer only whom a read is for, and where a request
-came from. The issuer runs only where the install names its store
+Service) stays the workloads'; the HUD serves it to host runners alone, at
+`POST /workload/v1/certificate`, since a machine outside the cluster reaches
+the farm only at the HUD's address, and it certifies there only a host
+runner's own account (`c4-hosts/<node>`, as `runner/<node>`). The web
+app's key lives in the HUD's storage, so it enrols without leaving the
+origin. The HUD certifies nothing: it tells the issuer only whom a read is
+for, and where a request came from. The issuer runs only where the install names its store
 (`--people-store`); otherwise no farm changes. Nothing refuses an act for
 want of it until slice K8.
+
+**Limits.** Both issuer routes answer anyone who reaches them, so each
+takes a burst from one client address, then a steady pace, and a pace from
+everyone together; past either, 429 with `Retry-After`, before the issuer
+sees the request. The address is the connection's, or behind the SSO proxy
+the first `X-Forwarded-For`. The people's route is generous per address,
+because a studio's people sign in from behind one NAT: a burst of 1000, then
+10 a second, and 50 a second from everyone (a burst of 2000). The host
+runners' route, which a runner asks about every half hour, takes a burst of
+10, then one every 6 seconds, and 5 a second from everyone (a burst of 20).
 
 **What a device sends** (`Enrolment`):
 
