@@ -140,6 +140,12 @@ type Queue struct {
 	// HUDService is the HUD's Service, [<namespace>/]<service>:<port>:
 	// units whose tool grants c4 reach it (tools.go).
 	HUDService string
+	// SignerService is the farm's workload issuer's Service,
+	// [<namespace>/]<service>:<port>: a unit whose tool grants c4 gets a
+	// token for it and reaches it, to have its own key certified as
+	// itself (PEOPLE-KEYS 5.1). Empty, or a farm without that Service: no
+	// token and no route, as before.
+	SignerService string
 	// cal holds live calibrations, shareHist the projects that share
 	// theirs (calibrate.go), calp their persistence (persist.go).
 	cal       calibrations
@@ -1792,7 +1798,7 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 		if tools != nil {
 			jobTool := v.job.Spec.Tool != nil
 			proxy, _ := q.proxyURL(ctx)
-			applyTools(pod, v.job.Name, tools, jobTool, proxy, q.hudURL())
+			applyTools(pod, v.job.Name, tools, jobTool, proxy, q.hudURL(), q.signerURL(ctx))
 		}
 		q.leaseOutside(ctx, pod, p.spec.Name)
 		if err := q.Client.Create(ctx, pod); err != nil {

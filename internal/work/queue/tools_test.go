@@ -229,6 +229,84 @@ func TestToolGrantsC4(t *testing.T) {
 	}
 }
 
+// Where the farm has its workload issuer, a unit whose tool grants c4 also
+// gets a token for its pod alone with the issuer's audience, the issuer's
+// address, and a route to it, so it can have its own key certified as
+// itself (PEOPLE-KEYS 5.1). A farm that names an issuer it does not have
+// gives its units neither, as before.
+func TestToolGrantsC4AndItsOwnKey(t *testing.T) {
+	ns, q, now, st := graphFarm(t)
+	ctx := context.Background()
+	farmNS := ns + "-farm"
+	if err := k8s.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: farmNS}}); err != nil {
+		t.Fatal(err)
+	}
+	q.Namespace, q.HUDService, q.SignerService = farmNS, "c4-hud:80", "c4-signer:80"
+	for _, o := range []client.Object{
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: farmNS, Name: "c4-hud"},
+			Spec: corev1.ServiceSpec{Selector: map[string]string{"app.kubernetes.io/component": "manager"},
+				Ports: []corev1.ServicePort{{Port: 80, TargetPort: intstr.FromInt32(8090)}}}},
+		&c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Namespace: farmNS, Name: "lead"}, Spec: c4v1.ToolSpec{C4: "job"}},
+	} {
+		if err := k8s.Create(ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tokens := func(p *corev1.Pod) map[string]bool {
+		out := map[string]bool{}
+		for _, v := range p.Spec.Volumes {
+			if v.Projected != nil && len(v.Projected.Sources) == 1 && v.Projected.Sources[0].ServiceAccountToken != nil {
+				out[v.Projected.Sources[0].ServiceAccountToken.Audience] = true
+			}
+		}
+		return out
+	}
+	run := func(name string) *corev1.Pod {
+		t.Helper()
+		if err := k8s.Create(ctx, job(ns, name, "graph", "cpu-"+ns, nil, now.Add(8*time.Hour))); err != nil {
+			t.Fatal(err)
+		}
+		tick(t, q)
+		doc := putDoc(t, st, `{"version": 1, "units": [{"name": "lead", "reasoning": {"does": "model", "tools": "lead"}}]}`)
+		finishUnit(t, now, ns, name, 0, map[string]string{c4v1.AnnotationOutputExpand: doc})
+		tick(t, q)
+		return podOfUnit(t, ns, name, 1)
+	}
+
+	// the issuer named but not there: the unit is as before
+	p := run("before")
+	if tok := tokens(p); tok[c4v1.SignerAudience] || !tok[c4v1.HUDAudience] || envOf(p.Spec.Containers[0], "C4_SIGNER") != "" {
+		t.Fatalf("no issuer, yet: tokens %v, env %v", tok, p.Spec.Containers[0].Env)
+	}
+
+	if err := k8s.Create(ctx, &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: farmNS, Name: "c4-signer"},
+		Spec: corev1.ServiceSpec{Selector: map[string]string{"app.kubernetes.io/component": "manager"},
+			Ports: []corev1.ServicePort{{Port: 80, TargetPort: intstr.FromInt32(8092)}}}}); err != nil {
+		t.Fatal(err)
+	}
+	p = run("own-key")
+	if tok := tokens(p); !tok[c4v1.SignerAudience] || !tok[c4v1.HUDAudience] ||
+		envOf(p.Spec.Containers[0], "C4_SIGNER") != "http://c4-signer."+farmNS+".svc:80" ||
+		envOf(p.Spec.Containers[0], "C4_SIGNER_TOKEN_FILE") != "/etc/c4/signer/token" {
+		t.Fatalf("the unit's own key: tokens %v, env %v", tok, p.Spec.Containers[0].Env)
+	}
+	var np networkingv1.NetworkPolicy
+	if err := k8s.Get(ctx, types.NamespacedName{Namespace: ns, Name: "c4-tools-lead"}, &np); err != nil {
+		t.Fatal(err)
+	}
+	ports := map[int]bool{}
+	for _, e := range np.Spec.Egress {
+		for _, pp := range e.Ports {
+			if pp.Port != nil {
+				ports[pp.Port.IntValue()] = true
+			}
+		}
+	}
+	if !ports[8090] || !ports[8092] {
+		t.Fatalf("the policy reaches the HUD and the issuer: %+v", np.Spec.Egress)
+	}
+}
+
 // A tool job's units run under its tool (spec.tool): labelled with it and
 // selected by the job's own NetworkPolicy, which allows nothing when the
 // tool declares no network, so the unit is sealed, and only the egress
