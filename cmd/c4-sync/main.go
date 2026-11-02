@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/tracker"
 	"github.com/Avalanche-io/c4-operator/internal/tracker/farm"
 	_ "github.com/Avalanche-io/c4-operator/internal/tracker/flow"
@@ -51,7 +52,12 @@ func main() {
 
 type options struct {
 	hud, hudPublic, tokenFile, listen, agent, devViewer, tz string
-	interval                                                time.Duration
+	// signer and signTokenFile are the farm's certificate issuer and
+	// c4-sync's token for it (audience c4-signer): with both, c4-sync
+	// signs each decision it relays for a Tracker that names it as its
+	// sync (spec.sync).
+	signer, signTokenFile string
+	interval              time.Duration
 }
 
 func parse(args []string, stderr io.Writer) (options, error) {
@@ -66,6 +72,8 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	fs.StringVar(&o.hudPublic, "hud-public-url", os.Getenv("C4_HUD_PUBLIC_URL"), "the HUD's address as people reach it, for links written to trackers (default --hud)")
 	fs.StringVar(&o.devViewer, "hud-dev-viewer", "", "development only: the HUD viewer (?as=) to act as, on a HUD started with --hud-dev-viewers")
 	fs.StringVar(&o.tz, "tz", os.Getenv("C4_TZ"), "the farm's time zone (IANA), for times written to a tracker whose project names none; default UTC (C4_TZ)")
+	fs.StringVar(&o.signer, "signer", os.Getenv("C4_SIGNER"), "the farm's certificate issuer (for example http://c4-signer.c4-system.svc): sign each relayed decision for a Tracker that names this sync (spec.sync) (C4_SIGNER)")
+	fs.StringVar(&o.signTokenFile, "sign-token-file", os.Getenv("C4_SIGN_TOKEN_FILE"), "a file holding c4-sync's token for the issuer (audience c4-signer), reread on every use (C4_SIGN_TOKEN_FILE)")
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
 		return o, err
@@ -84,6 +92,9 @@ func parse(args []string, stderr io.Writer) (options, error) {
 		if _, err := time.LoadLocation(o.tz); err != nil {
 			return o, fmt.Errorf("--tz %q: %v", o.tz, err)
 		}
+	}
+	if o.signer != "" && o.signTokenFile == "" {
+		return o, errors.New("--signer needs --sign-token-file: c4-sync's token for the issuer (audience c4-signer)")
 	}
 	return o, nil
 }
@@ -126,6 +137,15 @@ func run(args []string, stderr io.Writer) error {
 			return strings.TrimSpace(string(b)), err
 		}},
 		Log: log,
+	}
+	if o.signer != "" {
+		// Certified only while a Tracker names this sync: the first relay
+		// asks, and with no certificate the decision is relayed unsigned.
+		file := o.signTokenFile
+		s.Farm.(*farm.HUD).Signer = provenance.LazySigner(provenance.RemoteIssuer(o.signer, func() (string, error) {
+			b, err := os.ReadFile(file)
+			return strings.TrimSpace(string(b)), err
+		}, nil))
 	}
 	if o.tz != "" {
 		s.Loc, _ = time.LoadLocation(o.tz)

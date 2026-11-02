@@ -3,6 +3,9 @@ package farm_test
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -17,7 +20,9 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/tracker/farm"
+	"github.com/Avalanche-io/c4-operator/schema"
 )
 
 type hud struct {
@@ -337,5 +342,106 @@ func TestSubmitNeverAdoptsAStranger(t *testing.T) {
 	req.For, h.foreign["gh-8"] = "", "dana"
 	if _, err := f.Submit(context.Background(), req); !errors.Is(err, farm.ErrTaken) {
 		t.Errorf("dana's job adopted as the sync's: %v", err)
+	}
+}
+
+// With its own key, c4-sync signs the decision it relays for a Tracker
+// that names it as its sync (PEOPLE-KEYS-2 6.1): an act/v1 on the job by
+// UID at its spec's digest, with the body it sends as its params, by the
+// tracker user, for the person, under their confirmation. For a Tracker
+// that names another sync, or a job served without its UID, it signs
+// nothing, so the decision is relayed as before.
+func TestDecideSignsTheRelayedDecision(t *testing.T) {
+	ctx := context.Background()
+	ca, err := provenance.NewCA(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sync := provenance.ServiceAccountIdentity("c4-system", "c4-sync")
+	signer, err := provenance.NewSigner(ctx, provenance.LocalIssuer(ca, sync, time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	type sent struct {
+		act  string
+		body []byte
+	}
+	var got []sent
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got = append(got, sent{r.Header.Get(farm.ActHeader), b})
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	h := &farm.HUD{Base: srv.URL, Signer: signer}
+	j := farm.JobRef{Namespace: "show-a", Name: "flow-sh040-lgt-3f2a1c"}
+	digest := strings.Repeat("cd", 32)
+	relay := farm.Relay{Unit: "review", Do: "rework", Note: "fill down a stop", Tracker: "flow", Source: "Version/88120",
+		By: "@dana", Person: "dana", JobUID: "9b2e4d71-0c3a-4f8e-a6d2-5b1e7c9f3a10", SpecDigest: digest,
+		Confirmation: c4.Identify(strings.NewReader("dana confirms")).String(), SyncIdentity: sync}
+	if err := h.Decide(ctx, j, relay); err != nil {
+		t.Fatal(err)
+	}
+	data, err := base64.StdEncoding.DecodeString(got[0].act)
+	if err != nil || got[0].act == "" {
+		t.Fatalf("no act sent: %v", err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(ca.Cert)
+	v, a, err := provenance.VerifyAct(data, roots, time.Now(), provenance.NewMemorySeen())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := a.Predicate
+	want, _ := schema.ParamsID(got[0].body)
+	params, _ := schema.ParamsID(p.Params)
+	if v.Identity != sync || p.Act != "decide" || params != want || a.Subject[0].Name != "workjob:show-a/flow-sh040-lgt-3f2a1c@"+relay.JobUID ||
+		a.Subject[0].Digest["sha256"] != digest {
+		t.Fatalf("the act: %s %+v on %+v", v.Identity, p, a.Subject)
+	}
+	if c := p.Chain; c.By.Tracker != "flow" || c.By.User != "dana" || c.For.Party != "dana" || c.By.Grade != schema.GradeRelayed ||
+		len(c.Under) != 1 || c.Under[0].Kind != "people-map" || c.Under[0].Record != relay.Confirmation {
+		t.Fatalf("the chain: %+v", c)
+	}
+
+	for name, edit := range map[string]func(r *farm.Relay){
+		"a Tracker that names another sync": func(r *farm.Relay) { r.SyncIdentity = provenance.ServiceAccountIdentity("c4-system", "other") },
+		"a Tracker that names none":         func(r *farm.Relay) { r.SyncIdentity = "" },
+		"a job served without its UID":      func(r *farm.Relay) { r.JobUID = "" },
+	} {
+		r := relay
+		edit(&r)
+		got = nil
+		if err := h.Decide(ctx, j, r); err != nil || len(got) != 1 || got[0].act != "" {
+			t.Errorf("%s: %v, act %q", name, err, got[0].act)
+		}
+	}
+}
+
+// A sync the issuer will not certify (no Tracker names it yet) relays its
+// decisions unsigned, as before, and tries again at the next.
+func TestDecideUnsignedWithoutACertificate(t *testing.T) {
+	var acts []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		acts = append(acts, r.Header.Get(farm.ActHeader))
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	tries := 0
+	refused := provenance.LazySigner(func(context.Context, ed25519.PublicKey) ([]*x509.Certificate, error) {
+		tries++
+		return nil, errors.New("issuer: 403 Forbidden: not an importer of a project or a Tracker's sync")
+	})
+	h := &farm.HUD{Base: srv.URL, Signer: refused}
+	r := farm.Relay{Unit: "review", Do: "approve", Tracker: "flow", By: "@dana", Person: "dana",
+		JobUID: "9b2e4d71-0c3a-4f8e-a6d2-5b1e7c9f3a10", SpecDigest: strings.Repeat("cd", 32),
+		SyncIdentity: provenance.ServiceAccountIdentity("c4-system", "c4-sync")}
+	for range 2 {
+		if err := h.Decide(context.Background(), farm.JobRef{Namespace: "show-a", Name: "j"}, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(acts) != 2 || acts[0] != "" || acts[1] != "" || tries != 2 {
+		t.Fatalf("acts %q after %d tries", acts, tries)
 	}
 }

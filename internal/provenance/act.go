@@ -1,12 +1,16 @@
 package provenance
 
 import (
+	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
 	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Avalanche-io/c4-operator/schema"
 )
@@ -143,4 +147,21 @@ func ActSubject(kind, namespace, name, uid, specDigest string) Subject {
 func PayloadHash(payload []byte) string {
 	h := sha256.Sum256(payload)
 	return fmt.Sprintf("%x", h[:])
+}
+
+// SignAct signs an act as s, a farm part's own key (a tracker's relay):
+// the act's farm, signer and nonce are filled in from s and a fresh
+// random value, so it verifies only at the farm that certified s.
+func SignAct(ctx context.Context, s *Signer, subject Subject, p schema.ActPredicate, now time.Time) ([]byte, error) {
+	_, chain, err := s.current(ctx, now)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, 16)
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	p.Farm, p.Signer = FarmID(chain[len(chain)-1]), CertIdentity(chain[0])
+	p.Nonce = base64.RawURLEncoding.EncodeToString(nonce)
+	return SignStatement(ctx, s, PredicateAct, []Subject{subject}, p, now)
 }

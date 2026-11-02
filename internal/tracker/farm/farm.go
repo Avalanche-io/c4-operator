@@ -7,6 +7,7 @@ package farm
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,8 @@ import (
 	"github.com/Avalanche-io/c4"
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
+	"github.com/Avalanche-io/c4-operator/schema"
 )
 
 // JobRef names a job.
@@ -73,6 +76,16 @@ type Relay struct {
 	// Evidence is the tracker's own record of the decision, stored by C4
 	// ID so the relayed decision can cite it.
 	Evidence []byte
+	// JobUID and SpecDigest are the job as the HUD served it, what the
+	// signed decision is on; Confirmation is the person's confirmation of
+	// the login (the people-map record), which the act is under. A job
+	// whose spec has changed since refuses the act, and the decision is
+	// relayed again on the next pass.
+	JobUID, SpecDigest, Confirmation string
+	// SyncIdentity is the sync the Tracker names (spec.sync): c4-sync
+	// signs only for a Tracker that names it, since the HUD takes a
+	// relay's act only from that sync.
+	SyncIdentity string
 }
 
 // Farm is what the sync loop asks of C4.
@@ -138,6 +151,11 @@ type HUD struct {
 	// to trackers (an ingress); empty uses Base.
 	Public string
 	HTTP   *http.Client
+	// Signer is c4-sync's own key and certificate, from the farm's issuer
+	// while a Tracker names it as its sync (spec.sync): each decision it
+	// relays is signed as an act/v1 naming the person (PEOPLE-KEYS-2
+	// 6.1). Nil, it signs nothing, as before.
+	Signer *provenance.Signer
 }
 
 // APIError is a refusal from the HUD.
@@ -154,6 +172,11 @@ type APIError struct {
 func (e *APIError) Error() string { return fmt.Sprintf("HUD %d: %s", e.Status, e.Msg) }
 
 func (h *HUD) do(ctx context.Context, method, path string, ctype string, body []byte, out any) error {
+	return h.doWith(ctx, method, path, ctype, body, out, nil)
+}
+
+// doWith is do with headers of the request's own (a signed act).
+func (h *HUD) doWith(ctx context.Context, method, path string, ctype string, body []byte, out any, hdr http.Header) error {
 	u := strings.TrimSuffix(h.Base, "/") + "/api/v1" + path
 	if h.As != "" {
 		sep := "?"
@@ -165,6 +188,9 @@ func (h *HUD) do(ctx context.Context, method, path string, ctype string, body []
 	req, err := http.NewRequestWithContext(ctx, method, u, bytes.NewReader(body))
 	if err != nil {
 		return err
+	}
+	for k, vs := range hdr {
+		req.Header[k] = vs
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("X-C4-Client", "c4-sync")
@@ -332,12 +358,50 @@ func (h *HUD) Decide(ctx context.Context, j JobRef, r Relay) error {
 	if r.Reply && r.Do != "fail" {
 		body["reply"] = map[string]string{"text": r.Note}
 	}
-	err := h.doJSON(ctx, http.MethodPost, jobPath(j)+"/decide", body, nil)
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	hdr, err := h.relayAct(ctx, j, r, raw)
+	if err != nil {
+		return err
+	}
+	err = h.doWith(ctx, http.MethodPost, jobPath(j)+"/decide", "application/json", raw, nil, hdr)
 	var ae *APIError
 	if errors.As(err, &ae) && ae.Status == http.StatusConflict {
 		return fmt.Errorf("%w: %s", ErrNotOpen, ae.Msg)
 	}
 	return err
+}
+
+// ActHeader carries a request's signed act (the HUD's X-C4-Act).
+const ActHeader = "X-C4-Act"
+
+// relayAct signs the decision c4-sync relays as an act/v1 (PEOPLE-KEYS-2
+// 6.1): on the job by UID at its spec's digest, with the request's body
+// as its params, by the tracker user, for the person the people map
+// names, under their confirmation of the login when there is one, and
+// signed by c4-sync's own key. No signer, a job the HUD has not served
+// by UID, a Tracker that names another sync, or no certificate from the
+// issuer, and the decision goes unsigned, as before (the HUD grades it
+// as it did; K8 refuses it).
+func (h *HUD) relayAct(ctx context.Context, j JobRef, r Relay, body []byte) (http.Header, error) {
+	if h.Signer == nil || r.JobUID == "" || r.SpecDigest == "" || r.SyncIdentity == "" {
+		return nil, nil
+	}
+	ch := schema.ActChain{By: schema.Actor{Tracker: r.Tracker, User: strings.TrimPrefix(r.By, "@"), Grade: schema.GradeRelayed},
+		For: schema.For{Party: strings.TrimPrefix(r.Person, "party:"), Grade: schema.GradeRelayed}}
+	if r.Confirmation != "" {
+		ch.Under = []schema.Delegation{{Kind: "people-map", Record: r.Confirmation}}
+	}
+	on := provenance.ActSubject("workjob", j.Namespace, j.Name, r.JobUID, r.SpecDigest)
+	// SignAct obtains or renews the certificate: the issuer certifies
+	// c4-sync only while a Tracker names it, so with none it signs nothing
+	act, err := provenance.SignAct(ctx, h.Signer, on, schema.ActPredicate{Act: "decide", Params: body, Chain: ch}, time.Now())
+	if err != nil || h.Signer.Identity() != r.SyncIdentity {
+		return nil, nil
+	}
+	return http.Header{ActHeader: {base64.StdEncoding.EncodeToString(act)}}, nil
 }
 
 // StoreView puts each file's bytes in the project's store, then records

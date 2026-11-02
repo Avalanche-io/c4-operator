@@ -22,7 +22,10 @@ spec:
       containers:
       - name: sync
         image: c4-sync
-        args: [--hud=http://c4-hud.c4-system.svc, --hud-token-file=/var/run/c4-sync/token]
+        # --signer: the farm's issuer certifies c4-sync while a Tracker
+        # names it (spec.sync), and it signs each decision it relays
+        args: [--hud=http://c4-hud.c4-system.svc, --hud-token-file=/var/run/c4-sync/token,
+          --signer=http://c4-signer.c4-system.svc, --sign-token-file=/var/run/c4-sync-signer/token]
         ports:
         - {name: webhooks, containerPort: 8090}
         readinessProbe:
@@ -33,6 +36,7 @@ spec:
           capabilities: {drop: [ALL]}
         volumeMounts:
         - {name: hud-token, mountPath: /var/run/c4-sync, readOnly: true}
+        - {name: signer-token, mountPath: /var/run/c4-sync-signer, readOnly: true}
       volumes:
       # A projected token for the HUD alone (audience
       # c4.avalanche.io/hud-api, which the API server refuses): short-lived
@@ -41,6 +45,12 @@ spec:
         projected:
           sources:
           - serviceAccountToken: {path: token, audience: c4.avalanche.io/hud-api, expirationSeconds: 3600}
+      # And one for the farm's certificate issuer alone (audience
+      # c4-signer), as the node daemon's.
+      - name: signer-token
+        projected:
+          sources:
+          - serviceAccountToken: {path: token, audience: c4-signer, expirationSeconds: 3600}
 ---
 # Tracker deliveries arrive here, behind the studio's ingress or a relay;
 # sites that cannot take inbound traffic poll instead (Tracker.spec.events).

@@ -26,6 +26,12 @@ func TestParse(t *testing.T) {
 	if _, err := parse([]string{"--hud", "x", "--interval", "1s"}, &out); err == nil {
 		t.Fatal("a 1s interval should be refused")
 	}
+	if _, err := parse([]string{"--hud", "x", "--signer", "http://c4-signer.c4-system.svc"}, &out); err == nil || !strings.Contains(err.Error(), "--sign-token-file") {
+		t.Fatalf("a signer without its token: %v", err)
+	}
+	if o, err := parse([]string{"--hud", "x", "--signer", "http://c4-signer.c4-system.svc", "--sign-token-file", "/t"}, &out); err != nil || o.signer == "" {
+		t.Fatalf("a signer: %+v %v", o, err)
+	}
 	out.Reset()
 	if _, err := parse([]string{"--version"}, &out); err != errVersion || !strings.Contains(out.String(), "flow, github, kitsu, linear, mlflow") {
 		t.Fatalf("version: %v %q", err, out.String())

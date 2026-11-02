@@ -1,11 +1,14 @@
 package provenance
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -66,5 +69,45 @@ func TestIdentities(t *testing.T) {
 	}
 	if PayloadHash([]byte("{}")) != "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a" {
 		t.Errorf("payload hash %s", PayloadHash([]byte("{}")))
+	}
+}
+
+// A relay signs an act with its own Ed25519 key (SignAct): by a tracker
+// user, signed by its sa/ identity, for the farm that certified it; the
+// verifier takes it once, and a second farm's roots refuse it.
+func TestRelaySignsAnAct(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	ca, err := NewCA(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewSigner(ctx, LocalIssuer(ca, ServiceAccountIdentity("c4-system", "c4-sync"), time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	on := ActSubject("workjob", "show-a", "sh040-light-v007", "9b2e4d71-0c3a-4f8e-a6d2-5b1e7c9f3a10", strings.Repeat("ab", 32))
+	p := schema.ActPredicate{Act: "decide", Params: json.RawMessage(`{"do":"approve","unit":"review"}`),
+		Chain: schema.ActChain{By: schema.Actor{Tracker: "flow", User: "dana", Grade: schema.GradeRelayed},
+			For: schema.For{Party: "dana", Grade: schema.GradeRelayed}}}
+	data, err := SignAct(ctx, s, on, p, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(ca.Cert)
+	v, a, err := VerifyAct(data, roots, now, NewMemorySeen())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Identity != ServiceAccountIdentity("c4-system", "c4-sync") || a.Predicate.Farm != FarmID(ca.Cert) || a.Predicate.Nonce == "" ||
+		a.Subject[0].Name != on.Name {
+		t.Fatalf("signed as %s for farm %s: %+v", v.Identity, a.Predicate.Farm, a.Predicate)
+	}
+	other, _ := NewCA(now)
+	elsewhere := x509.NewCertPool()
+	elsewhere.AddCert(other.Cert)
+	if _, _, err := VerifyAct(data, elsewhere, now, NewMemorySeen()); err == nil {
+		t.Fatal("another farm took the relay's act")
 	}
 }

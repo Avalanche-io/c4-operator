@@ -42,6 +42,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/effect"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/tracker"
 	"github.com/Avalanche-io/c4-operator/internal/tracker/farm"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
@@ -1346,11 +1347,18 @@ func (s *Syncer) relay(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v1.Tr
 		rec.Error = fmt.Sprintf("the wait does not take %q (choices: %s); add it to the wait's choices or map the tracker's decision to one", do, strings.Join(w.Choices, ", "))
 		return "", s.recordDecision(ctx, l, rec)
 	}
-	err := s.Farm.Decide(ctx, jr, farm.Relay{
+	r := farm.Relay{
 		Project: j.Project, Unit: rec.Unit, Do: do, Note: pick.Body, Reply: w.Reply,
 		Tracker: t.Name, Source: pick.Source.URL + " (" + pick.Source.String() + ")",
 		By: "@" + pick.By.ID, Person: person, Evidence: pick.Evidence,
-	})
+		// what the signed decision is on, and under (farm.HUD.relayAct)
+		JobUID: j.UID, SpecDigest: j.SpecDigest,
+	}
+	r.Confirmation, _ = s.confirmation(ctx, t, pick.By.ID, person)
+	if sync := t.Spec.Sync; sync != nil {
+		r.SyncIdentity = provenance.ServiceAccountIdentity(sync.Namespace, sync.ServiceAccount)
+	}
+	err := s.Farm.Decide(ctx, jr, r)
 	if errors.Is(err, farm.ErrNotOpen) {
 		rec.Error = err.Error()
 		return "", s.recordDecision(ctx, l, rec)
@@ -1830,11 +1838,21 @@ func (s *Syncer) setTrackerCond(ctx context.Context, t *c4v1.Tracker, typ string
 // login u is them (a TrackerPerson, accepted and not revoked): the Tracker's
 // people map alone is only its offer.
 func (s *Syncer) confirmed(ctx context.Context, t *c4v1.Tracker, u, person string) bool {
+	_, ok := s.confirmation(ctx, t, u, person)
+	return ok
+}
+
+// confirmation is person's confirmation that login u is them
+// (TrackerPerson, accepted and standing): whether there is one, and its
+// record.
+func (s *Syncer) confirmation(ctx context.Context, t *c4v1.Tracker, u, person string) (string, bool) {
 	var tp c4v1.TrackerPerson
 	key := client.ObjectKey{Namespace: t.Namespace, Name: c4v1.TrackerPersonName(t.Name, u, person)}
 	if err := s.Client.Get(ctx, key, &tp); err != nil {
-		return false
+		return "", false
 	}
-	return tp.Spec.Tracker == t.Name && tp.Spec.Login == u && tp.Spec.Person == person &&
-		!tp.Spec.Accepted.At.IsZero() && tp.Standing()
+	if tp.Spec.Tracker != t.Name || tp.Spec.Login != u || tp.Spec.Person != person || tp.Spec.Accepted.At.IsZero() || !tp.Standing() {
+		return "", false
+	}
+	return tp.Spec.Accepted.Record, true
 }
