@@ -32,13 +32,14 @@ import sessions from './views/sessions.js';
 import { learnSnapshot, learnNeeds } from './act.js';
 import './touch.js';
 import book from './views/book.js';
+import owners from './views/owners.js';
 import { start as startSigning, status as signing, capture as captureSecrets } from './enrol.js';
 
 // the secrets an address can carry (a one-time code, a sign-in answer) out
 // of the address bar before anything reads it, the router included
 captureSecrets();
 
-const VIEWS = { queue, job, pools, workers: pools, map, tiers, graph, cost, wall, widget, mine, catalog, me: yourPage, needs: needsYou, sessions, book };
+const VIEWS = { queue, job, pools, workers: pools, map, tiers, graph, cost, wall, widget, mine, catalog, me: yourPage, needs: needsYou, sessions, book, owners };
 // each view and the mode it arrives at (docs/intro/ladder.md)
 // [view, label, mode, level]: a tab shows from that mode, at that level
 const NAV = [
@@ -56,6 +57,8 @@ const NAV = [
   ['catalog', 'Catalogue', 3, 1],
   // the farm-wide log of farm-level acts, sealed (views/book.js)
   ['book', 'Book', 4, 3],
+  // who answers for each part of the farm: its bindings (views/owners.js)
+  ['owners', 'Owners', 4, 3],
 ];
 
 if (staticMode || new URLSearchParams(location.search).get('motion') === 'off') {
@@ -133,7 +136,7 @@ function topBar() {
       h('span', { class: 'num' }, s ? f.clockSec(s.now) : '--:--:--', s && f.utc(s.now) ? h('span', { class: 'cx', title: 'UTC' }, f.utc(s.now)) : null),
       h('span', { class: 'lab' }, s ? `${f.dateLine(s.now)} \u00b7 ${f.offsetLabel()}` : '')),
     h('nav', { class: 'views', 'aria-label': 'Views' },
-      NAV.filter(([k, , n, l]) => (state.mode.mode >= n && ctx.level >= l && (k !== 'catalog' || state.catalog) && (k !== 'sessions' || state.observed) && (k !== 'book' || state.book)) || (state.route && state.route.name === k)).map(([k, label]) => h('a', { href: href(k), 'aria-current': state.route && (state.route.name === k || (k === 'queue' && state.route.name === 'job') || (k === 'pools' && state.route.name === 'workers')) ? 'page' : false }, label))),
+      NAV.filter(([k, , n, l]) => (state.mode.mode >= n && ctx.level >= l && (k !== 'catalog' || state.catalog) && (k !== 'sessions' || state.observed) && (k !== 'book' || state.book) && (k !== 'owners' || state.owners)) || (state.route && state.route.name === k)).map(([k, label]) => h('a', { href: href(k), 'aria-current': state.route && (state.route.name === k || (k === 'queue' && state.route.name === 'job') || (k === 'pools' && state.route.name === 'workers')) ? 'page' : false }, label))),
     levelSwitch(),
     detail(),
     h('div', { class: 'who' },
@@ -384,6 +387,8 @@ let lastView = null, lastRoute = null;
 fetch(objectURL('/api/v1/catalog'), { method: 'HEAD' }).then((r) => { state.catalog = r.ok; if (r.ok && state.snap) render(); }).catch(() => {});
 // the Your sessions tab shows only where something observes this machine's sessions
 fetch(objectURL('/api/v1/observed'), { method: 'HEAD' }).then((r) => { state.observed = r.ok; if (r.ok && state.snap) render(); }).catch(() => {});
+// the Owners tab shows only on a farm that keeps bindings (views/owners.js)
+fetch(objectURL('/api/v1/bindings'), { method: 'HEAD' }).then((r) => { state.owners = r.ok; if (r.ok && state.snap) render(); }).catch(() => {});
 // the Book tab shows only on a farm that keeps one (views/book.js)
 fetch(objectURL('/api/v1/book/farm'), { method: 'HEAD' }).then((r) => { state.book = r.ok; if (r.ok && state.snap) render(); }).catch(() => {});
 function render() {

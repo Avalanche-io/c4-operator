@@ -25,7 +25,7 @@ import { h } from '../dom.js';
 import * as f from '../fmt.js';
 import { get } from '../api.js';
 import { bookList } from '../../design/components/ledger.js';
-import { readPage, follows } from '../../design/components/farmbook.js';
+import { readPage, follows, partsOf } from '../../design/components/farmbook.js';
 import { c4idEl } from '../../design/components/c4id.js';
 
 const LAST = 'c4-hud-farm-book-head';
@@ -35,7 +35,7 @@ const BACK = 200;
 const EVERY = 5000;
 // how many more pages a read follows toward the head
 const PAGES = 50;
-const st = { page: null, err: null, broke: null, none: false, busy: false, t: 0 };
+const st = { page: null, parts: null, err: null, broke: null, none: false, busy: false, t: 0 };
 
 function last() {
   try { return JSON.parse(localStorage.getItem(LAST) || 'null'); } catch (e) { return null; }
@@ -69,6 +69,9 @@ function load(ctx) {
   if (st.none || st.busy || Date.now() - st.t < EVERY) return;
   st.busy = true;
   st.t = Date.now();
+  // the bindings say what a bind or end-binding entry bound; a farm that
+  // keeps none leaves those entries in general words
+  get('/bindings').then((d) => { st.parts = partsOf(d.bindings); }, () => {});
   read().then((p) => { st.page = p; st.err = null; }, (e) => {
     if (e.status === 404) st.none = true;
     else if (e.status === 409) st.broke = e.message;
@@ -103,7 +106,7 @@ export default {
       return h('section', { class: 'sheet farmbook' }, head,
         h('p', { class: 'dim' }, 'This farm keeps no book yet: its install names no system store for it.'));
     }
-    const p = st.page && readPage(st.page);
+    const p = st.page && readPage(st.page, st.parts);
     return h('section', { class: 'sheet farmbook' }, head,
       st.broke ? h('p', { class: 'warn red' }, `Don’t trust this book until your farm admin looks: ${st.broke}.`) : null,
       st.err ? h('p', { class: 'warn red' }, st.err) : null,

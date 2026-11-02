@@ -11,6 +11,7 @@
 //   how(u)              the Full-mode line: what the words stand for natively
 
 import * as f from './fmt.js';
+import { deploymentWord } from './farmbook.js';
 
 // who: person:noor → Noor; party:license-nuke → license-nuke; clock:… → the time
 export function who(waitsFor = '') {
@@ -207,6 +208,23 @@ export function actBy(e) {
   }
   if (e.signer === 'hud' && e.actor) return `signed by the HUD for ${e.actor}`;
   return `${e.actor || ''}${e.signer ? ' · ' + e.signer : ''}`;
+}
+
+// deploymentWord: a part of the farm as a binding names it (farmbook.js)
+export { deploymentWord };
+
+// bindingLine: whom a record's signer answers to, followed to its binding
+// (DESIGN 3.3): "the queue is dana’s"; a label quietly, never as an error
+// (before strict accountability it refuses nothing): "unattributed: node
+// laptop-1 has no owner", "revoked: node laptop-1 signed after dana’s
+// binding ended"
+export function bindingLine(b) {
+  if (!b) return '';
+  const dep = b.deployment ? deploymentWord(b.deployment) : '';
+  if (b.label === 'revoked') return `revoked: ${dep || 'its signer'} signed after ${b.owner ? `${b.owner}’s` : 'its'} binding ended`;
+  if (b.label && b.label.startsWith('unattributed')) return dep ? `unattributed: ${dep} has no owner` : b.label;
+  if (b.label) return b.label;
+  return b.owner ? `${dep || 'its signer'} is ${b.owner}’s` : '';
 }
 
 // howSigned: how a person's own act was signed, for a sentence on their

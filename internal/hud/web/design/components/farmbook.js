@@ -9,7 +9,8 @@
 //   readPage(page)        the page as rows for bookList (ledger.js), newest
 //                         last, sealed then pending, with the refusals and
 //                         the segments' seals
-//   entryWords(e)         an entry in the book's words
+//   entryWords(e, parts)  an entry in the book's words (parts: the
+//                         deployments bindings name, by record: partsOf)
 //   follows(last, page)   whether the page follows the last head this
 //                         browser accepted: null, or why not (went back,
 //                         forked)
@@ -65,10 +66,10 @@ function flagWords(f) {
 // entryWords: what an entry says, in the book's words. A control entry is
 // one of the HUD's control records: its act on its subject, by its actor;
 // the rest are the people's index's kinds.
-export function entryWords(e) {
+export function entryWords(e, parts) {
   const of = (p) => (p ? `${p}’s` : 'a');
   switch (e.kind) {
-    case 'control': return controlWords(e);
+    case 'control': return controlWords(e, parts);
     case 'device': return `${of(e.person)} device enrolled (…${short(e.device)})`;
     case 'removal': return e.device ? `${of(e.person)} device removed (…${short(e.device)})` : `all of ${of(e.person)} devices removed`;
     case 'setting': return 'the sign-in provider set';
@@ -82,7 +83,7 @@ export function entryWords(e) {
 }
 
 // controlWords: a control record's act on its subject (kind:name)
-function controlWords(e) {
+function controlWords(e, parts) {
   const subject = e.subject || '';
   const name = subject.includes(':') ? subject.slice(subject.indexOf(':') + 1) : subject;
   switch (e.act) {
@@ -90,9 +91,48 @@ function controlWords(e) {
     case 'revoke': return `revoked ${name}`;
     case 'disable': return subject.startsWith('node:') ? `took node ${name} out` : `disabled ${subject}`;
     case 'enable': return subject.startsWith('node:') ? `put node ${name} back` : `enabled ${subject}`;
-    case 'bind': return `the farm bound${e.person ? ' to ' + e.person : ''}`;
+    case 'bind': {
+      if (!subject.startsWith('deploymentbinding:') || name === 'farm') return `the farm bound${e.person ? ' to ' + e.person : ''}`;
+      const d = parts && parts.get(e.record);
+      return d ? `bound ${deploymentWord(d)}` : 'bound a part of the farm';
+    }
+    case 'end-binding': {
+      const d = parts && parts.get(e.record);
+      return d ? `ended the binding of ${deploymentWord(d)}` : 'ended a binding';
+    }
     default: return `${e.act}${subject ? ' ' + subject : ''}`;
   }
+}
+
+// deploymentWord: a part of the farm as a binding's deployment names it
+// (what its to names after the farm): node/laptop-1 → node laptop-1,
+// sync/flow → flow's sync, component/queue → the queue, * → the farm
+const COMPONENT = { hud: 'the HUD', queue: 'the queue', controller: 'the controller' };
+export function deploymentWord(d = '') {
+  if (!d || d === '*') return 'the farm';
+  const i = d.indexOf('/');
+  const kind = i < 0 ? d : d.slice(0, i), name = i < 0 ? '' : d.slice(i + 1);
+  switch (kind) {
+    case 'node': return `node ${name}`;
+    case 'runner': return `runner ${name}`;
+    case 'sync': return `${name}’s sync`;
+    case 'import': return `the importer for ${name}`;
+    case 'component': return COMPONENT[name] || name;
+    default: return d;
+  }
+}
+
+// partsOf: the deployment each binding of GET /bindings names, by the
+// records that made and ended it, for a bind or end-binding entry to say
+// what it bound (a binding's name is no way back to it: dashes are kept)
+export function partsOf(bindings) {
+  const m = new Map();
+  for (const b of bindings || []) {
+    if (!b.deployment) continue;
+    if (b.record) m.set(b.record, b.deployment);
+    if (b.ended && b.ended.record && !m.has(b.ended.record)) m.set(b.ended.record, b.deployment);
+  }
+  return m;
 }
 
 // who: who acted, and for whom when it isn't themselves
@@ -108,7 +148,7 @@ const parse = (x) => (typeof x === 'string' ? JSON.parse(x) : x);
 // message, who, the record; pending rows drawn open, flagged rows in the
 // late tone with the window their position allows, redacted rows saying
 // what was left out.
-export function readPage(page) {
+export function readPage(page, parts) {
   const segs = (page.segments || []).map(segmentOf).filter(Boolean);
   const sealedAt = new Map(segs.map((s) => [s.number, s.signedAt]));
   const flags = new Map();
@@ -128,11 +168,12 @@ export function readPage(page) {
     return {
       // act: how the person's act an entry books was signed, which the
       // farm reads from the act's own record (actBy, words.js)
-      seq: pe.position, id: pe.id, at: e.at, kind: f ? 'late' : e.kind, open: pending, act: pe.act,
+      // binding: whom its record's signer answers to (bindingLine)
+      seq: pe.position, id: pe.id, at: e.at, kind: f ? 'late' : e.kind, open: pending, act: pe.act, binding: pe.binding,
       // the HUD writes control records; the people's issuer the rest
       signer: e.kind === 'control' ? 'hud' : 'issuer', day: true, record: e.record || pe.id,
       message: withheld ? 'an entry withheld from you: only its person and the farm’s admins read it' + (notes.length ? ` (${notes.join('; ')})` : '')
-        : entryWords(e) + (notes.length ? ` (${notes.join('; ')})` : ''),
+        : entryWords(e, parts) + (notes.length ? ` (${notes.join('; ')})` : ''),
       actor: who(e),
       segment: pe.segment, sealedAt: sealedAt.get(pe.segment),
     };

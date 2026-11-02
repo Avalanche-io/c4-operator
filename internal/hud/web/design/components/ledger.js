@@ -9,11 +9,12 @@
 //                          and in the book wherever no signed record exists
 //   ink(text) / pencil(text)
 //   bookList(entries)      the book: sequence, time, seal, entry, actor (and
-//                          for a person's act, how it was signed: actBy)
+//                          for a person's act, how it was signed: actBy;
+//                          whom its signer answers to: bindingLine)
 
 import * as f from './fmt.js';
 import { c4idEl } from './c4id.js';
-import { actBy } from './words.js';
+import { actBy, bindingLine } from './words.js';
 
 function el(tag, attrs, ...kids) {
   const e = document.createElement(tag);
@@ -45,5 +46,6 @@ export function bookList(entries) {
       seal(e.signer, { open: !!e.open || !e.record, title: e.record ? undefined : `booked by the ${e.signer}; no signed record` }),
       el('span', { class: 'msg ' + (TONE[e.kind] || '') }, e.message),
       // who, and how a person's act was signed (actBy)
-      el('span', { class: 'who' }, actBy(e), e.record ? [' · ', c4idEl(e.record, { label: 'signed record' })] : null))));
+      el('span', { class: 'who' }, actBy(e), e.binding ? [' · ', el('span', { class: 'bound' + (e.binding.label ? ' dim' : '') }, bindingLine(e.binding))] : null,
+        e.record ? [' · ', c4idEl(e.record, { label: 'signed record' })] : null))));
 }

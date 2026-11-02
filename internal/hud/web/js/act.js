@@ -73,6 +73,11 @@ const WRITES = [
   ['DELETE', /^\/people\/([^/]+)\/([^/]+)$/, (m) => ({ act: 'people-revoke', key: `people:${m[1]}/${m[2]}` })],
   ['POST', /^\/held\/([^/]+)\/([^/]+)\/([^/]+)$/, (m, b) => ({ act: b && b.happened ? 'confirm-write' : 'deny-write', key: `held:${m[1]}/${m[2]}/${m[3]}` })],
   ['POST', /^\/capacity\/([^/]+)\/approve$/, (m) => ({ act: 'approve-capacity', key: `burst:${m[1]}` })],
+  // deployment bindings (accountability S2b): made on the farm; rotated
+  // (a bind that follows it) and ended on the binding
+  ['POST', /^\/bindings$/, () => ({ act: 'bind', key: 'farm' })],
+  ['POST', /^\/bindings\/([^/]+)\/rotate$/, (m) => ({ act: 'bind', key: `binding:${m[1]}` })],
+  ['POST', /^\/bindings\/([^/]+)\/end$/, (m) => ({ act: 'end-binding', key: `binding:${m[1]}` })],
 ];
 export function writeOf(method, path, body) {
   for (const [verb, re, fn] of WRITES) {
@@ -326,8 +331,8 @@ export function learnSnapshot(snap) {
 }
 
 // learnRead: what a read names for acts: grants (revoked on themselves),
-// tracker logins (confirmed on the offer, revoked on the confirmation) and
-// held writes
+// tracker logins (confirmed on the offer, revoked on the confirmation),
+// held writes, and deployment bindings (rotated and ended on themselves)
 export function learnRead(path, data) {
   if (!data) return;
   if (path.startsWith('/grants')) for (const g of data.grants || []) learn(`grant:${g.namespace}/${g.name}`, g.actOn);
@@ -336,6 +341,7 @@ export function learnRead(path, data) {
     learn(`people:${e.namespace}/${e.name}`, e.revokeOn);
   }
   if (path.startsWith('/held')) for (const w of data.held || []) learn(`held:${w.namespace}/${w.link}/${w.field}`, w.actOn);
+  if (path.startsWith('/bindings')) for (const b of data.bindings || []) if (b.name) learn(`binding:${b.name}`, b.actOn);
 }
 
 // actHeaders: the headers a write carries for its act, {} when this page
