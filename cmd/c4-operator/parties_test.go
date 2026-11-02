@@ -72,8 +72,14 @@ func (r *issuerFarm) signIns(t *testing.T) people.StaticSignIns {
 // in the book's store, its entry pending the seal.
 func (r *issuerFarm) bookControl(t *testing.T, action, target string, change map[string]any) {
 	t.Helper()
+	r.bookUnder(t, r.f.CA, action, target, change)
+}
+
+// bookUnder books a control record a HUD under ca signs.
+func (r *issuerFarm) bookUnder(t *testing.T, ca *provenance.CA, action, target string, change map[string]any) {
+	t.Helper()
 	ctx := context.Background()
-	hud, err := provenance.NewSigner(ctx, provenance.LocalIssuer(r.f.CA, provenance.ComponentIdentity("hud"), time.Hour))
+	hud, err := provenance.NewSigner(ctx, provenance.LocalIssuer(ca, provenance.ComponentIdentity("hud"), time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,6 +161,16 @@ func TestIssuerReadsParties(t *testing.T) {
 	r.bookControl(t, "end-member", farmbook.MemberKey("kestrel", "dana"), map[string]any{"party": "kestrel", "member": "dana", "purposes": []string{}})
 	if admin(ctx, "dana") {
 		t.Error("dana is an admin after her membership ended")
+	}
+
+	// a membership signed at another farm, whose CA the roots trust too,
+	// makes no one an admin here
+	r = newIssuerFarm(t, "kestrel", organisation("kestrel"))
+	other := provtest.NewFarm(t, time.Now())
+	r.f.Roots.AddCert(other.CA.Cert)
+	r.bookUnder(t, other.CA, "make-party", farmbook.PartyKey("kestrel"), map[string]any{"name": "kestrel", "member": "mallory", "purposes": []string{"member", "admin"}})
+	if farmAdmins(r.reader, r.book)(ctx, "mallory") {
+		t.Error("another farm's record makes mallory an admin")
 	}
 
 	// the farm bound to someone with no Party: no one, not the owner
