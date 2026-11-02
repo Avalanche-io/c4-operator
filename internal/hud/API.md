@@ -2524,15 +2524,23 @@ HUD shows its Parties tab only where `HEAD /parties` answers.
   provider's subject only with `idToken`, a fresh ID token for it, which
   the people's issuer checks as `whoami` does (issuer, audience, `azp`,
   freshness, signature, subject). So a person makes their own person
-  Party, and adds their own sign-ins; they, or a farm admin, remove one;
-  nobody adds one for someone else.
+  Party, once, and adds their own sign-ins; they, or a farm admin, remove
+  one; nobody adds one for someone else.
+- A person Party takes its person's own name: the one they sign in as, or
+  the name the `c4-sign-ins` Secret gives a subject they prove. While the
+  Secret names a person, a Party of that name takes one of the subjects
+  it gives them, proved, whoever makes it (`403` otherwise), so nobody
+  takes a name still on the Secret, and names are never reused.
 - A membership names a Party, person or organisation, never a bare
   sign-in name. One named by a name no Party has (booked before this
   rule) lapses visibly: it shows, with `lapsed`, and holds nothing.
 - Making an organisation never makes its maker an admin. Its make-party
-  names its first admin, a person Party other than the maker's own, who
-  counts only once they accept (`POST /parties/{name}/accept`) with their
-  own touched act.
+  names its first admin, a person Party, who counts only once they accept
+  (`POST /parties/{name}/accept`) with their own touched act. On a managed
+  farm (its binding names a `runFor`) the maker may not name themselves; on
+  a farm its owner runs they may, a small studio's one admin, and still
+  count only once they accept, booked, and the Party shows it
+  (`firstAdmin.selfNamed`).
 
 **What the viewer may do.** The viewer the snapshot, the event stream and
 `/needs-me` serve says so in three flags, each by the rule its route takes:
@@ -2546,8 +2554,8 @@ HUD shows its Parties tab only where `HEAD /parties` answers.
   no Party lists the sign-in it is using yet. A person who signs in by the
   `c4-sign-ins` Secret proves one of its subjects as they do.
 - `bindingOwner`: the viewer is the farm binding's owner: the person of the
-  owner's person Party, through its sign-ins, or, while the farm keeps no
-  Party of the owner's name, the one signed in as it.
+  owner's person Party, through its sign-ins. Before that Party exists no
+  one is, by user name or otherwise.
 
 The event stream reads them when it opens.
 
@@ -2565,7 +2573,8 @@ The event stream reads them when it opens.
 
 A party is `{ name, kind, displayName, legalName?, signIns?,
 perPersonViews?, made: { by, at, record }, changed?, firstAdmin?: { person,
-accepted, record? }, members, groups?, booked, yours?, actOn }`.
+selfNamed?, accepted, at?, record? }, members, groups?, booked, yours?,
+actOn }`.
 - `name` is lower-case letters, digits, dots and dashes, at most 63: the
   chain/1 party pattern, narrowed to an object name and to one case. A
   wait's `party:<name>` is held to the same pattern, so `party:Kestrel` is
@@ -2587,7 +2596,10 @@ accepted, record? }, members, groups?, booked, yours?, actOn }`.
   their Party never locks them out of the issuer. Sign-ins go only to the
   person and to farm admins.
 - `firstAdmin` (an organisation's) is the first admin its make-party
-  named, and whether they accepted. Until they do, it has no admin.
+  named; `selfNamed` when the farm admin who made it named themselves;
+  and, once they accepted, `accepted`, `at` (when their accept-admin entry
+  counts from) and its `record`, so the HUD can say "ines made herself
+  admin, Nov 1". Until they accept, it has no admin.
 - `members` and `groups` are the organisation's memberships in force, each
   `{ person | group, purposes, inEffect, by, record, since, pending?,
   lapsed? }`: who granted it, its record, and when its book entry counts
@@ -2618,8 +2630,9 @@ hold `member` and nothing more, so a rule for either is `400`.
 **Who may:**
 - Make an organisation: a farm admin (one who may create `parties`, or a
   development viewer in the farm-admin role on the installer's secret),
-  naming a first admin who is not themselves (`403`).
-- Make a person Party: the person, signed in with what it lists.
+  naming its first admin; on a managed farm, not themselves (`403`).
+- Make a person Party: the person, once, under their own name, signed in
+  with what it lists.
 - Change a party: an organisation's `admin`; for a person's party, the
   person, or a farm admin; its sign-ins as above.
 - Change members: the organisation's `admin`. A member may end their own
