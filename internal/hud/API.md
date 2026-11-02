@@ -1140,6 +1140,13 @@ in `X-C4-Act`: each job control, and the endpoints below.
   - **Enrolling a host runner** (`enroll`): on `node:<name>`, with the C4
     ID of the code it shows in its one form (`ABCD-EFGH`: upper case,
     letters and digits, one dash) as its `c4` digest.
+- **A unit's act is taken only from that unit:** sent with its own pod's
+  token, signed by the key the workload issuer certified for that unit's
+  attempt (`unit/<namespace>/<job>/<unit>@<job UID>/<attempt>`, the job's
+  whole UID and the attempt matched against the caller), for its job's
+  owner, under the job's ownership. Its control record is graded `signed`.
+  The kinds a unit may never make (a grant, a person's wait) are refused
+  whatever it sends. An agent's and a relay's acts are not taken yet.
 - **A person's act is the viewer's own,** taken once, and signed within five
   minutes of the HUD's clock. On a farm with a people's index
   (`--people-store`) its device is in force there now, and a confirmed

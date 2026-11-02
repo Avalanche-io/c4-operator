@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	authnv1 "k8s.io/api/authentication/v1"
@@ -102,6 +103,9 @@ func (s *Server) unitViewer(ctx context.Context, tok string) (*api.Viewer, error
 		Unit: &api.UnitViewer{Namespace: ns, Job: job, Unit: unit, Grant: p.Spec.C4, Agent: pod.Labels[c4v1.LabelAgent]}}
 	if ref := metav1.GetControllerOf(&pod); ref != nil && ref.Kind == "WorkJob" && ref.Name == job {
 		v.Unit.JobUID = string(ref.UID)
+	}
+	if n, err := strconv.Atoi(pod.Annotations[c4v1.AnnotationAttempt]); err == nil && n > 0 {
+		v.Unit.Attempt = n
 	}
 	if m := s.current(); m != nil {
 		for _, pr := range m.projects {

@@ -107,12 +107,15 @@ func (s *Server) citeAct(ctx context.Context, r *http.Request, v *api.Viewer, su
 		return nil, fmt.Errorf("%w is %s, and this request is %s", errAct, p.Act, action)
 	case err != nil || got != want:
 		return nil, fmt.Errorf("%w's params are not this request's body", errAct)
+	case p.Chain.By.Unit != "":
+		// a unit's act, only from that unit's own token (unitacts.go)
+		return s.citeUnitAct(ctx, data, vr, p, v, subject)
 	case p.Chain.By.Person == "":
-		// A unit's act is taken from that unit's own token (K5), an
-		// agent's under a grant in force for the viewer (K5) and a relay's
-		// only through relayed() with its signer bound to the Tracker (K6).
-		// Until each has its caller's check, only a person's own act is.
-		return nil, fmt.Errorf("%w is not a person's: a unit's, an agent's or a relay's act is not taken here yet", errAct)
+		// An agent's act is taken under a grant in force for the viewer
+		// (K5) and a relay's only through relayed() with its signer bound
+		// to the Tracker (K6). Until each has its caller's check, it is
+		// refused.
+		return nil, fmt.Errorf("%w is not a person's or a unit's: an agent's or a relay's act is not taken here yet", errAct)
 	case vr.Identity != provenance.UserIdentity(p.Chain.By.Person):
 		return nil, fmt.Errorf("%w names %s and is signed by %s, not by a device of theirs", errAct, p.Chain.By.Person, vr.Identity)
 	case v == nil:

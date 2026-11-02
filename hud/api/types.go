@@ -59,6 +59,9 @@ type UnitViewer struct {
 	// Agent is the agent the unit runs, from its pod's agent label (the
 	// queue's), "" for none.
 	Agent string `json:"agent,omitempty"`
+	// Attempt is the attempt the unit's pod runs, from the queue's
+	// annotation on it: a unit signs as that attempt (PEOPLE-KEYS 5.1).
+	Attempt int `json:"attempt,omitempty"`
 }
 
 // Roles a viewer can have (Viewer.Role).
