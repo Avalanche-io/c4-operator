@@ -208,7 +208,12 @@ func TestUpKeysPinsTheOwnersKey(t *testing.T) {
 	if again, err := UpKeys(ctx, o.client, st, "noor", out.Owner.Device, false); err != nil || again.Owner.Device != out.Owner.Device {
 		t.Errorf("up again, pinned: %v %+v", err, again)
 	}
-	other := "c4" + out.Owner.Device[2:len(out.Owner.Device)-1] + "x"
+	// another ID: its last character changed, whatever it was
+	last := "x"
+	if strings.HasSuffix(out.Owner.Device, "x") {
+		last = "y"
+	}
+	other := out.Owner.Device[:len(out.Owner.Device)-1] + last
 	if _, err := UpKeys(ctx, o.client, st, "noor", other, false); !errors.Is(err, ErrOwnerKey) || !strings.Contains(err.Error(), other) || !strings.Contains(err.Error(), out.Owner.Device) {
 		t.Errorf("another owner key than the pinned one: %v", err)
 	}
