@@ -6,8 +6,10 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
@@ -78,5 +80,68 @@ func TestLoopbackOnly(t *testing.T) {
 		if got := loopbackOnly(addr); got != want {
 			t.Errorf("%q: %v, want %v", addr, got, want)
 		}
+	}
+}
+
+// A unit is certified on its own pod's token as that unit's attempt,
+// unit/<ns>/<job>/<unit>@<job UID>/<attempt>, for an hour, and only while
+// its pod is that pod and running: never as its service account (even one
+// a project names among its importers), never for another pod's token,
+// a finished attempt, or a pod that names no job, unit or attempt.
+func TestIssuerCertifiesAUnitAsItself(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := c4v1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	yes := true
+	unitPod := func(name, uid string, edit func(p *corev1.Pod)) *corev1.Pod {
+		p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: name, UID: types.UID(uid),
+			Labels:      map[string]string{c4v1.LabelJob: "sh040-comp", c4v1.LabelUnit: "3"},
+			Annotations: map[string]string{c4v1.AnnotationAttempt: "2"},
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: c4v1.GroupVersion.String(), Kind: "WorkJob", Name: "sh040-comp",
+				UID: "9c1d2e7f-0000-4000-8000-000000000001", Controller: &yes}}},
+			Status: corev1.PodStatus{Phase: corev1.PodRunning}}
+		if edit != nil {
+			edit(p)
+		}
+		return p
+	}
+	show := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: "show-a"}, Spec: c4v1.ProjectSpec{
+		Namespaces: []string{"show-a"}, Importers: []c4v1.Importer{{Namespace: "show-a", ServiceAccount: "default"}}}}
+	r := fake.NewClientBuilder().WithScheme(scheme).WithObjects(show,
+		unitPod("u3", "pod-u3", nil),
+		unitPod("done", "pod-done", func(p *corev1.Pod) { p.Status.Phase = corev1.PodSucceeded }),
+		unitPod("noattempt", "pod-na", func(p *corev1.Pod) { delete(p.Annotations, c4v1.AnnotationAttempt) }),
+		unitPod("loose", "pod-loose", func(p *corev1.Pod) { p.OwnerReferences = nil }),
+		unitPod("plain", "pod-plain", func(p *corev1.Pod) { p.Labels = nil }),
+	).Build()
+	pod := func(name, uid string) *auth.Identity {
+		return &auth.Identity{User: "system:serviceaccount:show-a:default", Namespace: "show-a", Account: "default", PodName: name, PodUID: uid}
+	}
+	ctx := context.Background()
+	got, life, err := signerIdentity(ctx, r, pod("u3", "pod-u3"), "c4-system")
+	if want := provenance.UnitIdentity("show-a", "sh040-comp", "3", "9c1d2e7f-0000-4000-8000-000000000001", 2); err != nil || got != want || life != time.Hour {
+		t.Fatalf("a unit: %q for %v (err %v), want %q", got, life, err, want)
+	}
+	for name, c := range map[string]struct {
+		id  *auth.Identity
+		err string
+	}{
+		"another pod's token": {pod("u3", "pod-old"), "now another pod"},
+		"a finished attempt":  {pod("done", "pod-done"), "has ended"},
+		"no attempt":          {pod("noattempt", "pod-na"), "names no attempt"},
+		"no controlling job":  {pod("loose", "pod-loose"), "is not a unit of job"},
+		"a pod that is gone":  {pod("gone", "pod-gone"), "is gone"},
+	} {
+		if got, _, err := signerIdentity(ctx, r, c.id, "c4-system"); err == nil || !strings.Contains(err.Error(), c.err) {
+			t.Errorf("%s: certified as %q (err %v), want refused with %q", name, got, err, c.err)
+		}
+	}
+	// a pod that is no unit's is judged as its account: here an importer
+	if got, _, err := signerIdentity(ctx, r, pod("plain", "pod-plain"), "c4-system"); err != nil || got != provenance.ServiceAccountIdentity("show-a", "default") {
+		t.Errorf("a pod that is no unit's: %q (err %v)", got, err)
 	}
 }

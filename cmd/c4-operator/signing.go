@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -166,8 +168,9 @@ const hostsNamespace = "c4-hosts"
 // signerIdentity is the identity the issuer certifies a reviewed token's
 // account as, and for how long. A node daemon is certified as its node
 // for a day; a host runner (c4-hosts/<node>) as runner/<node> for an
-// hour; a workload as itself for an hour, and only if a project names it
-// among its importers. Anything else is refused.
+// hour; a unit, on its own pod's token, as that unit's attempt for an
+// hour (unitIdentity); a workload as itself for an hour, and only if a
+// project names it among its importers. Anything else is refused.
 func signerIdentity(ctx context.Context, projects client.Reader, id *auth.Identity, namespace string) (string, time.Duration, error) {
 	switch {
 	case id.Namespace == "":
@@ -186,6 +189,12 @@ func signerIdentity(ctx context.Context, projects client.Reader, id *auth.Identi
 		// A host runner is its machine's own account, named for its
 		// Node (config/rbac/host-runner.yaml).
 		return provenance.RunnerIdentity(id.Account), time.Hour, nil
+	case id.PodName != "":
+		// A token bound to a pod: a unit's is certified as that unit,
+		// never as its account, so a unit is only ever itself.
+		if unit, ok, err := unitIdentity(ctx, projects, id); ok || err != nil {
+			return unit, time.Hour, err
+		}
 	}
 	var list c4v1.ProjectList
 	if err := projects.List(ctx, &list); err != nil {
@@ -197,6 +206,41 @@ func signerIdentity(ctx context.Context, projects client.Reader, id *auth.Identi
 		}
 	}
 	return "", 0, fmt.Errorf("%s is not an importer of a project: a project names the accounts that sign its imports and ingests (spec.importers)", id.User)
+}
+
+// unitIdentity is the identity of the unit whose pod a reviewed token is
+// bound to, unit/<ns>/<job>/<unit>@<job UID>/<attempt> (PEOPLE-KEYS 5.1),
+// for its act/v1 records only: CheckSigner gives a unit/ leaf no other
+// kind. ok is false for a pod that is no unit's, which is judged as its
+// account is. The pod is read now, so a token outliving its pod, or one
+// for a finished attempt, certifies nothing.
+func unitIdentity(ctx context.Context, r client.Reader, id *auth.Identity) (string, bool, error) {
+	var pod corev1.Pod
+	if err := r.Get(ctx, types.NamespacedName{Namespace: id.Namespace, Name: id.PodName}, &pod); err != nil {
+		if apierrors.IsNotFound(err) {
+			return "", true, fmt.Errorf("pod %s/%s is gone", id.Namespace, id.PodName)
+		}
+		return "", true, fmt.Errorf("reading pod %s/%s: %w", id.Namespace, id.PodName, err)
+	}
+	job := pod.Labels[c4v1.LabelJob]
+	if job == "" {
+		return "", false, nil
+	}
+	ref := metav1.GetControllerOf(&pod)
+	attempt, err := strconv.Atoi(pod.Annotations[c4v1.AnnotationAttempt])
+	switch {
+	case string(pod.UID) != id.PodUID:
+		return "", true, fmt.Errorf("the token is bound to pod %s/%s %s, which is now another pod", id.Namespace, id.PodName, id.PodUID)
+	case ref == nil || ref.Kind != "WorkJob" || ref.Name != job || ref.UID == "":
+		return "", true, fmt.Errorf("pod %s/%s is not a unit of job %s", id.Namespace, id.PodName, job)
+	case pod.Labels[c4v1.LabelUnit] == "":
+		return "", true, fmt.Errorf("pod %s/%s names no unit", id.Namespace, id.PodName)
+	case err != nil || attempt < 1:
+		return "", true, fmt.Errorf("pod %s/%s names no attempt", id.Namespace, id.PodName)
+	case pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed || pod.DeletionTimestamp != nil:
+		return "", true, fmt.Errorf("unit %s/%s's attempt %d has ended", job, pod.Labels[c4v1.LabelUnit], attempt)
+	}
+	return provenance.UnitIdentity(id.Namespace, job, pod.Labels[c4v1.LabelUnit], string(ref.UID), attempt), true, nil
 }
 
 // everyReplica runs on every manager replica, leader or not: the issuer
