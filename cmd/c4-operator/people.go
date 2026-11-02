@@ -10,16 +10,21 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Avalanche-io/c4"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/farmbook"
+	"github.com/Avalanche-io/c4-operator/internal/hud/server"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
@@ -31,8 +36,8 @@ import (
 // Its records and index entries go to that object store by C4 ID; the
 // index's head is a Secret in the signing namespace, which only the
 // manager reads, written by resourceVersion so replicas append one at a
-// time; the people's sign-ins are a Secret there too until ORGANIZATION's
-// Parties carry them.
+// time. The people's sign-ins are the farm's Parties' (partySignIns), and
+// a Secret there on a farm with no Parties yet.
 const (
 	peopleIndexSecret = "c4-people-index"
 	peopleStoreSecret = "c4-people-store"
@@ -105,12 +110,12 @@ func newPeopleIssuer(ctx context.Context, s *signing, kube kubernetes.Interface,
 	iss := &people.Issuer{CA: s.ca, Bind: s.bind, Stale: s.newStale(),
 		Index:    index,
 		Provider: people.Provider{Issuer: o.provider, ClientID: o.clientID}, StepUp: people.StepUp{ACR: o.stepUpACR}, WebAuthn: rp,
-		SignIns: &secretSignIns{kube: kube, ns: signingNS}, Owner: owner, InstallerToken: o.installer, SoftwareTouchKeys: o.softwareTouchKeys,
-		// The farm owner's admins: before ORGANIZATION's Parties and their
-		// purposes, the farm binding's owner.
-		Admin: farmAdmin(reader)}
+		SignIns: &partySignIns{reader: reader, secret: &secretSignIns{kube: kube, ns: signingNS}}, Owner: owner, InstallerToken: o.installer, SoftwareTouchKeys: o.softwareTouchKeys,
+		// The farm owner's admins: the farm binding's owner before
+		// ORGANIZATION's Parties, then the farm owner's Party's admins.
+		Admin: farmAdmins(reader, book)}
 	// The index holds a booked entry to the issuer's own rules, an admin's
-	// revoke included.
+	// revoke included: a Party admin's revoke is sealed by the same rule.
 	index.Admin = iss.Admin
 	return iss, nil
 }
@@ -239,10 +244,95 @@ func (h *secretHead) Write(ctx context.Context, from, to people.HeadState) error
 	return err
 }
 
+// farmParties lists the farm's Parties (ORGANIZATION 1); kept is false on
+// a farm with none yet, or without the kind installed.
+func farmParties(ctx context.Context, reader client.Reader) (ps []c4v1.Party, kept bool, err error) {
+	var l c4v1.PartyList
+	if err := reader.List(ctx, &l); err != nil {
+		if meta.IsNoMatchError(err) || runtime.IsNotRegisteredError(err) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	return l.Items, len(l.Items) > 0, nil
+}
+
+// partySignIns are the people's sign-ins from the farm's Parties: each
+// person Party's signIns that name a provider (PEOPLE-KEYS-2 3.1). Only a
+// farm with no Parties yet reads K2's stand-in, the c4-sign-ins Secret.
+// Parties that can't be read sign no one in.
+type partySignIns struct {
+	reader client.Reader
+	secret people.SignIns
+}
+
+func (s *partySignIns) Load(ctx context.Context) (people.StaticSignIns, error) {
+	ps, kept, err := farmParties(ctx, s.reader)
+	if err != nil {
+		return nil, fmt.Errorf("the farm's parties: %w", err)
+	}
+	if !kept {
+		return s.secret.Load(ctx)
+	}
+	out := people.StaticSignIns{}
+	for _, p := range ps {
+		if p.Spec.Kind != c4v1.PartyPerson {
+			continue
+		}
+		for _, x := range p.Spec.SignIns {
+			if x.Issuer != "" {
+				out[p.Name] = append(out[p.Name], people.SignIn{Issuer: x.Issuer, Subject: x.Subject})
+			}
+		}
+	}
+	return out, nil
+}
+
+// farmAdmins decides who the farm owner's admins are, who may remove
+// anyone's devices and read others' ID tokens and addresses (Issuer.Sees,
+// the farm book's private parts). With Parties, a person holding admin by
+// name in the farm owner's Party, in force in the farm book now, or for a
+// person's Party, that person; with Parties and no Party of the farm
+// owner's name, or no book to judge by, no one. Before Parties, the farm
+// binding's owner.
+func farmAdmins(reader client.Reader, book *farmBook) func(ctx context.Context, person string) bool {
+	return func(ctx context.Context, person string) bool {
+		ps, kept, err := farmParties(ctx, reader)
+		if err != nil {
+			return false
+		}
+		b := farmBinding(ctx, reader)
+		if !kept {
+			return b != nil && b.Spec.Owner == person
+		}
+		var owner *c4v1.Party
+		for i := range ps {
+			if b != nil && ps[i].Name == b.Spec.Owner {
+				owner = &ps[i]
+			}
+		}
+		switch {
+		case owner == nil:
+			return false
+		case owner.Spec.Kind == c4v1.PartyPerson:
+			return owner.Name == person
+		case book == nil || book.reader == nil:
+			return false
+		}
+		view, err := book.reader.View(ctx, time.Now())
+		if err != nil {
+			return false
+		}
+		ok, _ := farmbook.HoldsByName(ctx, view, book.store, book.roots, owner.Name, person, server.PurposeAdmin)
+		return ok
+	}
+}
+
 // secretSignIns reads the people's sign-ins from the Secret c4-sign-ins:
 // each key a person, each line of its value "<issuer URL> <subject ID>".
-// It stands in for ORGANIZATION's Party signIns (O1), which aren't built;
-// a cluster administrator writes it, as they install the farm.
+// It stands in for ORGANIZATION's Party signIns on a farm with no Parties
+// yet (partySignIns); a cluster administrator writes it, as they install
+// the farm.
 type secretSignIns struct {
 	kube kubernetes.Interface
 	ns   string
