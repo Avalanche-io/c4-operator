@@ -1,6 +1,8 @@
 package provenance_test
 
 import (
+	"context"
+	"crypto/x509"
 	"encoding/base64"
 	"testing"
 	"time"
@@ -90,5 +92,42 @@ func TestVerifyRequest(t *testing.T) {
 	late := decode(f.SignRequest(t, runner, "GET", "/api/v1/nodes/laptop-1/pods", nil))
 	if _, _, err := provenance.VerifyRequest(late, f.Roots, f.Now.Add(10*time.Minute), seen); err == nil {
 		t.Error("a request signed ten minutes ago")
+	}
+}
+
+// A runner signs its own request with its key, and the farm takes it as
+// that request: the same method, target and body, once.
+func TestSignRequest(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	ca, err := provenance.NewCA(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(ca.Cert)
+	s, err := provenance.NewSigner(ctx, provenance.LocalIssuer(ca, provenance.RunnerIdentity("laptop-1"), time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"owners":["dana"]}`)
+	const target = "/api/v1/nodes/laptop-1/observed"
+	h, err := provenance.SignRequest(ctx, s, "POST", target, body, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := base64.StdEncoding.DecodeString(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, r, err := provenance.VerifyRequest(data, roots, now, provenance.NewMemorySeen())
+	if err != nil || v.Identity != provenance.RunnerIdentity("laptop-1") || r.Predicate.Farm != provenance.FarmID(ca.Cert) {
+		t.Fatalf("the runner's request: %v", err)
+	}
+	if err := r.Matches("POST", target, body); err != nil {
+		t.Fatal(err)
+	}
+	if r.Matches("POST", target, []byte(`{"owners":["lee"]}`)) == nil || r.Matches("GET", target, body) == nil || r.Matches("POST", target+"?x=1", body) == nil {
+		t.Fatal("a signed request matched another request")
 	}
 }

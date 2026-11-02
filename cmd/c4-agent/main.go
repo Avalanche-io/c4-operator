@@ -539,6 +539,11 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 		// its pods only through the HUD
 		r.Offer = isEnrolled && tokens != ""
 		r.PodsThroughHUD = isEnrolled && tokens != ""
+		// and signs each call there with its own key, which the workload
+		// issuer the HUD serves certifies as runner/<node>
+		if *signerToken != "" {
+			r.Key = agent.HostKey(*hud, *signerToken)
+		}
 	}
 	if *observe {
 		if *hud == "" {
@@ -567,6 +572,8 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 			return strings.TrimSpace(string(b)), nil
 		}
 		r.Signer, r.Farm = provenance.LazySigner(provenance.RemoteIssuer(*signerURL, token, nil)), *farm
+		// one key, runner/<node>, for its records and its calls alike
+		r.Key = r.Signer
 		go func() {
 			if err := r.Signer.Ready(ctx, 5*time.Second); err == nil {
 				fmt.Fprintf(out, "signing task records as %s\n", r.Signer.Identity())
@@ -742,7 +749,9 @@ func runEnrollOffer(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, arg
 	if len(strings.TrimSpace(string(tok))) == 0 {
 		return errors.New("enroll-offer: no HUD token yet: start the runner once, which makes it")
 	}
-	o, err := agent.OfferMachine(ctx, nil, e.HUD, strings.TrimSpace(string(tok)), e.Node, *holder)
+	// the offer is signed with the runner's key, certified at the HUD
+	key := agent.HostKey(e.HUD, agent.TokenFile(e.Tokens, "signer"))
+	o, err := agent.OfferMachine(ctx, nil, e.HUD, strings.TrimSpace(string(tok)), key, e.Node, *holder)
 	if err != nil {
 		return err
 	}

@@ -1,7 +1,10 @@
 package provenance
 
 import (
+	"context"
+	"crypto/rand"
 	"crypto/x509"
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"time"
@@ -74,4 +77,27 @@ func VerifyRequest(data []byte, roots *x509.CertPool, now time.Time, seen SeenSe
 		return nil, nil, fmt.Errorf("the request was taken once already (payload %.16s): %w", PayloadHash(v.Payload), err)
 	}
 	return v, r, nil
+}
+
+// SignRequest signs an HTTP request as s (request/v1): its method, its
+// target in origin form exactly as it will be sent (escaped path and,
+// with a query, ? and the raw query) and its body, byte for byte. It
+// returns the value of X-C4-Request. Every request is signed afresh: the
+// farm takes each once.
+func SignRequest(ctx context.Context, s *Signer, method, target string, body []byte, now time.Time) (string, error) {
+	farm, err := s.Farm(ctx, now) // also obtains the certificate
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, 16)
+	if _, err := rand.Read(nonce); err != nil {
+		return "", err
+	}
+	p := schema.RequestPredicate{Farm: farm, Method: method, Path: target, Signer: s.Identity(),
+		Nonce: base64.RawURLEncoding.EncodeToString(nonce)}
+	b, err := SignStatement(ctx, s, PredicateRequest, []Subject{{Name: "body", Digest: map[string]string{"sha256": schema.BodyDigest(body)}}}, p, now)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(b), nil
 }

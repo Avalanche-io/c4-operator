@@ -116,6 +116,12 @@ type Runner struct {
 	// version it names.
 	Signer  *provenance.Signer
 	Version string
+	// Key, when set, signs each call the runner makes to the HUD as this
+	// machine's runner (request/v1, requestkey.go): HostKey's, on an
+	// enrolled machine. Its calls also carry HUDToken until every client
+	// signs.
+	Key    *provenance.Signer
+	hudKey hudKey
 	// Holder is the person whose sign-in this machine's members use (the
 	// Claude Code config here); default the runner's owner, when it has one.
 	Holder string

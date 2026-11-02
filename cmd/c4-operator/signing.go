@@ -139,14 +139,7 @@ func publishRoot(ctx context.Context, kube kubernetes.Interface, ns string, cert
 // issuerRunnable serves the certificate issuer on addr. projects reads
 // the Projects that name importers (the manager's API reader).
 func issuerRunnable(s *signing, kube kubernetes.Interface, projects client.Reader, namespace, addr string) everyReplica {
-	rev := &auth.Reviewer{Client: kube, Tier: "signer"}
-	iss := &provenance.Issuer{CA: s.ca, Identify: func(ctx context.Context, token string) (string, time.Duration, error) {
-		id, err := rev.Review(ctx, token, AudienceSigner)
-		if err != nil {
-			return "", 0, err
-		}
-		return signerIdentity(ctx, projects, id, namespace)
-	}}
+	iss := workloadIssuer(s, kube, projects, namespace, nil)
 	return everyReplica(func(ctx context.Context) error {
 		hs := &http.Server{Addr: addr, Handler: iss, ReadHeaderTimeout: 10 * time.Second}
 		go func() {
@@ -157,6 +150,39 @@ func issuerRunnable(s *signing, kube kubernetes.Interface, projects client.Reade
 		}()
 		if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return err
+		}
+		return nil
+	})
+}
+
+// workloadIssuer is the farm's workload issuer: it certifies a reviewed
+// token's account (audience c4-signer) as signerIdentity says, when only
+// (if given) lets that account through.
+func workloadIssuer(s *signing, kube kubernetes.Interface, projects client.Reader, namespace string, only func(*auth.Identity) error) *provenance.Issuer {
+	rev := &auth.Reviewer{Client: kube, Tier: "signer"}
+	return &provenance.Issuer{CA: s.ca, Identify: func(ctx context.Context, token string) (string, time.Duration, error) {
+		id, err := rev.Review(ctx, token, AudienceSigner)
+		if err != nil {
+			return "", 0, err
+		}
+		if only != nil {
+			if err := only(id); err != nil {
+				return "", 0, err
+			}
+		}
+		return signerIdentity(ctx, projects, id, namespace)
+	}}
+}
+
+// hostIssuer is the workload issuer as the HUD serves it to host runners,
+// at its own address (/workload/v1/certificate): a machine outside the
+// cluster reaches the farm only there. It certifies host runners'
+// accounts (c4-hosts/<node>) alone; every other workload asks the issuer
+// inside the cluster.
+func hostIssuer(s *signing, kube kubernetes.Interface, projects client.Reader, namespace string) *provenance.Issuer {
+	return workloadIssuer(s, kube, projects, namespace, func(id *auth.Identity) error {
+		if id.Namespace != hostsNamespace {
+			return fmt.Errorf("%s is not a host runner's account: the HUD's issuer certifies host runners only", id.User)
 		}
 		return nil
 	})

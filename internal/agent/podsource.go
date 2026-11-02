@@ -70,6 +70,7 @@ func (r *Runner) ownPods(ctx context.Context) ([]corev1.Pod, error) {
 	if t := r.HUDToken(); t != "" {
 		req.Header.Set("Authorization", "Bearer "+t)
 	}
+	r.signHUD(ctx, req, nil)
 	hc := r.HTTPClient
 	if hc == nil {
 		hc = &http.Client{Timeout: 15 * time.Second}

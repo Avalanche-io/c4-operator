@@ -167,6 +167,12 @@ type Server struct {
 	// nil serves none. It trusts the HUD for nothing: it certifies on an
 	// ID token, or a one-person farm's installer token or code.
 	People http.Handler
+	// HostIssuer is the farm's workload issuer for host runners, served at
+	// /workload/v1/certificate: a machine outside the cluster reaches the
+	// farm only at the HUD's address. It certifies on the runner's own
+	// token (audience c4-signer), and only a host runner's account; nil
+	// serves none.
+	HostIssuer http.Handler
 	// PeopleIndex is the people's index, on a farm that keeps one
 	// (--people-store): a person's act is taken only from a device in
 	// force at its current position, a confirmed one's touch key that
@@ -324,6 +330,9 @@ func (s *Server) Handler() http.Handler {
 		p := http.StripPrefix("/issuer", s.peopleIssuer())
 		mux.Handle("GET /issuer/v1/people/", p)
 		mux.Handle("POST /issuer/v1/people/", p)
+	}
+	if s.HostIssuer != nil {
+		mux.Handle("POST /workload/v1/certificate", http.StripPrefix("/workload", s.HostIssuer))
 	}
 	if s.Sandbox != nil && s.DevViewers != nil {
 		p := s.sandboxProxy()

@@ -80,6 +80,7 @@ func (r *Runner) postObserved(ctx context.Context) error {
 			req.Header.Set("Authorization", "Bearer "+t)
 		}
 	}
+	r.signHUD(ctx, req, body)
 	hc := r.HTTPClient
 	if hc == nil {
 		hc = &http.Client{Timeout: 10 * time.Second}

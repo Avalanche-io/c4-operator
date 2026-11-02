@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 )
 
 // A machine is enrolled by its offer and its holder's acceptance (the
@@ -38,8 +39,9 @@ type EnrollOffer struct {
 }
 
 // OfferMachine posts a machine's enrollment offer to the HUD, as its
-// runner (token: its HUD token), naming the holder whose sign-in it uses.
-func OfferMachine(ctx context.Context, hc *http.Client, hud, token, node, holder string) (EnrollOffer, error) {
+// runner (token: its HUD token; key, when given, its runner key, which
+// signs the offer), naming the holder whose sign-in it uses.
+func OfferMachine(ctx context.Context, hc *http.Client, hud, token string, key *provenance.Signer, node, holder string) (EnrollOffer, error) {
 	body, _ := json.Marshal(map[string]string{"holder": holder})
 	u := strings.TrimRight(hud, "/") + "/api/v1/nodes/" + url.PathEscape(node) + "/enroll-offer"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
@@ -49,6 +51,11 @@ func OfferMachine(ctx context.Context, hc *http.Client, hud, token, node, holder
 	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if key != nil {
+		if err := SignHUDRequest(ctx, key, req, body); err != nil {
+			return EnrollOffer{}, fmt.Errorf("this machine's key: %w", err)
+		}
 	}
 	if hc == nil {
 		hc = &http.Client{Timeout: 10 * time.Second}

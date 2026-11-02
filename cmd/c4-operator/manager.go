@@ -445,6 +445,10 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		// operator's tier token alone; their metrics need an API token
 		// the c4-metrics-reader role is bound to.
 		TierToken: (&tier.TokenFile{Path: tierToken}).Token, MetricsToken: apiToken(mgr.GetConfig())}
+	if sig.ca != nil {
+		// host runners reach the workload issuer at the HUD's address
+		srv.HostIssuer = hostIssuer(sig, kube, mgr.GetAPIReader(), namespace)
+	}
 	// The clean agent environment blocks run in by default ().
 	if id, err := agent.BaseEnvID(); err != nil {
 		ctrl.Log.WithName("hud").Error(err, "the clean agent environment's version; blocks get none")
