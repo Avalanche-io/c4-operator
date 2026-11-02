@@ -66,7 +66,12 @@ type AgentKeys interface {
 // keystore keeps a key file. Only the MCP server reads it.
 type KeyFiles struct{ Dir string }
 
-// Key reads the key of this kind, or makes it the first time.
+// Key reads the key of this kind, or makes it the first time. The
+// directory must be the person's own, 0700, and the file a regular file
+// of theirs, 0600: a key file planted there, a symlink, or one others can
+// read is refused, never used. A file that doesn't read as a key (a
+// write cut short) is moved aside and a new key made, which needs a new
+// grant: Key returns the new key with a *KeyRemade saying so.
 func (k KeyFiles) Key(kind Kind) (AgentKey, error) {
 	if k.Dir == "" {
 		return nil, errors.New("no directory for the agent's key")
@@ -75,15 +80,97 @@ func (k KeyFiles) Key(kind Kind) (AgentKey, error) {
 	if !ok || !validAgent(name) {
 		return nil, fmt.Errorf("key %q: a workload's, named with letters, digits, '.', '_' and '-', at most 64", kind)
 	}
-	path := filepath.Join(k.Dir, string(kind)+".key")
-	if b, err := os.ReadFile(path); err == nil {
-		return loadKeyFile(b)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
 	if err := os.MkdirAll(k.Dir, 0o700); err != nil {
 		return nil, err
 	}
+	if err := private(k.Dir, true); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(k.Dir, string(kind)+".key")
+	b, err := readPrivate(path)
+	switch {
+	case err == nil:
+		key, lerr := loadKeyFile(b)
+		if lerr == nil {
+			return key, nil
+		}
+		// Cut short or corrupt: kept aside for the person to look at, and
+		// replaced by a new key, which the old grant doesn't name.
+		aside := fmt.Sprintf("%s.corrupt-%d", path, time.Now().Unix())
+		if err := os.Rename(path, aside); err != nil {
+			return nil, fmt.Errorf("the agent's key file %s doesn't read as a key (%v), and can't be moved aside: %w", path, lerr, err)
+		}
+		nk, err := makeKeyFile(path)
+		if err != nil {
+			return nil, err
+		}
+		return nk, &KeyRemade{Path: path, Aside: aside, Cause: lerr}
+	case !errors.Is(err, os.ErrNotExist):
+		return nil, err
+	}
+	return makeKeyFile(path)
+}
+
+// KeyRemade says a key file didn't read as a key and a new key was made in
+// its place: the agent's grant named the old key, so a person grants the
+// new one (c4 farm integrate) before the agent signs again.
+type KeyRemade struct {
+	Path, Aside string
+	Cause       error
+}
+
+func (e *KeyRemade) Error() string {
+	return fmt.Sprintf("the agent's key file %s didn't read as a key (%v): it is kept as %s, and a new key was made, which needs a new grant: run c4 farm integrate", e.Path, e.Cause, e.Aside)
+}
+
+// private checks a key directory, or a key file, is the person's own and
+// only theirs: not a symlink, owned by this user, mode 0700 (a directory)
+// or 0600 (a file).
+func private(path string, dir bool) error {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	want, kind, what := os.FileMode(0o600), "key file", "regular file"
+	if dir {
+		want, kind, what = 0o700, "key directory", "directory"
+	}
+	switch {
+	case fi.Mode()&os.ModeSymlink != 0:
+		return fmt.Errorf("the agent's %s %s is a symlink: refused; a key lives in a file of the person's own", kind, path)
+	case dir != fi.IsDir() || !dir && !fi.Mode().IsRegular():
+		return fmt.Errorf("the agent's %s %s is not a %s", kind, path, what)
+	case fi.Mode().Perm() != want:
+		return fmt.Errorf("the agent's %s %s is mode %v, not %v: refused, since others may have read it (chmod %o, or remove the key and grant a new one)", kind, path, fi.Mode().Perm(), want, want)
+	}
+	return ownedByMe(path, fi)
+}
+
+// readPrivate reads a key file after checking it is private, and that the
+// file read is the one checked.
+func readPrivate(path string) ([]byte, error) {
+	if err := private(path, false); err != nil {
+		return nil, err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	li, err := os.Lstat(path)
+	if err != nil || !os.SameFile(fi, li) {
+		return nil, fmt.Errorf("the agent's key file %s changed while it was read", path)
+	}
+	return io.ReadAll(io.LimitReader(f, 64<<10))
+}
+
+// makeKeyFile makes a P-256 key in a new file at path, 0600, exclusively:
+// two servers starting at once keep the first key made.
+func makeKeyFile(path string) (AgentKey, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, err
@@ -92,10 +179,9 @@ func (k KeyFiles) Key(kind Kind) (AgentKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	// O_EXCL: two servers starting at once keep the first key made.
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if errors.Is(err, os.ErrExist) {
-		b, err := os.ReadFile(path)
+		b, err := readPrivate(path)
 		if err != nil {
 			return nil, err
 		}
@@ -105,6 +191,11 @@ func (k KeyFiles) Key(kind Kind) (AgentKey, error) {
 		return nil, err
 	}
 	if _, err := f.Write(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})); err != nil {
+		f.Close()
+		os.Remove(path)
+		return nil, err
+	}
+	if err := f.Sync(); err != nil {
 		f.Close()
 		os.Remove(path)
 		return nil, err
@@ -167,6 +258,9 @@ type agentID struct {
 	key  AgentKey
 	cert *people.AgentCertified
 	got  time.Time
+	// note is what the server says until the agent is certified again: a
+	// key made anew, which needs a new grant.
+	note string
 	// tried is when the issuer last refused, so a farm with no grant isn't
 	// asked on every control.
 	tried  time.Time
@@ -202,7 +296,14 @@ func (c *Client) agentCert(ctx context.Context, force bool) (*agentID, string) {
 	defer id.mu.Unlock()
 	if id.key == nil {
 		k, err := c.Keys.Key(Workload(c.Agent))
-		if err != nil {
+		var remade *KeyRemade
+		switch {
+		case errors.As(err, &remade) && k != nil:
+			// A new key: said in the log and in what the server answers
+			// until a person grants it.
+			fmt.Fprintln(os.Stderr, "c4 farm mcp:", remade)
+			id.note = remade.Error()
+		case err != nil:
 			return nil, "the agent's key: " + err.Error()
 		}
 		id.key = k
@@ -217,13 +318,16 @@ func (c *Client) agentCert(ctx context.Context, force bool) (*agentID, string) {
 	cert, err := c.certify(ctx, id.key)
 	if err != nil {
 		id.tried, id.reason = now, err.Error()
+		if id.note != "" {
+			id.reason = id.note + "; " + id.reason
+		}
 		if id.cert != nil && now.Before(id.cert.Expires.Add(-time.Minute)) {
 			return id, "" // the old certificate still lives
 		}
 		id.cert = nil
 		return nil, id.reason
 	}
-	id.cert, id.got, id.reason = cert, now, ""
+	id.cert, id.got, id.reason, id.note = cert, now, "", ""
 	return id, ""
 }
 
@@ -248,10 +352,49 @@ func (c *Client) certify(ctx context.Context, key AgentKey) (*people.AgentCertif
 	if err := c.issuer(ctx, "POST", "/agent", people.AgentEnrolment{Request: q, Proof: base64.RawURLEncoding.EncodeToString(sig)}, &out); err != nil {
 		return nil, err
 	}
-	if len(out.Chain) == 0 || out.Device != schema.DeviceID(key.SPKI()) {
-		return nil, errors.New("the issuer's certificate is not for this key")
+	if err := checkCert(&out, key.SPKI(), c.Agent, cfg.Farm, time.Now()); err != nil {
+		return nil, fmt.Errorf("the issuer's certificate: %w", err)
 	}
 	return &out, nil
+}
+
+// checkCert checks a certificate the issuer returned before the server
+// signs with it: its leaf is for this key, as agent/<agent>, naming this
+// key's device and the grant it says, for a person; it is in force now;
+// and it is signed by the CA it is chained to, which is the farm's.
+func checkCert(c *people.AgentCertified, spki []byte, agent, farm string, now time.Time) error {
+	if len(c.Chain) != 2 {
+		return fmt.Errorf("a chain of %d certificates, not the leaf and the farm's CA", len(c.Chain))
+	}
+	leaf, err := x509.ParseCertificate(c.Chain[0])
+	if err != nil {
+		return err
+	}
+	ca, err := x509.ParseCertificate(c.Chain[1])
+	if err != nil {
+		return err
+	}
+	device := schema.DeviceID(spki)
+	switch {
+	case string(leaf.RawSubjectPublicKeyInfo) != string(spki):
+		return errors.New("its leaf is for another key")
+	case provenance.CertIdentity(leaf) != provenance.AgentIdentity(agent) || c.Identity != provenance.AgentIdentity(agent) || c.Agent != agent:
+		return fmt.Errorf("its leaf is %s, not agent %s", provenance.CertIdentity(leaf), agent)
+	case provenance.CertDevice(leaf) != device || c.Device != device:
+		return fmt.Errorf("its leaf names device %.16s, not this key's %.16s", provenance.CertDevice(leaf), device)
+	case c.Grant == "" || provenance.CertGrant(leaf) != c.Grant:
+		return fmt.Errorf("its leaf names grant %.16s, and it says %.16s", provenance.CertGrant(leaf), c.Grant)
+	case c.Person == "":
+		return errors.New("it names no person whose grant it is")
+	case now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) || !c.Expires.Equal(leaf.NotAfter):
+		return fmt.Errorf("its leaf lives %s to %s, and it says it ends %s", leaf.NotBefore, leaf.NotAfter, c.Expires)
+	case !ca.IsCA || provenance.FarmID(ca) != farm || c.Farm != farm:
+		return fmt.Errorf("it chains to %.16s, not this farm's CA %.16s", provenance.FarmID(ca), farm)
+	}
+	if err := leaf.CheckSignatureFrom(ca); err != nil {
+		return fmt.Errorf("its leaf isn't signed by its CA: %w", err)
+	}
+	return nil
 }
 
 // issuer calls the people's issuer at the HUD's origin.

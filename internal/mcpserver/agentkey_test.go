@@ -3,10 +3,13 @@ package mcpserver
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -94,6 +97,8 @@ type agentHUD struct {
 	granted bool
 	asked   int
 	posts   []agentPost
+	// tamper changes the certificate the issuer answers.
+	tamper func(c *people.AgentCertified, pub *ecdsa.PublicKey, ca *provenance.CA)
 }
 
 type agentPost struct {
@@ -134,8 +139,12 @@ func (h *agentHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			h.t.Error(err)
 		}
-		json.NewEncoder(w).Encode(people.AgentCertified{AgentGrant: people.AgentGrant{Grant: h.grant, Agent: e.Request.Agent, Device: device, Person: "noor"},
-			Farm: h.f.ID, Identity: provenance.CertIdentity(leaf), Chain: [][]byte{leaf.Raw, h.f.CA.Cert.Raw}, Expires: leaf.NotAfter})
+		c := people.AgentCertified{AgentGrant: people.AgentGrant{Grant: h.grant, Agent: e.Request.Agent, Device: device, Person: "noor"},
+			Farm: h.f.ID, Identity: provenance.CertIdentity(leaf), Chain: [][]byte{leaf.Raw, h.f.CA.Cert.Raw}, Expires: leaf.NotAfter}
+		if h.tamper != nil {
+			h.tamper(&c, pub, h.f.CA)
+		}
+		json.NewEncoder(w).Encode(c)
 	case r.Method == "GET" && r.URL.Path == "/api/v1/jobs/show-a/sh040-light-v007":
 		json.NewEncoder(w).Encode(api.Job{Namespace: "show-a", Name: "sh040-light-v007", UID: agentJobUID, SpecDigest: agentJobSpec,
 			Waits: []api.Wait{{Unit: 3, Name: "ruling", WaitsFor: "agent:claude-code"}, {Unit: 4, Name: "approval", WaitsFor: "person:noor"}}})
@@ -282,4 +291,123 @@ func TestServeConnectsTheAgentKey(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Error("serving, the server made no key, or didn't ask for its certificate")
+}
+
+// Probe (K5 review): a key file planted before the server's first run is
+// refused, never used: a symlink to another file, one others can read, or
+// one in a directory others can read. A file cut short by a crash is kept
+// aside and a new key made, which needs a new grant, and the server says
+// so.
+func TestPlantedOrBrokenKeyFileRefused(t *testing.T) {
+	k, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	der, _ := x509.MarshalPKCS8PrivateKey(k)
+	pemb := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+	cases := map[string]func(dir string) error{
+		"a symlink to another file": func(dir string) error {
+			elsewhere := filepath.Join(filepath.Dir(dir), "planted.key")
+			if err := os.WriteFile(elsewhere, pemb, 0o600); err != nil {
+				return err
+			}
+			return os.Symlink(elsewhere, filepath.Join(dir, "workload-claude-code.key"))
+		},
+		"a file others can read": func(dir string) error {
+			return os.WriteFile(filepath.Join(dir, "workload-claude-code.key"), pemb, 0o644)
+		},
+		"a directory others can read": func(dir string) error {
+			if err := os.WriteFile(filepath.Join(dir, "workload-claude-code.key"), pemb, 0o600); err != nil {
+				return err
+			}
+			return os.Chmod(dir, 0o755)
+		},
+	}
+	for name, plant := range cases {
+		dir := keyDir(t)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := plant(dir); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := (KeyFiles{Dir: dir}).Key(Workload("claude-code")); err == nil || got != nil {
+			t.Errorf("%s: used, %v", name, err)
+		}
+	}
+	// Cut short.
+	dir := keyDir(t)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "workload-claude-code.key")
+	if err := os.WriteFile(path, pemb[:20], 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := (KeyFiles{Dir: dir}).Key(Workload("claude-code"))
+	var remade *KeyRemade
+	if !errors.As(err, &remade) || got == nil || !strings.Contains(err.Error(), "needs a new grant") {
+		t.Fatalf("a truncated key file: %v, key %v", err, got != nil)
+	}
+	if b, _ := os.ReadFile(remade.Aside); string(b) != string(pemb[:20]) {
+		t.Error("the broken file wasn't kept aside")
+	}
+	if again, err := (KeyFiles{Dir: dir}).Key(Workload("claude-code")); err != nil || string(again.SPKI()) != string(got.SPKI()) {
+		t.Errorf("the new key isn't the one kept: %v", err)
+	}
+	// The server says so until a person grants the new key.
+	h := newAgentHUD(t)
+	h.granted = false
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	dir2 := keyDir(t)
+	os.MkdirAll(dir2, 0o700)
+	os.WriteFile(filepath.Join(dir2, "workload-claude-code.key"), pemb[:20], 0o600)
+	c := &Client{Base: srv.URL, Agent: "claude-code", Keys: KeyFiles{Dir: dir2}}
+	if why := c.Connect(context.Background()); !strings.Contains(why, "a new key was made, which needs a new grant") {
+		t.Errorf("the server's answer after remaking the key: %q", why)
+	}
+}
+
+// The server checks a certificate the issuer returns before it signs
+// with it: one for another key, another agent, another grant than it
+// says, no person, another farm's CA, or an end other than its leaf's is
+// refused, and the agent's controls go unsigned.
+func TestReturnedCertificateCheckedBeforeUse(t *testing.T) {
+	other := provtest.NewFarm(t, time.Now())
+	otherKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	for name, tamper := range map[string]func(c *people.AgentCertified, pub *ecdsa.PublicKey, ca *provenance.CA){
+		"another key's leaf": func(c *people.AgentCertified, _ *ecdsa.PublicKey, ca *provenance.CA) {
+			spki, _ := x509.MarshalPKIXPublicKey(&otherKey.PublicKey)
+			leaf, _ := ca.IssueLeaf(&otherKey.PublicKey, c.Identity, schema.DeviceID(spki), c.Grant, time.Hour, time.Now())
+			c.Chain[0] = leaf.Raw
+		},
+		"another agent's leaf": func(c *people.AgentCertified, pub *ecdsa.PublicKey, ca *provenance.CA) {
+			leaf, _ := ca.IssueLeaf(pub, provenance.AgentIdentity("other-agent"), c.Device, c.Grant, time.Hour, time.Now())
+			c.Chain[0] = leaf.Raw
+		},
+		"a grant its leaf doesn't name": func(c *people.AgentCertified, _ *ecdsa.PublicKey, _ *provenance.CA) {
+			c.Grant = provtest.ID("another grant")
+		},
+		"no person": func(c *people.AgentCertified, _ *ecdsa.PublicKey, _ *provenance.CA) { c.Person = "" },
+		"another farm's CA": func(c *people.AgentCertified, pub *ecdsa.PublicKey, _ *provenance.CA) {
+			leaf, _ := other.CA.IssueLeaf(pub, c.Identity, c.Device, c.Grant, time.Hour, time.Now())
+			c.Chain = [][]byte{leaf.Raw, other.CA.Cert.Raw}
+		},
+		"an end other than its leaf's": func(c *people.AgentCertified, _ *ecdsa.PublicKey, _ *provenance.CA) {
+			c.Expires = c.Expires.Add(24 * time.Hour)
+		},
+	} {
+		h := newAgentHUD(t)
+		h.tamper = tamper
+		srv := httptest.NewServer(h)
+		c := &Client{Base: srv.URL, Agent: "claude-code", Keys: KeyFiles{Dir: keyDir(t)}}
+		if why := c.Connect(context.Background()); !strings.Contains(why, "the issuer's certificate") {
+			t.Errorf("%s: certified: %q", name, why)
+		}
+		if _, _, err := c.decide(context.Background(), nil, DecideIn{JobRef: JobRef{Namespace: "show-a", Name: "sh040-light-v007"}, Unit: "ruling", Do: "approve"}); err != nil {
+			t.Fatal(err)
+		}
+		if p := h.last(); p.act != nil {
+			t.Errorf("%s: a control signed with it", name)
+		}
+		srv.Close()
+	}
 }
