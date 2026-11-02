@@ -50,3 +50,45 @@ func TestSignedRequest(t *testing.T) {
 		}
 	}
 }
+
+// The farm takes a signed request once, from one of its clients, signed
+// within five minutes of its clock: the same request again is refused, as
+// is one signed by a part of the farm (a node, a component), an act sent
+// as a request, and one signed long before.
+func TestVerifyRequest(t *testing.T) {
+	f := provtest.NewFarm(t, time.Now())
+	body := []byte(`{"node":"laptop-1"}`)
+	runner := f.Part(t, provenance.RunnerIdentity("laptop-1"))
+	seen := provenance.NewMemorySeen()
+	decode := func(h string) []byte {
+		b, err := base64.StdEncoding.DecodeString(h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	b := decode(f.SignRequest(t, runner, "POST", "/api/v1/nodes/laptop-1/observed", body))
+	v, r, err := provenance.VerifyRequest(b, f.Roots, f.Now, seen)
+	if err != nil || v.Identity != runner.Identity || r.Matches("POST", "/api/v1/nodes/laptop-1/observed", body) != nil {
+		t.Fatalf("a runner's request: %v", err)
+	}
+	if _, _, err := provenance.VerifyRequest(b, f.Roots, f.Now, seen); err == nil {
+		t.Fatal("the same request taken twice")
+	}
+	for name, k := range map[string]*provtest.Key{
+		"a node":      f.Part(t, provenance.NodeIdentity("w1")),
+		"a component": f.Part(t, provenance.ComponentIdentity("hud")),
+	} {
+		if _, _, err := provenance.VerifyRequest(decode(f.SignRequest(t, k, "GET", "/api/v1/snapshot", nil)), f.Roots, f.Now, seen); err == nil {
+			t.Errorf("%s signed a request", name)
+		}
+	}
+	act := f.SignAct(t, f.Person(t, "noor", false), provtest.Act{})
+	if _, _, err := provenance.VerifyRequest(act, f.Roots, f.Now, seen); err == nil {
+		t.Error("an act taken as a signed request")
+	}
+	late := decode(f.SignRequest(t, runner, "GET", "/api/v1/nodes/laptop-1/pods", nil))
+	if _, _, err := provenance.VerifyRequest(late, f.Roots, f.Now.Add(10*time.Minute), seen); err == nil {
+		t.Error("a request signed ten minutes ago")
+	}
+}

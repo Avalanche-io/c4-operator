@@ -447,6 +447,10 @@ func CheckSigner(v *Verified) error {
 		// The actor's own key, or a tracker's relay (checkAct).
 		_, err := checkAct(v)
 		return err
+	case PredicateRequest:
+		// The client that sent it (checkRequest): never an act.
+		_, err := checkRequest(v)
+		return err
 	case PredicateDevice, PredicateBookEntry:
 		want = ComponentIdentity("issuer")
 	case PredicateImport, PredicateIngest:
