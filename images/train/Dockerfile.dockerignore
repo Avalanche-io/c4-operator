@@ -4,5 +4,6 @@
 !go.sum
 !cmd/c4-unit/
 !internal/needs/
+!internal/provenance/
 !schema/
 !images/train/

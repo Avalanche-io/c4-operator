@@ -2036,7 +2036,7 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 	env := append([]corev1.EnvVar{
 		{Name: "C4_JOB", Value: j.Name}, {Name: "C4_NAMESPACE", Value: j.Namespace}, {Name: "C4_UNIT", Value: strconv.Itoa(idx)},
 		{Name: "C4_ATTEMPT", Value: strconv.Itoa(attempt)}, {Name: "C4_UNIT_LABEL", Value: u.Label},
-		{Name: "C4_JOB_UID", Value: string(j.UID)}, {Name: "C4_SPEC", Value: spec},
+		{Name: "C4_JOB_UID", Value: string(j.UID)}, {Name: "C4_SPEC", Value: spec}, {Name: "C4_OWNER", Value: j.Annotations[c4v1.AnnotationOwner]},
 		{Name: "C4_POD", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}}},
 		{Name: "C4_POD_UID", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.uid"}}},
 	}, u.Env...)

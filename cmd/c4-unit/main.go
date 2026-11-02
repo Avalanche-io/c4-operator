@@ -97,6 +97,7 @@ import (
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/internal/needs"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 )
 
 const (
@@ -127,6 +128,9 @@ type env struct {
 	oiiotool  string // the converter for EXR and TIFF
 	now       func() time.Time
 	sleep     func(time.Duration)
+	// issue certifies the unit's key (default the issuer at $C4_SIGNER,
+	// on the token at $C4_SIGNER_TOKEN_FILE)
+	issue provenance.IssueFunc
 
 	// for run
 	environ   func() []string  // the environment the tool starts from
@@ -293,7 +297,15 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 		if *expect > 0 {
 			w["expect"] = expect.Seconds()
 		}
-		seq, err := safepoint(e, filepath.Join(out, ".c4", "safepoint"), *checkpoint, w)
+		// a wait asks a person (or a party) to decide: an act of the
+		// unit's, signed before the safe point that opens it
+		sp := filepath.Join(out, ".c4", "safepoint")
+		act := map[string]any{"seq": nextSafepointSeq(sp)}
+		for k, v := range w {
+			act[k] = v
+		}
+		signNote(e, out, "wait", act, e.errw())
+		seq, err := safepoint(e, sp, *checkpoint, w)
 		if err != nil {
 			return 1, err
 		}
@@ -335,7 +347,9 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 		if err != nil {
 			return 1, err
 		}
-		seq, err := appendNote(filepath.Join(out, ".c4", "asks"), map[string]any{"to": *to, "ask": strings.TrimSpace(*ask)}, e)
+		asks := filepath.Join(out, ".c4", "asks")
+		signNote(e, out, "ask", map[string]any{"seq": nextNoteSeq(asks), "to": *to, "ask": strings.TrimSpace(*ask)}, e.errw())
+		seq, err := appendNote(asks, map[string]any{"to": *to, "ask": strings.TrimSpace(*ask)}, e)
 		if err != nil {
 			return 1, err
 		}
@@ -355,7 +369,13 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 		} else {
 			note["cannot"] = *cannot
 		}
-		if _, err := appendNote(filepath.Join(out, ".c4", "answers"), note, e); err != nil {
+		answers := filepath.Join(out, ".c4", "answers")
+		act := map[string]any{"seq": nextNoteSeq(answers)}
+		for k, v := range note {
+			act[k] = v
+		}
+		signNote(e, out, "answer", act, e.errw())
+		if _, err := appendNote(answers, note, e); err != nil {
 			return 1, err
 		}
 		return 0, nil
@@ -368,6 +388,12 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 			return 2, err
 		}
 		msg := needs.Message(*what, *why, ab)
+		// signed as the unit, and on the pod before the unit ends
+		if out, err := output(e, *dir); err == nil {
+			signReport(e, out, "needs", map[string]any{"what": strings.TrimSpace(*what), "why": strings.TrimSpace(*why), "about": ab}, e.errw())
+		} else if unitSigns(e) {
+			fmt.Fprintf(e.errw(), "c4-unit: this needs could not be signed (%v): the farm gets it unsigned, and from K8 refuses it\n", err)
+		}
 		// The container's termination message is how the farm learns it.
 		if err := os.WriteFile(terminationLog(e), []byte(msg), 0o644); err != nil {
 			return 1, err
@@ -386,6 +412,7 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 			return 1, err
 		}
 		w := strings.TrimSpace(*why)
+		signReport(e, out, "withdraw", map[string]any{"why": w}, e.errw())
 		doc, _ := json.Marshal(map[string]string{"why": w})
 		if err := writeAtomic(filepath.Join(out, ".c4", "withdraw"), append(doc, '\n')); err != nil {
 			return 1, err
@@ -706,16 +733,7 @@ func steer(e env, out string, w io.Writer, asJSON bool) (int, error) {
 // any; and returns the number. The node daemon asks the farm for a
 // decision on it.
 func safepoint(e env, path, checkpoint string, wait map[string]any) (int, error) {
-	seq := 1
-	if b, err := os.ReadFile(path); err == nil {
-		for _, l := range strings.Split(string(b), "\n") {
-			if v, ok := strings.CutPrefix(l, "seq "); ok {
-				if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
-					seq = n + 1
-				}
-			}
-		}
-	}
+	seq := nextSafepointSeq(path)
 	at := time.Now()
 	if e.now != nil {
 		at = e.now()
@@ -733,6 +751,21 @@ func safepoint(e env, path, checkpoint string, wait map[string]any) (int, error)
 		fmt.Fprintf(&b, "wait %s\n", w)
 	}
 	return seq, writeAtomic(path, []byte(b.String()))
+}
+
+// nextSafepointSeq is the number the next safe point at path will have.
+func nextSafepointSeq(path string) int {
+	seq := 1
+	if b, err := os.ReadFile(path); err == nil {
+		for _, l := range strings.Split(string(b), "\n") {
+			if v, ok := strings.CutPrefix(l, "seq "); ok {
+				if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+					seq = n + 1
+				}
+			}
+		}
+	}
+	return seq
 }
 
 // preview writes a PNG preview of an image. PNG and JPEG are converted
