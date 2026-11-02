@@ -154,12 +154,18 @@ func personAct(st keystore.Store, dev, tc *people.Certified, a provenance.Person
 	}
 	a.Person = strings.TrimPrefix(dev.Identity, provenance.IdentityBase+"user/")
 	a.SignedAt = time.Now().UTC()
+	// the farm the act is made for is the key's own, never the HUD's word
+	if a.Farm, err = sameFarm(dev, a.Farm); err != nil {
+		return nil, err
+	}
 	var touch keystore.Key
 	var touchCert *provenance.DeviceCert
 	if a.Confirmed {
 		if touch, err = st.Key(keystore.Touch); err != nil {
 			return nil, err
 		}
+		// what the touch confirms, in the system's own prompt
+		touch = keystore.WithReason(touch, ActReason(a.Act, a.Subject.Name, a.Params))
 		d := deviceCert(tc)
 		touchCert = &d
 	}
@@ -189,6 +195,7 @@ func AgentHook(c *Client, st keystore.Store, present bool) func(context.Context,
 			o.printf("agent     %s acts on your sign-in until you run c4 farm integrate on yourself, at a terminal: its own key's grant takes your touch\n", AgentName)
 			return
 		}
+		o.printf("touch     granting %s its own key at this farm: your Mac asks for your touch to confirm it\n", AgentName)
 		g, err := GrantAgent(ctx, c, st, AgentName)
 		switch {
 		case errors.Is(err, ErrNoTouchKey):
