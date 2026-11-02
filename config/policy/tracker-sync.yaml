@@ -2,10 +2,11 @@
 # decisions: while a Tracker names it, the farm's certificate issuer
 # certifies that account to sign relayed decisions for the Tracker
 # (docs/c4-sync.md, PEOPLE-KEYS-2 6.1). So naming it hands an account a
-# signing identity, and only the manager or a cluster admin (at install,
-# c4 farm up --tracker) may set, change or clear it; anyone else who may
-# edit a Tracker leaves it as it is. The account is in the Tracker's own
-# namespace or the farm's (c4-system), never in another project's.
+# signing identity, and only the manager or someone allowed the verb sync
+# on Trackers (a cluster admin at install, c4 farm up --tracker) may set,
+# change or clear it; anyone else who may edit a Tracker leaves it as it
+# is. The account is in the Tracker's own namespace or the farm's
+# (c4-system), never in another project's.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -25,10 +26,12 @@ spec:
       (has(object.spec.sync) != has(oldObject.spec.sync) ||
        (has(object.spec.sync) && object.spec.sync != oldObject.spec.sync))
   validations:
+  # the manager, or someone allowed the verb sync on Trackers: a cluster
+  # admin (every verb), never a project role that lists its own
   - expression: >-
       request.userInfo.username == 'system:serviceaccount:c4-system:c4-manager' ||
-      'system:masters' in request.userInfo.groups
-    message: a Tracker's sync is named at install or by the farm's manager, since it gives that account a relay's signing certificate
+      authorizer.group('c4.avalanche.io').resource('trackers').namespace(object.metadata.namespace).name(object.metadata.name).check('sync').allowed()
+    message: a Tracker's sync is named at install or by the farm's manager (the verb sync on trackers), since it gives that account a relay's signing certificate
   - expression: >-
       !has(object.spec.sync) ||
       object.spec.sync.namespace == object.metadata.namespace ||

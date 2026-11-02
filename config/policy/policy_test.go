@@ -1069,6 +1069,15 @@ func TestTrackerSyncOnlyAtInstall(t *testing.T) {
 	if err := lee.Patch(ctx, installed, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"people":{"dana":"dana"}}}`))); err != nil {
 		t.Errorf("a project editor changes the rest of a Tracker with a sync: %v", err)
 	}
+	// a cluster admin by a binding, not system:masters (kind's and
+	// kubeadm's admin, kubeadm:cluster-admins)
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "kubeadm-admins"},
+		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
+		Subjects: []rbacv1.Subject{{Kind: "Group", Name: "kubeadm:cluster-admins"}}})
+	installer := as("kubernetes-admin", "kubeadm:cluster-admins")
+	eventually(t, "an installer bound to cluster-admin names a sync", func() error {
+		return installer.Create(ctx, tracker("mlflow", sync))
+	})
 	if err := manager.Create(ctx, tracker("kitsu", &c4v1.TrackerSync{Namespace: "widgets", ServiceAccount: "kitsu-sync"})); err != nil {
 		t.Errorf("the manager names a sync in the Tracker's namespace: %v", err)
 	}

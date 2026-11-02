@@ -2240,8 +2240,9 @@ and `signer` the sync's own `sa/<ns>/<account>` identity, which the
 farm's issuer certifies only while a Tracker names that account, its leaf
 naming each such Tracker (`urn:c4:sync:<namespace>/<tracker>`): a relayed
 act is refused unless its leaf names the act's Tracker, and such a leaf
-signs no import or ingest. Only a cluster admin or the manager sets a
-Tracker's `sync` (an admission policy). The HUD
+signs no import or ingest. Only the manager or someone allowed the verb
+`sync` on Trackers (a cluster admin) sets a Tracker's `sync` (an admission
+policy). The HUD
 takes it only with the relayed decision (`via`), only signed by the
 account the Tracker names, sent by that account, and naming the same
 tracker, user, person and confirmation; otherwise `403`. The control

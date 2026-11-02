@@ -211,9 +211,11 @@ Each Tracker says:
   Tracker names it, the farm's certificate issuer certifies that account,
   its certificate naming each such Tracker, and c4-sync signs each decision
   it relays for them as itself (see People, below); it signs nothing else.
-  Because it hands an account a signing identity, only a cluster admin (at
-  install, as `c4 farm up --tracker` does) or the farm's manager may set or
-  change it, and the account is in the Tracker's namespace or c4-system.
+  Because it hands an account a signing identity, only the farm's manager or
+  someone allowed the verb `sync` on Trackers may set or change it (a
+  cluster admin at install, as `c4 farm up --tracker` does; a project role
+  that lists its own verbs never has it), and the account is in the
+  Tracker's namespace or c4-system.
   Without it, decisions are relayed unsigned, as before;
 - `scope.spend_field` and `scope.spend_on` (Flow and Kitsu): the field
   that carries what C4 has spent, and where it goes. `shot`, the default,
