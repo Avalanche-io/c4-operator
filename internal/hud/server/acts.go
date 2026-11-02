@@ -110,12 +110,27 @@ func (s *Server) citeAct(ctx context.Context, r *http.Request, v *api.Viewer, su
 	case p.Chain.By.Unit != "":
 		// a unit's act, only from that unit's own token (unitacts.go)
 		return s.citeUnitAct(ctx, data, vr, p, v, subject)
+	case p.Chain.By.Person == "" && p.Chain.By.User != "":
+		// A relay's act, only for the relayed decision it carries and
+		// signed by the sync its Tracker names (relayed(), relayCheck).
+		rc := relayOf(ctx)
+		if rc == nil {
+			return nil, fmt.Errorf("%w is a relay's, and a relay's act is taken only with the decision it relays", errAct)
+		}
+		if err := rc.check(vr.Identity, p.Chain); err != nil {
+			return nil, fmt.Errorf("%w %v", errAct, err)
+		}
+		if _, _, err := provenance.VerifyAct(data, s.trust(ctx).roots, time.Now(), s.actsSeen()); err != nil {
+			return nil, fmt.Errorf("%w: %w", errAct, err)
+		}
+		// The record's grade is the farm's: relayed for a confirmed
+		// login, unattributed for one no person has confirmed.
+		return &citedAct{cite: &schema.ActCitation{Payload: provenance.PayloadHash(vr.Payload), Record: c4.Identify(bytes.NewReader(data)).String()},
+			params: p.Params, grade: rc.grade, on: subject}, nil
 	case p.Chain.By.Person == "":
 		// An agent's act is taken under a grant in force for the viewer
-		// (K5) and a relay's only through relayed() with its signer bound
-		// to the Tracker (K6). Until each has its caller's check, it is
-		// refused.
-		return nil, fmt.Errorf("%w is not a person's or a unit's: an agent's or a relay's act is not taken here yet", errAct)
+		// (K5). Until it has its caller's check, it is refused.
+		return nil, fmt.Errorf("%w is not a person's, a unit's or a relay's: an agent's act is not taken here yet", errAct)
 	case vr.Identity != provenance.UserIdentity(p.Chain.By.Person):
 		return nil, fmt.Errorf("%w names %s and is signed by %s, not by a device of theirs", errAct, p.Chain.By.Person, vr.Identity)
 	case v == nil:

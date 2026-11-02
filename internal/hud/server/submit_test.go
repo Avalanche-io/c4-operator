@@ -749,7 +749,7 @@ func TestAUnitsJobKeepsItsParentsGrant(t *testing.T) {
 	sync := &api.Viewer{User: c4v1.SyncAccount}
 	wait := &c4v1.WorkWait{Unit: 0, Name: "review", Server: "person:dana"}
 	via := &api.Relay{Tracker: "github", Source: "https://github.com/o/r/pull/41", By: "dana", Person: "dana"}
-	if _, _, _, err := s.relayed(ctx, sync, &jobRec{job: child}, wait, via); err == nil || !strings.Contains(err.Error(), "is not tracker github's work") {
+	if _, _, _, _, err := s.relayed(ctx, sync, &jobRec{job: child}, wait, via); err == nil || !strings.Contains(err.Error(), "is not tracker github's work") {
 		t.Errorf("the tracker's sync relayed a decision to a unit's job: %v", err)
 	}
 	for _, c := range []struct {

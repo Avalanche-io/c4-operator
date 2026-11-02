@@ -268,7 +268,9 @@ func TestRelayNamesTheConfirmedLogin(t *testing.T) {
 	p := relay("review")
 	c := p.Chain
 	if c == nil || c.Accountable || !strings.Contains(c.Gap, "dana has not yet confirmed that the login dana") || c.By.User != "dana" ||
-		c.By.Tracker != "github" || c.For.Party != "dana" || len(c.Under) != 0 || p.Custody != CustodyRelayed {
+		c.By.Tracker != "github" || c.For.Party != "dana" || len(c.Under) != 0 || p.Custody != CustodyUnattributed {
+		// the tracker's word alone names dana: no one the farm knows
+		// decided (PEOPLE-KEYS-2 6.1; refused from K8)
 		t.Fatalf("an unconfirmed login: %+v %+v", p, c)
 	}
 	valid(c)
@@ -278,9 +280,11 @@ func TestRelayNamesTheConfirmedLogin(t *testing.T) {
 		t.Fatalf("confirm: %d %v", code, out)
 	}
 	confirmation, _ := out["record"].(string)
-	c = relay("ruling").Chain
-	if c == nil || !c.Accountable || c.Gap != "" || len(c.Under) != 1 || c.Under[0].Kind != "people-map" || c.Under[0].Record != confirmation {
-		t.Fatalf("a confirmed login: %+v", c)
+	p = relay("ruling")
+	c = p.Chain
+	if c == nil || !c.Accountable || c.Gap != "" || len(c.Under) != 1 || c.Under[0].Kind != "people-map" || c.Under[0].Record != confirmation ||
+		p.Custody != CustodyRelayed {
+		t.Fatalf("a confirmed login: %s %+v", p.Custody, c)
 	}
 	valid(c)
 }

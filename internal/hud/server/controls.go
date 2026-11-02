@@ -908,7 +908,7 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if body.Via != nil {
-		grade, who, ch, err := s.relayed(ctx, v, rec, wait, body.Via)
+		grade, who, ch, check, err := s.relayed(ctx, v, rec, wait, body.Via)
 		if err != nil {
 			var ge *errGrant
 			code := http.StatusForbidden
@@ -919,6 +919,9 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		custody, actor, chain = grade, who, ch
+		// the relay's signed act, if it sends one, is taken only as this
+		// decision's (citeAct)
+		ctx = withRelay(ctx, check)
 	}
 	reply := ""
 	switch {

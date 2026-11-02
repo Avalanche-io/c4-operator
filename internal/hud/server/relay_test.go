@@ -130,7 +130,9 @@ func TestRelayedDecisions(t *testing.T) {
 	}
 	p := record(out)
 	relay, _ := p.Relay.(map[string]any)
-	if p.Custody != CustodyRelayed || p.Actor != "dana via tracker github (@dana)" || !strings.HasPrefix(p.Authenticated, "relayed by c4-sync") ||
+	// dana has not confirmed the login: the tracker's word alone names
+	// her, so the decision goes through, graded unattributed
+	if p.Custody != CustodyUnattributed || p.Actor != "dana via tracker github (@dana)" || !strings.HasPrefix(p.Authenticated, "relayed by c4-sync") ||
 		relay["evidence"] != evidence || relay["by"] != "dana" {
 		t.Fatalf("relayed record: %+v", p)
 	}
@@ -140,8 +142,8 @@ func TestRelayedDecisions(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("relayed by a party: %d %v", code, out)
 	}
-	if p := record(out); p.Custody != CustodyRelayedParty || p.Actor != "party:ml via tracker github (@mlflow-registry)" {
-		t.Fatalf("unattributed record: %+v", p)
+	if p := record(out); p.Custody != CustodyUnattributed || p.Actor != "party:ml via tracker github (@mlflow-registry)" {
+		t.Fatalf("an unconfirmed party login: %+v", p)
 	}
 
 	code, out = post("wrangler", map[string]any{"unit": "ruling", "do": "approve"})
