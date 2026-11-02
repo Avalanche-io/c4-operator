@@ -165,3 +165,42 @@ func personAct(st keystore.Store, dev, tc *people.Certified, a provenance.Person
 	}
 	return provenance.SignPersonAct(a, key, deviceCert(dev), touch, touchCert)
 }
+
+// AgentHook is an Integration's Agent for farm c with this machine's keys
+// st: on, a grant of the agent's own key, which takes the person's touch,
+// so only when they are present; off, its revoke. A farm with no people's
+// issuer, or none that takes agent grants, says nothing.
+func AgentHook(c *Client, st keystore.Store, present bool) func(context.Context, Out, bool) {
+	return func(ctx context.Context, o Out, on bool) {
+		if _, err := PeopleConfig(ctx, c); err != nil {
+			return
+		}
+		if !on {
+			n, err := RevokeAgent(ctx, c, st, AgentName)
+			switch {
+			case err != nil:
+				o.printf("agent     %s's grant was not ended: %v (c4 farm integrate off tries again)\n", AgentName, err)
+			case n > 0:
+				o.printf("agent     %s's grant of its own key is ended\n", AgentName)
+			}
+			return
+		}
+		if !present {
+			o.printf("agent     %s acts on your sign-in until you run c4 farm integrate on yourself, at a terminal: its own key's grant takes your touch\n", AgentName)
+			return
+		}
+		g, err := GrantAgent(ctx, c, st, AgentName)
+		switch {
+		case errors.Is(err, ErrNoTouchKey):
+			o.printf("agent     %v\n", err)
+		case err != nil:
+			o.printf("agent     %s has no key of its own yet: %v (c4 farm integrate on tries again)\n", AgentName, err)
+		default:
+			until := ""
+			if !g.Lapses.IsZero() {
+				until = ", until " + o.Clock.At(g.Lapses) + " if it makes no act"
+			}
+			o.printf("agent     %s signs as itself with its own key (%s), granted by your touch%s; c4 farm integrate off ends it\n", AgentName, ShortDevice(g.Device), until)
+		}
+	}
+}

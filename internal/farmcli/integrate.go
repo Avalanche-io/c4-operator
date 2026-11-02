@@ -72,6 +72,9 @@ type Integration struct {
 	// Runner makes this machine a runner, for a local farm: enroll, then
 	// start the agent service. Nil leaves runners alone.
 	Runner func(ctx context.Context, o Out) error
+	// Agent grants the agent its own key at the farm (on) or ends the
+	// grant (off), when set (K5).
+	Agent func(ctx context.Context, o Out, on bool)
 	// Service is the agent service off removes (default the machine's).
 	Service *AgentService
 	// Record is where On notes what it added (the person's Config's
@@ -117,6 +120,9 @@ func (in *Integration) On(ctx context.Context, o Out) error {
 		o.printf("claude    not on this machine, so it has no farm tools yet: install Claude Code (https://claude.com/claude-code), then c4 farm integrate on\n")
 	} else {
 		in.mcpOn(ctx, o)
+		if in.Agent != nil {
+			in.Agent(ctx, o, true)
+		}
 	}
 	if in.Runner != nil {
 		if err := in.Runner(ctx, o); err != nil {
@@ -206,6 +212,10 @@ func (in *Integration) Off(ctx context.Context, o Out) error {
 	}
 	if in.Record == nil {
 		in.Record = map[string]bool{}
+	}
+	// the agent's grant first, while the farm's tools are still there
+	if in.Agent != nil {
+		in.Agent(ctx, o, false)
 	}
 	switch {
 	case in.ClaudeBin == "":

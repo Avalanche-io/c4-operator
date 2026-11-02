@@ -281,7 +281,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		}
 		fmt.Fprintf(stdout, "signed in to %s as %s · projects %s\n", n, s.Viewer.User, strings.Join(s.Viewer.Projects, ", "))
 		loginKey(ctx, c, farmcli.KeysFor(n), *port, isTerminal(stdin) && !farmcli.InsideAgent(), stdout)
-		switch in := (&farmcli.Integration{Record: cfg.Integrations}); {
+		switch in := (&farmcli.Integration{Record: cfg.Integrations, Agent: agentHook(cfg, n, isTerminal(stdin) && !farmcli.InsideAgent())}); {
 		case slices.Contains(on, farmcli.Claude):
 			// a farm signed in to, not made here: its tools in Claude Code,
 			// and no runner (that is the farm admin's to enroll)
@@ -1151,7 +1151,8 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 				return err
 			}
 		} else {
-			in := farmcli.Integration{Record: cfg.Integrations}
+			// Consent above: a person at a terminal, never an agent
+			in := farmcli.Integration{Record: cfg.Integrations, Agent: agentHook(cfg, cm.farm, terminal)}
 			_, f, ferr := cfg.Resolve(cm.farm)
 			runner := ferr == nil && f.Local && on
 			if !*yes {
@@ -1301,7 +1302,7 @@ func (u upIntegration) choose(cfg *farmcli.Config) (on []string, wasOn bool, err
 
 // apply does what the answers say, keeps them, and says what it did.
 func (u upIntegration) apply(ctx context.Context, cfg *farmcli.Config, on []string, wasOn bool) error {
-	in := farmcli.Integration{Record: cfg.Integrations}
+	in := farmcli.Integration{Record: cfg.Integrations, Agent: agentHook(cfg, cfg.Current, isTerminal(u.stdin) && !farmcli.InsideAgent())}
 	switch {
 	case slices.Contains(on, farmcli.Claude):
 		// the runner only on its own yes: one given at login named no service
@@ -1383,6 +1384,20 @@ func bindFarm(ctx context.Context, o localfarm.Options, present bool, stdout io.
 		return fmt.Errorf("the farm is up, but not bound to its owner %s: %v", o.Owner, err)
 	}
 	return nil
+}
+
+// agentHook is an integration's grant of the agent's own key at farm (the
+// current one for ""), or nil when it can't be reached.
+func agentHook(cfg *farmcli.Config, farm string, present bool) func(context.Context, farmcli.Out, bool) {
+	name, f, err := cfg.Resolve(farm)
+	if err != nil {
+		return nil
+	}
+	c, err := farmcli.NewClient(f)
+	if err != nil {
+		return nil
+	}
+	return farmcli.AgentHook(c, farmcli.KeysFor(name), present)
 }
 
 // localRunner makes this machine one of the local farm's runners for its
