@@ -40,9 +40,12 @@ type Viewer struct {
 	// while no Party of their name exists, may make their own person
 	// Party without the farm admin's right. Set on the snapshot's,
 	// events' and needs-me's viewer.
-	MakeParties  bool `json:"makeParties,omitempty"`
-	BindingOwner bool `json:"bindingOwner,omitempty"`
-	MakeOwnParty bool `json:"makeOwnParty,omitempty"`
+	// Party is the viewer's own person Party, by a sign-in it lists, or
+	// "" for none.
+	Party        string `json:"party,omitempty"`
+	MakeParties  bool   `json:"makeParties,omitempty"`
+	BindingOwner bool   `json:"bindingOwner,omitempty"`
+	MakeOwnParty bool   `json:"makeOwnParty,omitempty"`
 }
 
 // Hold is one reason a job's units are held back. Kind is grant, tools or

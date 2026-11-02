@@ -659,8 +659,8 @@ func TestPartySignIns(t *testing.T) {
 	if code, out := mk("noor-sso", "noor", ins("noor@studio.example", sso+" "+peopletest.NoorSub), ""); code != http.StatusForbidden || !says(out, "fresh ID token") {
 		t.Errorf("a provider subject with no token: %d %v", code, out)
 	}
-	if code, out := mk("noor-sso", "noor", ins("noor@studio.example", sso+" "+peopletest.NoorSub), p.token(peopletest.DanaSub)); code != http.StatusForbidden || !says(out, "proves") {
-		t.Errorf("a provider subject on another's token: %d %v", code, out)
+	if code, out := mk("noor-sso", "noor", ins("noor@studio.example", sso+" "+peopletest.NoorSub), p.token(peopletest.DanaSub)); code != http.StatusBadRequest || !says(out, "is not what idToken proves") {
+		t.Errorf("a provider subject that disagrees with its token: %d %v", code, out)
 	}
 	if code, out := mk("noor-sso", "noor", ins("noor@studio.example", "noor"), ""); code != http.StatusForbidden || !says(out, "added only by someone signed in as it") {
 		t.Errorf("a HUD name noor isn't signed in as: %d %v", code, out)
@@ -1222,10 +1222,10 @@ func TestPartyViewerRights(t *testing.T) {
 	if v := viewer("noor", nil); v.MakeParties || v.BindingOwner || !v.MakeOwnParty {
 		t.Errorf("viewer noor, the binding's owner's name, before her Party: %+v", v)
 	}
-	if v := viewer("dana", nil); v.MakeOwnParty || v.BindingOwner {
+	if v := viewer("dana", nil); v.MakeOwnParty || v.BindingOwner || v.Party != "dana" {
 		t.Errorf("dana, with her Party: %+v", v)
 	}
-	if v := viewer("maya", nil); v.MakeParties || v.BindingOwner || !v.MakeOwnParty {
+	if v := viewer("maya", nil); v.MakeParties || v.BindingOwner || !v.MakeOwnParty || v.Party != "" {
 		t.Errorf("maya: %+v", v)
 	}
 	// the owner's Party is made by its person signed in otherwise:
@@ -1234,8 +1234,16 @@ func TestPartyViewerRights(t *testing.T) {
 	if v := viewer("noor", nil); v.BindingOwner {
 		t.Errorf("viewer noor, not among the owner's Party's sign-ins: %+v", v)
 	}
-	if v := viewer("noor-sso", nil); !v.BindingOwner || v.MakeOwnParty {
+	if v := viewer("noor-sso", nil); !v.BindingOwner || v.MakeOwnParty || v.Party != "noor" {
 		t.Errorf("noor@studio.example, the owner's Party's person: %+v", v)
+	}
+	// a sign-in two Parties list, written around the HUD, is no one's Party
+	if err := p.s.Client.Create(context.Background(), &c4v1.Party{ObjectMeta: metav1.ObjectMeta{Name: "lee"}, Spec: c4v1.PartySpec{Kind: c4v1.PartyPerson,
+		DisplayName: "Lee", SignIns: []c4v1.PartySignIn{{Subject: "noor@studio.example"}}, Made: c4v1.PartyAct{By: "ines", At: metav1.Now()}}}); err != nil {
+		t.Fatal(err)
+	}
+	if v := viewer("noor-sso", nil); v.Party != "" || v.BindingOwner {
+		t.Errorf("a sign-in two Parties list: %+v", v)
 	}
 	p.s.FarmBook, p.s.FarmBookReader = nil, nil
 	if v := viewer("ines", nil); v.MakeParties || v.MakeOwnParty {
@@ -1375,4 +1383,39 @@ func TestPartySelfNamedOnASelfRunFarm(t *testing.T) {
 		t.Error("ines is no admin after accepting")
 	}
 	p.seal(t)
+}
+
+// A provider subject is taken from its verified ID token: the client
+// sends idToken alone and the HUD adds the token's iss, in its one
+// spelling, and sub; a subject it sends besides must be the token's (400);
+// a subject with no token is refused.
+func TestPartyProviderSubjectFromTheToken(t *testing.T) {
+	p := newPartyRig(t)
+	ctx := context.Background()
+	p.secret()
+	body := map[string]any{"name": "noor", "kind": "person", "displayName": "Noor", "signIns": ins("noor@studio.example"), "idToken": p.token(peopletest.NoorSub)}
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "noor-sso", body, nil); code != http.StatusOK {
+		t.Fatalf("noor makes her Party on her token alone: %d %v", code, out)
+	}
+	ps, _ := p.s.parties(ctx)
+	if got := findParty(ps, "noor").Spec.SignIns; !slices.Equal(got, []c4v1.PartySignIn{{Subject: "noor@studio.example"}, {Issuer: sso, Subject: peopletest.NoorSub}}) {
+		t.Errorf("noor's sign-ins from her token: %+v", got)
+	}
+	put := func(body map[string]any) (int, map[string]any) {
+		return p.call(t, http.MethodPut, "/api/v1/parties/noor/sign-ins", "noor-sso", body, nil)
+	}
+	keep := ins("noor@studio.example", sso+" "+peopletest.NoorSub)
+	if code, out := put(map[string]any{"signIns": append(keep, api.SignIn{Issuer: sso, Subject: "00u-noor-laptop"}), "idToken": p.token("00u-noor-other")}); code != http.StatusBadRequest || !says(out, "is not what idToken proves") {
+		t.Errorf("a subject that disagrees with its token: %d %v", code, out)
+	}
+	if code, out := put(map[string]any{"signIns": append(keep, api.SignIn{Issuer: sso, Subject: "00u-noor-laptop"})}); code != http.StatusForbidden || !says(out, "fresh ID token") {
+		t.Errorf("a subject with no token: %d %v", code, out)
+	}
+	if code, out := put(map[string]any{"signIns": keep, "idToken": p.token("00u-noor-laptop")}); code != http.StatusOK {
+		t.Fatalf("noor adds a subject on its token alone: %d %v", code, out)
+	}
+	ps, _ = p.s.parties(ctx)
+	if got := findParty(ps, "noor").Spec.SignIns; !slices.Contains(got, c4v1.PartySignIn{Issuer: sso, Subject: "00u-noor-laptop"}) {
+		t.Errorf("noor's sign-ins after a token-only add: %+v", got)
+	}
 }

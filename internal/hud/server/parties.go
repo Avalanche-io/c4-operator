@@ -703,7 +703,9 @@ func (s *Server) farmAdminMakes(ctx context.Context, r *http.Request, v *api.Vie
 //     Party listing their sign-in yet. One who signs in by the
 //     c4-sign-ins Secret proves their subject as they do;
 //   - bindingOwner: the farm binding's owner: the person of the owner's
-//     person Party, through its sign-ins; no one before it exists.
+//     person Party, through its sign-ins; no one before it exists;
+//   - party: the viewer's own person Party, by a sign-in it lists (R1),
+//     or "".
 func (s *Server) withPartyRights(r *http.Request, v *api.Viewer) *api.Viewer {
 	out := *v
 	ctx := r.Context()
@@ -712,6 +714,7 @@ func (s *Server) withPartyRights(r *http.Request, v *api.Viewer) *api.Viewer {
 		return &out
 	}
 	person := s.partyPerson(v, ps)
+	out.Party = person
 	if b, err := s.farmBinding(ctx); err == nil && b != nil && v.Unit == nil {
 		// through the owner's person Party's sign-ins alone (R1)
 		owner := findParty(ps, b.Spec.Owner)
@@ -747,12 +750,7 @@ func validSignIns(in []api.SignIn) ([]c4v1.PartySignIn, error) {
 			out = append(out, y)
 		}
 	}
-	slices.SortFunc(out, func(a, b c4v1.PartySignIn) int {
-		if c := strings.Compare(a.Issuer, b.Issuer); c != 0 {
-			return c
-		}
-		return strings.Compare(a.Subject, b.Subject)
-	})
+	sortSignIns(out)
 	return out, nil
 }
 
@@ -814,40 +812,59 @@ func added(old, next []c4v1.PartySignIn) []c4v1.PartySignIn {
 	return out
 }
 
-// proveAdds checks each sign-in a write adds is the writer's own, just
-// proved (R2): a name the HUD signs people in as only by the viewer
-// signed in as it; a provider subject only by idToken, a fresh ID token
-// for it, checked by the people's issuer as whoami checks one. One write
-// adds at most one provider subject. It returns the proved one, if any.
-func (s *Server) proveAdds(ctx context.Context, v *api.Viewer, adds []c4v1.PartySignIn, idToken string) (*c4v1.PartySignIn, *errGrant) {
-	var provider *c4v1.PartySignIn
-	for i, x := range adds {
+// provedSignIns checks each sign-in a write takes next to over old is the
+// writer's own, just proved (R2), and adds the one idToken proves: a name
+// the HUD signs people in as only by the viewer signed in as it; a
+// provider subject only from idToken, a fresh ID token the people's
+// issuer checks as whoami checks one, the server taking its issuer, in
+// its one spelling, and its subject from the verified token. A client
+// sends idToken alone; a provider subject it sends besides must be the
+// one the token proves (400). It returns next with the proved subject,
+// and that subject, if any.
+func (s *Server) provedSignIns(ctx context.Context, v *api.Viewer, old, next []c4v1.PartySignIn, idToken string) ([]c4v1.PartySignIn, *c4v1.PartySignIn, *errGrant) {
+	var claims []c4v1.PartySignIn
+	for _, x := range added(old, next) {
 		switch {
 		case x.Issuer == "" && x.Subject != v.User:
-			return nil, &errGrant{http.StatusForbidden, fmt.Sprintf("signIns: %s is added only by someone signed in as it, and you are signed in as %s", x.Subject, v.User)}
-		case x.Issuer != "" && provider != nil:
-			return nil, &errGrant{http.StatusBadRequest, "signIns: one write adds one provider subject, which its idToken proves"}
+			return nil, nil, &errGrant{http.StatusForbidden, fmt.Sprintf("signIns: %s is added only by someone signed in as it, and you are signed in as %s", x.Subject, v.User)}
 		case x.Issuer != "":
-			provider = &adds[i]
+			claims = append(claims, x)
 		}
 	}
-	if provider == nil {
-		return nil, nil
-	}
 	if idToken == "" {
-		return nil, &errGrant{http.StatusForbidden, fmt.Sprintf("signIns: %s goes on a Party only on a fresh ID token for it: send idToken, from signing in at the farm's provider", signInWords(*provider))}
+		if len(claims) > 0 {
+			return nil, nil, &errGrant{http.StatusForbidden, fmt.Sprintf("signIns: %s goes on a Party only on a fresh ID token for it: send idToken, from signing in at the farm's provider", signInWords(claims[0]))}
+		}
+		return next, nil, nil
 	}
 	if s.ProveSignIn == nil {
-		return nil, &errGrant{http.StatusNotImplemented, "this HUD has no people's issuer to check an ID token with, so it adds no provider subject"}
+		return nil, nil, &errGrant{http.StatusNotImplemented, "this HUD has no people's issuer to check an ID token with, so it adds no provider subject"}
 	}
 	got, err := s.ProveSignIn(ctx, idToken)
 	if err != nil {
-		return nil, &errGrant{http.StatusForbidden, fmt.Sprintf("idToken: %v", err)}
+		return nil, nil, &errGrant{http.StatusForbidden, fmt.Sprintf("idToken: %v", err)}
 	}
-	if got.Subject != provider.Subject || people.CanonicalIssuer(got.Issuer) != provider.Issuer {
-		return nil, &errGrant{http.StatusForbidden, fmt.Sprintf("idToken proves %s at %s, not %s", got.Subject, got.Issuer, signInWords(*provider))}
+	proved := c4v1.PartySignIn{Issuer: people.CanonicalIssuer(got.Issuer), Subject: got.Subject}
+	for _, x := range claims {
+		if x != proved {
+			return nil, nil, &errGrant{http.StatusBadRequest, fmt.Sprintf("signIns: %s is not what idToken proves (%s): send idToken alone, and the HUD takes the subject from it", signInWords(x), signInWords(proved))}
+		}
 	}
-	return provider, nil
+	if !slices.Contains(next, proved) {
+		next = append(slices.Clone(next), proved)
+		sortSignIns(next)
+	}
+	return next, &proved, nil
+}
+
+// sortSignIns sorts sign-ins by issuer, then subject.
+func sortSignIns(ins []c4v1.PartySignIn) {
+	slices.SortFunc(ins, func(a, b c4v1.PartySignIn) int {
+		if c := strings.Compare(a.Issuer, b.Issuer); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Subject, b.Subject)
+	})
 }
 
 // standInHolder is who else the c4-sign-ins Secret (K2's stand-in) gives
@@ -1056,8 +1073,9 @@ func (s *Server) handleMakeParty(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusForbidden, "signIns: a person's Party is made by the person, signed in with it: list the sign-in you are using, %s", v.User)
 			return
 		}
-		proved, g := s.proveAdds(ctx, v, signIns, body.IDToken)
-		if g != nil {
+		var proved *c4v1.PartySignIn
+		var g *errGrant
+		if signIns, proved, g = s.provedSignIns(ctx, v, nil, signIns, body.IDToken); g != nil {
 			fail(w, g.code, "%s", g.msg)
 			return
 		}
@@ -1283,24 +1301,27 @@ func (s *Server) handleSignIns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	adds := added(p.Spec.SignIns, signIns)
+	// an idToken is a provider subject to add
+	adding := len(added(p.Spec.SignIns, signIns)) > 0 || body.IDToken != ""
 	authz := ""
 	switch {
 	case st.person == p.Name:
 		authz = "the person " + p.Name
-	case len(adds) == 0 && s.farmAdmin(ctx, r, v, p.Name):
+	case !adding && s.farmAdmin(ctx, r, v, p.Name):
 		authz = s.authorization(v, "update", "parties", "", p.Name)
-	case len(adds) > 0:
+	case adding:
 		fail(w, http.StatusForbidden, "%s may not add to %s's sign-ins: the person adds their own, each proved by signing in with it", v.User, p.Name)
 		return
 	default:
 		fail(w, http.StatusForbidden, "%s may not change %s's sign-ins: the person, or a farm admin, removes one", v.User, p.Name)
 		return
 	}
-	if _, g := s.proveAdds(ctx, v, adds, body.IDToken); g != nil {
+	signIns, _, g := s.provedSignIns(ctx, v, p.Spec.SignIns, signIns, body.IDToken)
+	if g != nil {
 		fail(w, g.code, "%s", g.msg)
 		return
 	}
+	adds := added(p.Spec.SignIns, signIns)
 	if who, x := claimed(st.parties, p.Name, adds); who != "" {
 		fail(w, http.StatusConflict, "signIns: %s is %s's already; one sign-in is one person's", x, who)
 		return
