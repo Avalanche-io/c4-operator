@@ -149,7 +149,7 @@ func (s *Server) liveJob(ctx context.Context, ns, name string) (*c4v1.WorkJob, e
 func (s *Server) record(ctx context.Context, obj client.Object, kind, user, reason, msg string, note bookNote) {
 	// A farm-level act's write took effect: its control record goes into
 	// the farm book.
-	if note.record != "" && farmbook.IsControlAct(note.kind) {
+	if note.record != "" && !note.booked && farmbook.IsControlAct(note.kind) {
 		s.bookFarm(ctx, note.record)
 	}
 	if s.Kube == nil {
@@ -900,18 +900,22 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 		// the agent is known by its own token, so it decides directly.
 		custody = CustodyClaimed
 	}
-	standFor := ""
+	standFor, memberNote := "", ""
 	if body.Via == nil {
 		// Whom the wait names decides it, or someone the farm and the
 		// project let stand in (whomay.go); a relay checks the person its
 		// tracker maps instead.
 		var err error
-		d := deciderOf(r, v)
+		d := s.decider(r, v)
 		if ag := actAgent(r); ag != "" && v.Unit == nil {
 			// An agent's signed act decides as that agent, header or not;
-			// citeAct refuses the act if it isn't the agent's.
+			// citeAct refuses the act if it isn't the agent's. Like an
+			// agent named by the header, it holds none of its person's
+			// Party standing.
+			d = deciderOf(r, v)
 			d.Agent = ag
 		}
+		memberNote = memberWords(wait.Server, d)
 		d.OwnJob = v.Unit != nil && v.Unit.Namespace == rec.job.Namespace && v.Unit.Job == rec.job.Name
 		if s.AgentGrants != nil && v.Unit == nil && d.Agent != "" && r.Header.Get(ActHeader) == "" && strings.HasPrefix(wait.Server, "agent:") {
 			// DESIGN 6, from K5: on a farm that keeps agents' grants, an
@@ -999,6 +1003,8 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := s.controlJob(ctx, r, v, rec, j, before, "decide", change, func(p *controlPredicate) {
 		p.Custody = custody
+		// A Party's member says so, and under which membership.
+		p.Authorization += memberNote
 		// Standing in, the record names both: for the person, by the actor.
 		p.For = standFor
 		if one, from := s.farmOwner(ctx); standFor != "" && one != "" && one == v.User {

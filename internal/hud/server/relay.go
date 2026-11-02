@@ -78,6 +78,11 @@ func (s *Server) relayed(ctx context.Context, v *api.Viewer, rec *jobRec, wait *
 	// (whomay.go); a party the map names speaks as a member of it.
 	who := Decider{User: mapped}
 	if p, ok := strings.CutPrefix(mapped, "party:"); ok {
+		if s.keptParty(ctx, p) {
+			// A Party's waits take a member holding member; a tracker
+			// login that names only the party names no member.
+			return "", "", nil, nil, refuse("@%s is %s, a Party on this farm: a tracker login decides for it only as a member, mapped to that person", via.By, mapped)
+		}
 		who = Decider{User: mapped, Parties: []string{p}}
 	}
 	if err := MayControl("decide", wait.Server, who); err != nil {

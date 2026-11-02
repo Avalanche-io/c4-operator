@@ -64,8 +64,21 @@ type Decider struct {
 	Role string
 	// Parties are the outside parties the person speaks for: their
 	// c4:party:<name> or c4-party-<name> groups, or the party a tracker
-	// maps its user to.
+	// maps its user to. They decide a party: wait only for a party the
+	// farm doesn't keep as a Party.
 	Parties []string
+	// Kept are the parties the farm keeps as Parties, and Members those
+	// the decider holds member in, in effect, each with the record that
+	// put it in force ("" for the studio's c4:party: group): a party:
+	// wait for a kept party takes a member (parties.go, Server.decider).
+	// AllKept: the farm's Parties could not be read, so any party may be
+	// kept, and no group decides for one.
+	Kept    map[string]bool
+	Members map[string]string
+	AllKept bool
+	// Person is the person a Party's sign-ins make the decider, where it
+	// is not User: their person: waits are theirs too.
+	Person string
 	// Agent names the agent, when the control comes through MCP.
 	Agent string
 	Unit  bool
@@ -118,9 +131,9 @@ func MayControl(control, server string, who Decider) error {
 		switch {
 		case by == ByJob:
 			return nil
-		case by == ByWaitsPerson && kind == "person" && (name == "" || who.User == name):
+		case by == ByWaitsPerson && kind == "person" && (name == "" || who.User == name || who.Person != "" && who.Person == name):
 			return nil
-		case by == ByWaitsPerson && kind == "party" && slices.Contains(who.Parties, name):
+		case by == ByWaitsPerson && kind == "party" && who.speaksFor(name):
 			return nil
 		case by == ByWaitsPerson && kind == "role" && who.Role != "" && who.Role == name:
 			// a wait addressed to a role, by someone who has it
@@ -134,6 +147,17 @@ func MayControl(control, server string, who Decider) error {
 		}
 	}
 	return fmt.Errorf("this waits for %s; %s may not %s it (%s.by: %s)", waitsWhom(server), who.User, control, control, strings.Join(rule.By, ", "))
+}
+
+// speaksFor says whether the decider may decide for party: a member
+// holding member, where the farm keeps it as a Party; else, as before
+// Parties, a member of its c4:party: group.
+func (d Decider) speaksFor(party string) bool {
+	if d.AllKept || d.Kept[party] {
+		_, ok := d.Members[party]
+		return ok
+	}
+	return slices.Contains(d.Parties, party)
 }
 
 // waitsWhom names a wait's server in the farm's words.

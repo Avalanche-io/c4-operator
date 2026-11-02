@@ -389,6 +389,9 @@ func contains(xs []string, x string) bool {
 // bookNote is what a control's Event carries for the book.
 type bookNote struct {
 	actor, kind, record string
+	// booked: the act's entry is in the farm book already (a Party's,
+	// whose book is its state, books it before it answers).
+	booked bool
 }
 
 // actorOf names who made a control for the book: the viewer, or an agent

@@ -38,7 +38,7 @@ func (s *Server) handleNeedsMe(w http.ResponseWriter, r *http.Request) {
 func (s *Server) needsMe(r *http.Request, v *api.Viewer, snap *api.Snapshot) *api.NeedsMe {
 	out := &api.NeedsMe{Now: snap.Now, Viewer: v, Items: []api.NeedsMeItem{}}
 	ctx := r.Context()
-	who := deciderOf(r, v)
+	who := s.decider(r, v)
 	one := s.singlePersonFlag()
 	single := one != "" && v.User == one
 	mayChange := map[string]bool{}

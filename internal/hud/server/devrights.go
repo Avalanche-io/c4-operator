@@ -28,6 +28,8 @@ var devWriters = map[string][]string{
 	"nodes":            {"facilities", "wrangler", "farm-admin"},
 	// the installer binds the farm to its owner
 	"deploymentbindings": {"wrangler", "farm-admin"},
+	// a farm admin keeps the party list (accountability DESIGN D8)
+	"parties": {"farm-admin"},
 }
 
 // devRole is a development viewer's role, or the HUD's guess for one
