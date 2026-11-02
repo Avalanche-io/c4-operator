@@ -35,6 +35,8 @@ import (
 //     installer path enrolled.
 //   - countersign-device: on device:<ID>, params {record: the device
 //     record its code enrolled}, the same.
+//   - grant and revoke: an agent's grant of its own key, and its end when
+//     the integration is removed (agents.go).
 
 // ApprovalTTL is how long an approval of a new device works.
 const ApprovalTTL = 10 * time.Minute
@@ -124,8 +126,12 @@ func (i *Issuer) takeAct(r *http.Request, data []byte) (*Booked, error) {
 		build, err = i.approval(by, device, now)
 	case ActBrowserCode, ActCountersign:
 		build, err = i.ownerAct(r, v, verb, by, device, farmSubject, params, now)
+	case ActGrant:
+		build, err = i.agentGrant(data, by, device, params)
+	case ActRevoke:
+		build, err = i.agentRevoke(r, by, grantSubject(subject), params)
 	default:
-		err = refuse(http.StatusBadRequest, "the people's issuer books %s, %s, %s and %s acts, not %s", ActRemoveDevice, ActApprove, ActBrowserCode, ActCountersign, verb)
+		err = refuse(http.StatusBadRequest, "the people's issuer books %s, %s, %s, %s, %s and %s acts, not %s", ActRemoveDevice, ActApprove, ActBrowserCode, ActCountersign, ActGrant, ActRevoke, verb)
 	}
 	if err != nil {
 		return nil, err

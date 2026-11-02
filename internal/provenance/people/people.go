@@ -234,6 +234,8 @@ func (i *Issuer) mux() *http.ServeMux {
 	m.HandleFunc("GET /v1/people/index", i.handleIndex)
 	m.HandleFunc("GET /v1/people/records/{id}", i.handleRecord)
 	m.HandleFunc("GET /v1/people/devices", i.handleDevices)
+	m.HandleFunc("POST /v1/people/agent", i.handleAgent)
+	m.HandleFunc("GET /v1/people/agents", i.handleAgents)
 	return m
 }
 
@@ -261,7 +263,7 @@ func fail(w http.ResponseWriter, err error) {
 	case errors.As(err, &tk):
 		code = http.StatusForbidden
 	case errors.Is(err, provenance.ErrUntrusted), errors.Is(err, provenance.ErrChain), errors.Is(err, provenance.ErrSignatureForm),
-		errors.Is(err, provenance.ErrClock), errors.Is(err, provenance.ErrNeedsTouch), errors.Is(err, ErrNotInForce), errors.Is(err, ErrTouchKey):
+		errors.Is(err, provenance.ErrClock), errors.Is(err, provenance.ErrNeedsTouch), errors.Is(err, ErrNotInForce), errors.Is(err, ErrTouchKey), errors.Is(err, ErrNoGrant):
 		code = http.StatusForbidden
 	case errors.Is(err, provenance.ErrSeen):
 		code = http.StatusConflict

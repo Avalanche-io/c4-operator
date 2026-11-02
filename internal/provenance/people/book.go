@@ -26,7 +26,8 @@ import (
 // peopleKinds are the kinds of entry the index books, in the book beside
 // the HUD's control entries.
 var peopleKinds = map[string]bool{KindDevice: true, KindProviderKey: true, KindSetting: true, KindRemoval: true,
-	KindCode: true, KindCountersign: true, KindApproval: true, KindSignIns: true, KindFlag: true, KindTouchWindow: true}
+	KindCode: true, KindCountersign: true, KindApproval: true, KindSignIns: true, KindFlag: true, KindTouchWindow: true,
+	KindAgentGrant: true, KindAgentUse: true, KindGrantEnd: true}
 
 // inBook reports whether an entry was written for a farm book: pending,
 // or sealed in the book's order. The entries of the issuer's own index,
@@ -239,6 +240,9 @@ var errAdopting = refuse(http.StatusServiceUnavailable, "the farm book hasn't ad
 // out: the queue refuses it at the seal too.
 func (x *Index) syncBook(ctx context.Context) error {
 	now := time.Now()
+	if x.Now != nil {
+		now = x.Now()
+	}
 	v, err := x.Book.View(ctx, now)
 	if err != nil {
 		return err
@@ -288,7 +292,7 @@ func (x *Index) syncBook(ctx context.Context) error {
 		}
 		x.pend, x.pendIDs = append(x.pend, &e), append(x.pendIDs, s.ID)
 	}
-	x.state = v.State
+	x.state, x.view = v.State, v
 	return nil
 }
 

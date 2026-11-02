@@ -153,6 +153,11 @@ type Entry struct {
 	// pending (book-entry/v1, component/issuer), on a farm with a farm
 	// book: the queue seals only what the issuer wrote.
 	Sig json.RawMessage `json:"sig,omitempty"`
+	// Agent and Grant: an agent's grant, an act the agent made under it,
+	// and its end (agents.go); End says why it ended.
+	Agent string `json:"agent,omitempty"`
+	Grant string `json:"grant,omitempty"`
+	End   string `json:"end,omitempty"`
 
 	// counts is when the entry counts from: its seal, or for an entry a
 	// book adopted, or one in the issuer's own order, its own at.
@@ -323,6 +328,8 @@ type Index struct {
 	// the records the entries cite; Head is the index kept before the book,
 	// read only to wait for its adoption.
 	Book *farmbook.Reader
+	// Now is the clock pending entries are judged at; nil is time.Now.
+	Now func() time.Time
 
 	mu sync.Mutex
 	// entries are the entries read, sealed in the book's order with a book,
@@ -337,6 +344,9 @@ type Index struct {
 	sealed, pos int64
 	// state is the book's State as last read: an append moves it.
 	state farmbook.State
+	// view is the book as last read, sealed and pending: what an agent's
+	// grant is judged by (agents.go).
+	view *farmbook.View
 	// head is the book's head segment as last read.
 	head *farmbook.Segment
 	// pendActs are the payload hashes of the acts pending entries book.
@@ -565,6 +575,8 @@ func (x *Index) loadKind(ctx context.Context, e *Entry, pending bool) error {
 		if k.KeyID != e.KeyID || e.Issuer == "" {
 			return fmt.Errorf("the entry names key %q of %q, its JWK %q", e.KeyID, e.Issuer, k.KeyID)
 		}
+	case KindAgentGrant, KindAgentUse, KindGrantEnd:
+		return x.loadAgent(e, b, pending)
 	default:
 		return x.loadAct(e, b, pending)
 	}
