@@ -5,7 +5,7 @@
 //
 //   seal(signer, {open})   a signer's mark: node diamond, queue square,
 //                          HUD circle (a person or agent), controller,
-//                          importer and ingest triangle; dashed until signed,
+//                          importer, ingest and the people's issuer triangle; dashed until signed,
 //                          and in the book wherever no signed record exists
 //   ink(text) / pencil(text)
 //   bookList(entries)      the book: sequence, time, seal, entry, actor (and
@@ -22,7 +22,7 @@ function el(tag, attrs, ...kids) {
   return e;
 }
 
-export const SEALS = { node: 'node', queue: 'queue', hud: 'hud', controller: 'controller', importer: 'importer', ingest: 'ingest' };
+export const SEALS = { node: 'node', queue: 'queue', hud: 'hud', controller: 'controller', importer: 'importer', ingest: 'ingest', issuer: 'issuer' };
 
 export function seal(signer, { open = false, title } = {}) {
   return el('i', { class: `seal ${SEALS[signer] || 'hud'}${open ? ' open' : ''}`, title: title || `signed by the ${signer}`, 'aria-hidden': 'true' });
@@ -38,7 +38,8 @@ export function bookList(entries) {
   return el('div', { class: 'book', role: 'log', 'aria-label': 'The book: entries, newest last' },
     (entries || []).map((e) => el('div', { class: `e${e.superseded ? ' struck' : ''}${e.open ? ' open' : ''}`, 'data-key': 'b' + e.seq },
       el('span', { class: 'seq' }, String(e.seq).padStart(4, '0')),
-      el('span', { class: 'at' + (e.approx ? ' pencil' : '') }, e.approx ? '<' + f.clock(e.at, false) : f.clockSec(e.at)),
+      // a book that spans days (the farm book) gives each entry its day
+      el('span', { class: 'at' + (e.approx ? ' pencil' : '') }, e.approx ? '<' + f.clock(e.at, false) : e.day ? f.clock(e.at) : f.clockSec(e.at)),
       // signed only where a record exists: an entry without one is drawn
       // open, by whom it was booked
       seal(e.signer, { open: !!e.open || !e.record, title: e.record ? undefined : `booked by the ${e.signer}; no signed record` }),

@@ -163,7 +163,7 @@ main:focus { outline: none; }
 .seal.node { background: var(--g17); transform: rotate(45deg) scale(.8); }
 .seal.queue { background: var(--g17); }
 .seal.hud { border: 1.2px solid var(--g17); border-radius: 50%; }
-.seal.controller, .seal.importer, .seal.ingest { width: 0; height: 0; border-left: 4.5px solid transparent; border-right: 4.5px solid transparent; border-bottom: 8px solid var(--g17); }
+.seal.controller, .seal.importer, .seal.ingest, .seal.issuer { width: 0; height: 0; border-left: 4.5px solid transparent; border-right: 4.5px solid transparent; border-bottom: 8px solid var(--g17); }
 .seal.open { border-style: dashed; background: none; }
 .edgecode { display: flex; align-items: center; gap: 10px; height: 16px; background: var(--deep); border-top: var(--hair) solid var(--rule-1); border-bottom: var(--hair) solid var(--rule-1); padding: 0 10px; font: 400 9px/1 var(--mono); color: var(--ink-3); letter-spacing: .1em; white-space: nowrap; overflow: hidden;
   background-image: repeating-linear-gradient(90deg, transparent 0 10px, var(--g08) 10px 15px); background-size: 15px 3px; background-repeat: repeat-x; background-position: 0 1px; }

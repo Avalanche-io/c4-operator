@@ -203,3 +203,7 @@ canvas[data-player] { background: var(--g02); }
 /* A one-person farm's passkey approval (views/me.js): the device ID's short
    form, large, to compare with what the farm's machine prints */
 .me .short-id { font-size: 28px; letter-spacing: .12em; margin: 4px 0 8px; color: var(--ink); }
+
+/* The farm book (views/book.js): its entries span days, so the time
+   column holds a day as well */
+.farmbook .book .e { grid-template-columns: 34px 78px 12px 1fr; }
