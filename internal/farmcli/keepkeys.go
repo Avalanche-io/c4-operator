@@ -3,7 +3,6 @@ package farmcli
 import (
 	"context"
 	"errors"
-	"net/http"
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/internal/keystore"
@@ -63,17 +62,14 @@ func KeepKeys(ctx context.Context, c *Client, a KeepArgs) {
 			renew = false
 		}
 	}
+	if renew && cfg.Provider != nil {
+		// a renewal through the browser never holds up a command: the
+		// person runs it
+		say("key       this machine's key ends at %s: c4 farm login renews it\n", mine.Expires.Local().Format("Jan 2 15:04"))
+		renew = false
+	}
 	if renew {
-		la := LoginArgs{Store: a.Store, Farm: cfg, Open: a.Open, Say: a.Say}
-		var err error
-		if cfg.Provider != nil {
-			say("key       this machine's key ends at %s: renewing it, through your browser\n", mine.Expires.Local().Format("15:04"))
-			la.Provider = &http.Client{Timeout: 30 * time.Second}
-			la.Endpoints, err = Discover(ctx, la.Provider, cfg.Provider.Issuer)
-		}
-		if err == nil {
-			_, err = Renew(ctx, c, la)
-		}
+		_, err := Renew(ctx, c, LoginArgs{Store: a.Store, Farm: cfg, Open: a.Open, Say: a.Say})
 		if err != nil {
 			say("key       this machine's key ends at %s and did not renew: %v\n", mine.Expires.Local().Format("Jan 2 15:04"), err)
 		}

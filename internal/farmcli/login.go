@@ -38,6 +38,9 @@ type OIDCEndpoints struct {
 // Discover reads a provider's endpoints from its discovery document.
 func Discover(ctx context.Context, hc *http.Client, issuer string) (OIDCEndpoints, error) {
 	var e OIDCEndpoints
+	if err := secureURL("the sign-in provider", issuer); err != nil {
+		return e, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(issuer, "/")+"/.well-known/openid-configuration", nil)
 	if err != nil {
 		return e, err
@@ -56,7 +59,29 @@ func Discover(ctx context.Context, hc *http.Client, issuer string) (OIDCEndpoint
 	if e.Authorization == "" || e.Token == "" {
 		return e, fmt.Errorf("the sign-in provider %s names no authorization or token endpoint", issuer)
 	}
+	for what, u := range map[string]string{"its authorization endpoint": e.Authorization, "its token endpoint": e.Token} {
+		if err := secureURL("the sign-in provider's "+what, u); err != nil {
+			return e, err
+		}
+	}
 	return e, nil
+}
+
+// secureURL refuses a sign-in address that isn't https: a token or code
+// over plain HTTP is anyone's on the way. Only this machine's own loopback
+// address may be http, for a test.
+func secureURL(what, raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("%s %q is not an address", what, Printable(raw))
+	}
+	switch h := u.Hostname(); {
+	case u.Scheme == "https":
+		return nil
+	case u.Scheme == "http" && (h == "localhost" || h == "127.0.0.1" || h == "::1"):
+		return nil
+	}
+	return fmt.Errorf("%s %q is not https: refused", what, Printable(raw))
 }
 
 // LoginArgs are c4 farm login's.
@@ -80,6 +105,9 @@ type LoginArgs struct {
 	// Prompt is the provider's prompt: "none" for a renewal's silent round
 	// trip, once a sign-in session is open in the browser.
 	Prompt string
+	// Interactive is a renewal the person asked for (c4 farm login), which
+	// may ask them to sign in.
+	Interactive bool
 }
 
 // Login signs the person in at the farm's provider and enrols this
@@ -137,6 +165,12 @@ func signIn(ctx context.Context, a LoginArgs, nonce string) (string, error) {
 	if a.Prompt != "" {
 		q.Set("prompt", a.Prompt)
 	}
+	if err := secureURL("the sign-in provider's authorization endpoint", a.Endpoints.Authorization); err != nil {
+		return "", err
+	}
+	if err := secureURL("the sign-in provider's token endpoint", a.Endpoints.Token); err != nil {
+		return "", err
+	}
 	auth := a.Endpoints.Authorization + "?" + q.Encode()
 
 	got := make(chan url.Values, 1)
@@ -160,7 +194,12 @@ func signIn(ctx context.Context, a LoginArgs, nonce string) (string, error) {
 			ln.Addr().(*net.TCPAddr).Port, ln.Addr().(*net.TCPAddr).Port)
 	}
 	if a.Open != nil {
-		a.Open(auth)
+		// no browser opened: the person follows the address printed, or
+		// forwards the port; a renewal doesn't wait for a browser that
+		// isn't there
+		if err := a.Open(auth); err != nil && a.Prompt == "none" {
+			return "", fmt.Errorf("no browser opened for the sign-in: %w", err)
+		}
 	}
 	wait := a.Wait
 	if wait == 0 {
@@ -252,7 +291,10 @@ func Renew(ctx context.Context, c *Client, a LoginArgs) (*people.Certified, erro
 		return nil, err
 	}
 	if a.Farm.Provider != nil {
-		a.Prompt = "none"
+		// silent unless the person is at c4 farm login, renewing
+		if !a.Interactive {
+			a.Prompt = "none"
+		}
 		if e.IDToken, err = signIn(ctx, a, deviceID(key)); err != nil {
 			return nil, fmt.Errorf("renewing on a fresh sign-in: %w", err)
 		}

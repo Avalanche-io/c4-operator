@@ -1517,8 +1517,17 @@ func loginKey(ctx context.Context, c *farmcli.Client, st keystore.Store, port in
 	hc := &http.Client{Timeout: 30 * time.Second}
 	ep, err := farmcli.Discover(ctx, hc, cfg.Provider.Issuer)
 	if err == nil {
-		_, err = farmcli.Login(ctx, c, farmcli.LoginArgs{Store: st, Farm: cfg, Endpoints: ep, Provider: hc, Open: openURL, Port: port,
-			Say: func(format string, a ...any) { fmt.Fprintf(stdout, format, a...) }})
+		la := farmcli.LoginArgs{Store: st, Farm: cfg, Endpoints: ep, Provider: hc, Open: openURL, Port: port,
+			Say: func(format string, a ...any) { fmt.Fprintf(stdout, format, a...) }}
+		// a machine enrolled already renews its key, at the person's word
+		if cert, _ := farmcli.LoadCert(st, keystore.Device); cert != nil {
+			la.Interactive = true
+			if _, err = farmcli.Renew(ctx, c, la); err == nil {
+				fmt.Fprintf(stdout, "key       this machine's key is renewed\n")
+			}
+		} else {
+			_, err = farmcli.Login(ctx, c, la)
+		}
 	}
 	if err != nil {
 		fmt.Fprintf(stdout, "key       this machine's key is not enrolled: %v (c4 farm login again)\n", err)

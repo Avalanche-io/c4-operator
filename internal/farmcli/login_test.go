@@ -289,3 +289,21 @@ func TestEachRunKeepsTheKeys(t *testing.T) {
 		t.Errorf("told twice: %q", said.String())
 	}
 }
+
+// A sign-in provider's addresses are https; only this machine's loopback
+// may be http, for a test. Anything else is refused before a browser opens.
+func TestSignInAddressesAreHTTPS(t *testing.T) {
+	for _, u := range []string{"https://sso.studio.example", "http://127.0.0.1:8080/auth", "http://localhost/x"} {
+		if err := secureURL("x", u); err != nil {
+			t.Errorf("%s: %v", u, err)
+		}
+	}
+	for _, u := range []string{"http://sso.studio.example", "javascript:alert(1)", "file:///etc/passwd", "ftp://sso.studio.example", "//sso.studio.example"} {
+		if err := secureURL("x", u); err == nil {
+			t.Errorf("%s was taken", u)
+		}
+	}
+	if _, err := Discover(context.Background(), http.DefaultClient, "http://sso.studio.example"); err == nil {
+		t.Error("discovery over plain HTTP")
+	}
+}
