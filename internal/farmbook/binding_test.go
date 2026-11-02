@@ -62,7 +62,8 @@ func TestBindingsAtTheSeal(t *testing.T) {
 	if res := r.seal(); refusedFor(res, early) != farmbook.ReasonRejected {
 		t.Errorf("a node bound before the farm: refused %+v", res.Refused)
 	}
-	r.book(r.control(r.hud, "bind", "deploymentbinding:farm", bindChange("dana", "studio/*", "task/v1", "control/v1"), r.now), nil)
+	farmRec := r.control(r.hud, "bind", "deploymentbinding:farm", bindChange("dana", "studio/*", "task/v1", "control/v1"), r.now)
+	r.book(farmRec, nil)
 	r.seal()
 
 	wide := r.book(r.control(r.hud, "bind", "deploymentbinding:wide", bindChange("noor", "studio/node/laptop-1", "task/v1", "control/v1"), r.now), nil)
@@ -109,7 +110,7 @@ func TestBindingsAtTheSeal(t *testing.T) {
 	}
 	rotated := recordID(r.control(r.hud, "bind", "deploymentbinding:node-d", c, r.now)) // not booked: no binding's record
 	badOwner := end("deploymentbinding:node-d", rotated, "noor")
-	farmEnd := end("deploymentbinding:farm", rotated, "dana")
+	farmEnd := end("deploymentbinding:farm", recordID(farmRec), "dana")
 	res = r.seal()
 	if refusedFor(res, badOwner) != farmbook.ReasonRejected || refusedFor(res, farmEnd) != farmbook.ReasonRejected {
 		t.Errorf("ends refused %+v", res.Refused)
@@ -163,7 +164,11 @@ func TestSignerFollowedToItsOwner(t *testing.T) {
 	hudRec := r.control(byFarm, "bind", "deploymentbinding:hud-a", bindChange("dana", "studio/component/hud", "control/v1"), r.now)
 	r.book(hudRec, nil)
 	r.seal()
+	nodeRec := r.control(byFarm, "bind", "deploymentbinding:n1", bindChange("noor", "studio/node/n1", "task/v1"), r.now)
+	r.book(nodeRec, nil)
+	r.seal()
 	byHUD := boundSigner(t, r.farm, provenance.ComponentIdentity("hud"), recordID(hudRec))
+	byOther := boundSigner(t, r.farm, provenance.ComponentIdentity("hud"), recordID(nodeRec))
 	byNode := boundSigner(t, r.farm, provenance.ComponentIdentity("hud"), recordID(r.control(r.hud, "bind", "deploymentbinding:x", bindChange("dana", "studio/node/n1", "task/v1"), r.now)))
 	grant := func(s *provenance.Signer, note string) {
 		c := grantChange("dana", r.now.Add(time.Hour))
@@ -173,6 +178,7 @@ func TestSignerFollowedToItsOwner(t *testing.T) {
 	grant(byHUD, "bound")
 	grant(r.hud, "unbound")
 	grant(byNode, "not booked")
+	grant(byOther, "another deployment's binding")
 	r.seal()
 	r.book(r.control(byFarm, "end-binding", "deploymentbinding:hud-a", map[string]any{"binding": recordID(hudRec), "owner": "dana", "by": "dana"}, r.now), nil)
 	r.seal()
@@ -189,11 +195,13 @@ func TestSignerFollowedToItsOwner(t *testing.T) {
 	}{
 		{"", "", farmbook.LabelUnattributed},             // 1: the farm's bind, signed before any binding
 		{"dana", "*", ""},                                // 2: hud-a's bind, signed under the farm binding
-		{"dana", "component/hud", ""},                    // 3: under hud-a, most specific
-		{"", "", farmbook.LabelUnattributed},             // 4: no binding named
-		{"", "", farmbook.LabelUnattributed},             // 5: a binding the book never booked
-		{"dana", "*", ""},                                // 6: the end-binding, under the farm binding
-		{"dana", "component/hud", farmbook.LabelRevoked}, // 7: booked after hud-a ended
+		{"dana", "*", ""},                                // 3: n1's bind, signed under the farm binding
+		{"dana", "component/hud", ""},                    // 4: under hud-a, most specific
+		{"", "", farmbook.LabelUnattributed},             // 5: no binding named
+		{"", "", farmbook.LabelUnattributed},             // 6: a binding the book never booked
+		{"", "", farmbook.LabelUnattributed},             // 7: n1's binding, another deployment's
+		{"dana", "*", ""},                                // 8: the end-binding, under the farm binding
+		{"dana", "component/hud", farmbook.LabelRevoked}, // 9: booked after hud-a ended
 	}
 	if v.Position() != int64(len(want)) {
 		t.Fatalf("the book holds %d entries, want %d", v.Position(), len(want))
