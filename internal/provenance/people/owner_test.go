@@ -159,3 +159,34 @@ func TestBrowserCodeEnrolsNoTouchKey(t *testing.T) {
 		t.Errorf("%d device records, want the owner's two and one browser", n)
 	}
 }
+
+// A touch key states hardware, or is a passkey: a key file, or a browser
+// key that isn't a passkey, is refused as a touch key unless the farm
+// takes software touch keys (a test or file-key farm). A device key may be
+// software; only the touch is held to this.
+func TestTouchKeyStatesHardwareOrIsAPasskey(t *testing.T) {
+	enrol := func(r *rig, owner, touch string) int {
+		cli, tk := newDev(t), newDev(t)
+		oe, te := r.enrolment(cli, "noor", "", "mac"), r.enrolment(tk, "noor", cli.id, "mac")
+		oe.Protection, te.Protection = owner, touch
+		code, _ := r.call("POST", "/v1/people/owner", local, people.OwnerEnrolment{Owner: oe, Touch: &te}, nil, people.InstallerHeader, installerToken)
+		return code
+	}
+	for _, p := range []string{schema.ProtectionFile, schema.ProtectionBrowser} {
+		if code := enrol(onePerson(t), schema.ProtectionHardware, p); code != http.StatusForbidden {
+			t.Errorf("a %s touch key: %d, want 403", p, code)
+		}
+	}
+	if code := enrol(onePerson(t), schema.ProtectionFile, schema.ProtectionHardware); code != http.StatusOK {
+		t.Errorf("a software device key with a hardware touch key: %d", code)
+	}
+	r := onePerson(t)
+	r.iss.SoftwareTouchKeys = true
+	if code := enrol(r, schema.ProtectionFile, schema.ProtectionFile); code != http.StatusOK {
+		t.Errorf("a key-file touch key on a farm that takes them: %d", code)
+	}
+	var cfg people.Config
+	if code, body := r.call("GET", "/v1/people/config", local, nil, &cfg); code != http.StatusOK || !cfg.SoftwareTouchKeys {
+		t.Errorf("the config says softwareTouchKeys: %d %s", code, body)
+	}
+}

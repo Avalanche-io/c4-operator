@@ -125,6 +125,7 @@ func runManager(args []string) error {
 	farmBookSeal := fs.Duration("farm-book-seal", farmbook.DefaultSealEvery, "with --system-store: how often the queue seals the farm book, at most "+farmbook.MaxSealEvery.String()+"; a record counts from the first sealed segment that names it, so this is how fine its time is")
 	signInProvider := fs.String("sign-in-provider", "", "with --people-store: the install's sign-in provider (an OIDC issuer URL) people's device keys are certified on; until a touch can confirm a farm admin's act, it changes only by redeploying with another")
 	signInClient := fs.String("sign-in-client-id", "", "with --sign-in-provider: the farm's own client ID there; a token for any other client is refused")
+	softwareTouchKeys := fs.Bool("software-touch-keys", false, "take a touch key that states a software protection (a key file, or a browser key that is not a passkey): a test or file-key farm's choice, set at install; otherwise a touch key states hardware or is a passkey, so a key file planted on a person's machine cannot be enrolled as their touch")
 	hudOrigin := fs.String("hud-origin", "", "the HUD's origin as people's browsers reach it (https://hud.studio.example, or http://localhost:<port>): where a browser's passkey touch key is made and signs; without it, passkeys are refused")
 	stepUpACR := fs.String("sign-in-step-up-acr", "", "acr values that mean multi-factor at the sign-in provider, comma-separated, beside OpenID PAPE's: what a touch key's step-up sign-in may show")
 	telemetryRing := fs.Bool("telemetry-ring", false, "the telemetry tier a farm starts at before its farm admin sets one: keep the last two hours of the work queue's decisions, redacted, in memory, so a diagnostic bundle (GET /api/v1/diagnose) covers the moment a problem happened; off, a bundle holds the present moment alone. Nothing leaves the farm either way; C4_TELEMETRY=off holds it off")
@@ -197,7 +198,7 @@ func runManager(args []string) error {
 			return err
 		}
 		iss, err := newPeopleIssuer(ctx, sig, kube, mgr.GetAPIReader(), *signingNS, peopleOptions{store: *peopleStore, provider: *signInProvider,
-			clientID: *signInClient, stepUpACR: splitList(*stepUpACR), singlePerson: *singlePerson, installer: installer, hudOrigin: *hudOrigin}, book)
+			clientID: *signInClient, stepUpACR: splitList(*stepUpACR), singlePerson: *singlePerson, installer: installer, hudOrigin: *hudOrigin, softwareTouchKeys: *softwareTouchKeys}, book)
 		if err != nil {
 			return err
 		}

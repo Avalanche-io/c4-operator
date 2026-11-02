@@ -55,6 +55,9 @@ type peopleOptions struct {
 	// hudOrigin is the HUD's origin, where a browser's passkey touch key
 	// is made and signs (--hud-origin); "" takes no passkeys.
 	hudOrigin string
+	// softwareTouchKeys lets a touch key state a software protection
+	// (--software-touch-keys): a test or file-key farm.
+	softwareTouchKeys bool
 }
 
 // newPeopleIssuer makes the people's issuer, or nil when the install
@@ -102,7 +105,7 @@ func newPeopleIssuer(ctx context.Context, s *signing, kube kubernetes.Interface,
 	iss := &people.Issuer{CA: s.ca,
 		Index:    index,
 		Provider: people.Provider{Issuer: o.provider, ClientID: o.clientID}, StepUp: people.StepUp{ACR: o.stepUpACR}, WebAuthn: rp,
-		SignIns: &secretSignIns{kube: kube, ns: signingNS}, Owner: owner, InstallerToken: o.installer,
+		SignIns: &secretSignIns{kube: kube, ns: signingNS}, Owner: owner, InstallerToken: o.installer, SoftwareTouchKeys: o.softwareTouchKeys,
 		// The farm owner's admins: before ORGANIZATION's Parties and their
 		// purposes, the farm binding's owner.
 		Admin: func(ctx context.Context, person string) bool {

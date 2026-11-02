@@ -73,6 +73,13 @@ type Issuer struct {
 	// made for: the HUD's host and origin (--hud-origin). nil refuses
 	// passkeys; the CLI's touch key needs none.
 	WebAuthn *WebAuthnRP
+	// SoftwareTouchKeys lets a touch key state a software protection
+	// (software-file, or a browser key that isn't a passkey): a test or
+	// file-key farm, set at install (--software-touch-keys). Otherwise a
+	// touch key states hardware, or is a passkey, so a key file planted on
+	// the person's machine can't be enrolled as their touch (PEOPLE-KEYS-2
+	// 4.3). It is stated, not attested.
+	SoftwareTouchKeys bool
 	// Owner is a one-person farm's person, from its farm binding or
 	// --single-person-farm; nil or "" on a studio farm.
 	Owner func(ctx context.Context) string
@@ -294,6 +301,10 @@ type Config struct {
 	OwnerEnrolled bool   `json:"ownerEnrolled"`
 	LeafTTL       string `json:"leafTTL"`
 	Lapse         string `json:"lapse"`
+	// SoftwareTouchKeys says this farm takes a touch key that states a
+	// software protection (--software-touch-keys); otherwise a touch key
+	// states hardware or is a passkey.
+	SoftwareTouchKeys bool `json:"softwareTouchKeys,omitempty"`
 }
 
 // StepUpConfig is StepUp as a client reads it.
@@ -331,7 +342,7 @@ func (i *Issuer) handleConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, Config{Farm: i.Farm(), Order: x.Order(), Position: pos, Provider: set, WebAuthn: i.WebAuthn,
 		Nonce:  "the device ID: the C4 ID of the key's DER SubjectPublicKeyInfo, as a string (c4...)",
 		StepUp: StepUpConfig{MaxAge: age.String(), ACR: append(append([]string{}, DefaultStepUpACR...), i.StepUp.ACR...), AMR: "mfa, or factors of two kinds (RFC 8176): known (pwd, pin, kba), held (otp, sms, tel, hwk, swk, sc, pop), being (fpt, face, iris, retina, vbm)"},
-		Owner:  i.owner(r.Context()), OwnerEnrolled: enrolled, LeafTTL: LeafTTL.String(), Lapse: Lapse.String()})
+		Owner:  i.owner(r.Context()), OwnerEnrolled: enrolled, LeafTTL: LeafTTL.String(), Lapse: Lapse.String(), SoftwareTouchKeys: i.SoftwareTouchKeys})
 }
 
 // Reads need a caller (PEOPLE-KEYS-2 7): the person the HUD signed in,

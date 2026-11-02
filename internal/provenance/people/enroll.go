@@ -93,6 +93,9 @@ func (i *Issuer) predicate(e *Enrolment, now time.Time) (*schema.DevicePredicate
 	if err := checkProof(p); err != nil {
 		return nil, nil, "", refuse(http.StatusForbidden, "%v", err)
 	}
+	if err := i.touchProtection(p); err != nil {
+		return nil, nil, "", err
+	}
 	if w := p.WebAuthn; w != nil {
 		// A passkey is this farm's only if it was made for the HUD and
 		// signed at its origin; its record keeps both, and every touch is
@@ -568,4 +571,15 @@ func checkPasskeyProof(pub *ecdsa.PublicKey, msg []byte, w *schema.DeviceWebAuth
 		return fmt.Errorf("the passkey's assertion is not over its request: %w", err)
 	}
 	return a.CheckRP(w.RPID, w.Origin)
+}
+
+// touchProtection refuses a touch key whose stated protection is software,
+// unless the farm takes software touch keys (SoftwareTouchKeys): a touch
+// key states hardware, or is a passkey, whose touch the authenticator
+// makes. A device key may be software; only the touch is held to this.
+func (i *Issuer) touchProtection(p *schema.DevicePredicate) error {
+	if p.TouchFor == "" || p.WebAuthn != nil || p.Protection == schema.ProtectionHardware || i.SoftwareTouchKeys {
+		return nil
+	}
+	return refuse(http.StatusForbidden, "a touch key states protection %s, and this farm takes a touch key only in hardware or as a passkey: a software touch key is a test or file-key farm's (--software-touch-keys)", schema.ProtectionHardware)
 }
