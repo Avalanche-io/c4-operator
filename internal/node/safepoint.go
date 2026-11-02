@@ -62,8 +62,10 @@ type spRelay struct {
 	steer   string
 	read    int
 	steerAt time.Time
-	// notes are the unit's .c4/asks and .c4/answers last relayed.
+	// notes are the unit's .c4/asks and .c4/answers last relayed, and
+	// acts its .c4/acts.
 	notes map[string]string
+	acts  string
 }
 
 // steerEvery is how often the daemon reads a pod for new messages.
@@ -113,6 +115,9 @@ func (d *Daemon) safepointsOnce(ctx context.Context, relays map[string]*spRelay)
 		}
 		r.seen = true
 		upper, _ := d.volumeDirs(v.Partition, v.ID)
+		// the unit's signed acts first, every pass: a control's act is on
+		// the pod before the control is (c4-unit signs before it writes)
+		d.relayActs(ctx, v.Namespace, v.Pod, v.PodUID, upper, r)
 		if sp, ok := ReadSafepoint(upper); ok && sp.Seq > r.asked {
 			note := SafepointNote{Seq: sp.Seq, At: sp.At, Checkpoint: sp.Checkpoint, Wait: sp.Wait}
 			if d.setPodNote(ctx, v.Namespace, v.Pod, v.PodUID, c4v1.AnnotationSafepoint, note) {
@@ -145,6 +150,23 @@ func (d *Daemon) safepointsOnce(ctx context.Context, relays map[string]*spRelay)
 		if !r.seen {
 			delete(relays, uid)
 		}
+	}
+}
+
+// relayActs relays a unit's signed acts to its pod (AnnotationUnitActs)
+// when they changed, and tells the unit how many the farm has.
+func (d *Daemon) relayActs(ctx context.Context, ns, name, uid, upper string, r *spRelay) {
+	b, n, ok := ReadUnitActs(upper)
+	if !ok || b == r.acts {
+		return
+	}
+	if !d.setPodNote(ctx, ns, name, uid, c4v1.AnnotationUnitActs, json.RawMessage(b)) {
+		return
+	}
+	r.acts = b
+	dir := filepath.Join(d.podsDir(), uid, "volumes", "kubernetes.io~empty-dir", ControlVolume)
+	if err := WriteActsSeen(dir, n); err != nil {
+		d.Log.V(1).Info("acts seen", "pod", ns+"/"+name, "err", err.Error())
 	}
 }
 
@@ -196,6 +218,32 @@ func ReadUnitNote(out, file string) (string, bool) {
 		return "", false
 	}
 	return string(b), true
+}
+
+// unitActsBytes bounds a unit's .c4/acts: c4-unit signs at most 48 acts
+// in an attempt, each about 3 KiB, and the pod's annotations together may
+// be 256 KiB.
+const unitActsBytes = 192 << 10
+
+// ReadUnitActs reads a unit's signed acts (.c4/acts, c4-unit): a JSON
+// array of at most 192 KiB, and how many it holds.
+func ReadUnitActs(out string) (string, int, bool) {
+	b, err := os.ReadFile(filepath.Join(out, ".c4", "acts"))
+	if err != nil || len(b) > unitActsBytes {
+		return "", 0, false
+	}
+	var acts []json.RawMessage
+	if json.Unmarshal(b, &acts) != nil {
+		return "", 0, false
+	}
+	return string(b), len(acts), true
+}
+
+// WriteActsSeen tells the unit, in its control directory, how many of its
+// acts the farm has (control/acts.seen): needs and withdraw wait for it
+// before the unit ends.
+func WriteActsSeen(control string, n int) error {
+	return writeFileAtomic(filepath.Join(control, "acts.seen"), n)
 }
 
 // ReadSteerSeen reads how far a unit read its messages (.c4/steer-seen,

@@ -165,6 +165,17 @@ func (r *Runner) relay(ctx context.Context, p *corev1.Pod, u UnitDirs) error {
 		st = &relayState{}
 		r.relays[p.UID] = st
 	}
+	// the unit's signed acts first: a control's act is on the pod before
+	// the control is (c4-unit signs before it writes)
+	if b, n, ok := node.ReadUnitActs(u.Out); ok && b != st.acts {
+		if err := r.annotate(ctx, p, map[string]string{c4v1.AnnotationUnitActs: b}); err != nil {
+			return err
+		}
+		st.acts = b
+		if err := node.WriteActsSeen(u.Control, n); err != nil {
+			return err
+		}
+	}
 	if err := r.relaySteer(ctx, p, u, st); err != nil {
 		return err
 	}
@@ -238,8 +249,10 @@ type relayState struct {
 	// far the unit said it read them.
 	steer string
 	read  int
-	// notes are the unit's .c4/asks and .c4/answers last relayed.
+	// notes are the unit's .c4/asks and .c4/answers last relayed, and
+	// acts its .c4/acts.
 	notes map[string]string
+	acts  string
 }
 
 // controlDocs are the documents a member leaves for the farm, as a pod

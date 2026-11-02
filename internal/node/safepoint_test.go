@@ -119,4 +119,21 @@ func TestSteerRelay(t *testing.T) {
 	if got := annotation(t, c, c4v1.AnnotationAnswers); got != "" {
 		t.Fatalf("answers that are not a list were relayed: %q", got)
 	}
+	// The unit's signed acts go every pass, ahead of the steer tick, and
+	// the unit learns how many the farm has.
+	acts := `[{"mediaType":"a"},{"mediaType":"b"}]`
+	os.WriteFile(filepath.Join(upper, ".c4", "acts"), []byte(acts), 0o644)
+	relays["u3"].steerAt = time.Now()
+	d.safepointsOnce(ctx, relays)
+	if got := annotation(t, c, c4v1.AnnotationUnitActs); got != acts {
+		t.Fatalf("acts %q", got)
+	}
+	if b, err := os.ReadFile(filepath.Join(control, "acts.seen")); err != nil || string(b) != "2" {
+		t.Fatalf("acts.seen %q %v", b, err)
+	}
+	os.WriteFile(filepath.Join(upper, ".c4", "acts"), []byte("not a list"), 0o644)
+	d.safepointsOnce(ctx, relays)
+	if got := annotation(t, c, c4v1.AnnotationUnitActs); got != acts {
+		t.Fatalf("acts that are not a list were relayed: %q", got)
+	}
 }

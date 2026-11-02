@@ -136,6 +136,19 @@ func TestHostSafepointRelay(t *testing.T) {
 	if got := getPod(t, c).Annotations[c4v1.AnnotationSteerSeen]; got != "1" {
 		t.Fatalf("steer-seen %q", got)
 	}
+	// the unit's signed acts go to the pod, and the unit learns how many
+	// the farm has
+	acts := `[{"mediaType":"a"}]`
+	os.WriteFile(filepath.Join(u.Out, ".c4", "acts"), []byte(acts), 0o644)
+	if err := r.relay(ctx, getPod(t, c), u); err != nil {
+		t.Fatal(err)
+	}
+	if got := getPod(t, c).Annotations[c4v1.AnnotationUnitActs]; got != acts {
+		t.Fatalf("acts %q", got)
+	}
+	if b, err := os.ReadFile(filepath.Join(u.Control, "acts.seen")); err != nil || string(b) != "1" {
+		t.Fatalf("acts.seen %q %v", b, err)
+	}
 	answers := `[{"seq":1,"ask":"2#1","answer":"tokenize/"}]`
 	os.WriteFile(filepath.Join(u.Out, ".c4", "answers"), []byte(answers), 0o644)
 	if err := r.relay(ctx, getPod(t, c), u); err != nil {
