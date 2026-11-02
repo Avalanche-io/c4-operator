@@ -79,6 +79,7 @@ const real = {
   // the farm book after a position (book.js reads it too), and a pause
   book: (since) => api().then((m) => m.get(`/book/farm?since=${since}`)),
   pause: () => new Promise((ok) => setTimeout(ok, 3000)),
+  sleep: (ms) => new Promise((ok) => setTimeout(ok, ms)),
   changed: () => document.dispatchEvent(new CustomEvent('hud:refresh')),
 };
 let deps = real;
@@ -110,9 +111,18 @@ export function browserLabel(ua = globalThis.navigator ? navigator.userAgent : '
   return os ? `${b} on ${os}` : b;
 }
 
-// call: the issuer's answer to a read, or with a body a write
+// call: the issuer's answer to a read, or with a body a write. An issuer
+// that asks the HUD to slow down (429) is asked again after the
+// Retry-After it gave, a few times, never treated as a refusal: a 429 is
+// answered before anything is taken, so the same request may go again.
+const RETRIES = 3;
 async function call(path, body) {
-  const r = await deps.issuer(path, body === undefined || typeof body === 'string' || body instanceof Uint8Array ? body : JSON.stringify(body));
+  const sent = body === undefined || typeof body === 'string' || body instanceof Uint8Array ? body : JSON.stringify(body);
+  let r = await deps.issuer(path, sent);
+  for (let n = 0; r.status === 429 && n < RETRIES; n++) {
+    await deps.sleep(retryAfter(r.headers && r.headers.get ? r.headers.get('Retry-After') : null));
+    r = await deps.issuer(path, sent);
+  }
   const out = await r.json().catch(() => ({}));
   if (!r.ok) {
     const e = new Error(out.error || `${r.status}`);
@@ -120,6 +130,15 @@ async function call(path, body) {
     throw e;
   }
   return out;
+}
+
+// retryAfter: how long a Retry-After asks to wait, in milliseconds: its
+// seconds or its date, held to between a second and a minute; a second
+// when it says neither
+export function retryAfter(v, now = Date.now()) {
+  const secs = Number(v);
+  const ms = v != null && v !== '' && Number.isFinite(secs) ? secs * 1000 : Date.parse(v) - now;
+  return Number.isFinite(ms) ? Math.min(60e3, Math.max(1e3, ms)) : 1e3;
 }
 
 // ------------------------------------------------------------ secrets in the address
