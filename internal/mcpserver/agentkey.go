@@ -374,8 +374,8 @@ func checkCert(c *people.AgentCertified, spki []byte, agent, farm string, now ti
 		return errors.New("its leaf is for another key")
 	case provenance.CertIdentity(leaf) != provenance.AgentIdentity(agent) || c.Identity != provenance.AgentIdentity(agent) || c.Agent != agent:
 		return fmt.Errorf("its leaf is %s, not agent %s", provenance.CertIdentity(leaf), agent)
-	case provenance.CertDevice(leaf) != device || c.Device != device:
-		return fmt.Errorf("its leaf names device %.16s, not this key's %.16s", provenance.CertDevice(leaf), device)
+	case c.Device != device:
+		return fmt.Errorf("it names device %.16s, not this key's %.16s", c.Device, device)
 	case c.Grant == "" || provenance.CertGrant(leaf) != c.Grant:
 		return fmt.Errorf("its leaf names grant %.16s, and it says %.16s", provenance.CertGrant(leaf), c.Grant)
 	case c.Person == "":

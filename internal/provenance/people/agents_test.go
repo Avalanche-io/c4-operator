@@ -341,13 +341,14 @@ func TestAgentEntriesCheckedAtTheSeal(t *testing.T) {
 	if res := refusals(a.seal()); len(res) != 1 || res[0].Reason != farmbook.ReasonDisagrees {
 		t.Errorf("an act under one grant booked as another's use: %+v", res)
 	}
-	// noor's grant act, booked as a grant to another agent.
-	gact := a.grant(assistant, a.agent, true)
+	// noor's grant of the key to a reviewer, booked as a grant to the
+	// assistant.
+	gact := a.grant("reviewer", a.agent, true)
 	gid := provtest.ID(string(gact))
 	if err := a.store.Put(context.Background(), gid, gact); err != nil {
 		t.Fatal(err)
 	}
-	write(people.Entry{Kind: people.KindAgentGrant, Record: gid, Grant: gid, Agent: "other-agent", Device: a.agent.id, Person: "noor", By: "noor"})
+	write(people.Entry{Kind: people.KindAgentGrant, Record: gid, Grant: gid, Agent: assistant, Device: a.agent.id, Person: "noor", By: "noor"})
 	if res := refusals(a.seal()); len(res) != 1 || res[0].Reason != farmbook.ReasonDisagrees {
 		t.Errorf("a grant booked for another agent than its act names: %+v", res)
 	}
@@ -370,10 +371,19 @@ func TestAgentEntriesCheckedAtTheSeal(t *testing.T) {
 	if res := refusals(a.seal()); len(res) != 1 || res[0].Reason != farmbook.ReasonUnsigned {
 		t.Errorf("an agent's use written without the issuer's signature: %+v", res)
 	}
-	// A grant of noor's own CLI key, which is a person's device.
+	// A grant of noor's own CLI key, which is a person's device: refused at
+	// the issuer, and at the seal.
 	own := a.act(a.noor, "noor", people.ActGrant, deviceSubject(a.noor.Device), map[string]string{"agent": assistant, "device": a.noor.Device}, true)
 	if code, body, _ := a.book(own, ""); code != http.StatusForbidden || !strings.Contains(body, "person's device") {
 		t.Errorf("a grant of a person's own key: %d %s", code, body)
+	}
+	oid := provtest.ID(string(own))
+	if err := a.store.Put(context.Background(), oid, own); err != nil {
+		t.Fatal(err)
+	}
+	write(people.Entry{Kind: people.KindAgentGrant, Record: oid, Grant: oid, Agent: assistant, Device: a.noor.Device, Person: "noor", By: "noor"})
+	if res := refusals(a.seal()); len(res) != 1 || res[0].Reason != farmbook.ReasonRejected {
+		t.Errorf("the seal of a grant of a person's own key: %+v", res)
 	}
 }
 

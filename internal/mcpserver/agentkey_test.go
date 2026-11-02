@@ -313,6 +313,9 @@ func TestPlantedOrBrokenKeyFileRefused(t *testing.T) {
 		"a file others can read": func(dir string) error {
 			return os.WriteFile(filepath.Join(dir, "workload-claude-code.key"), pemb, 0o644)
 		},
+		"a directory where the key file is": func(dir string) error {
+			return os.Mkdir(filepath.Join(dir, "workload-claude-code.key"), 0o600)
+		},
 		"a directory others can read": func(dir string) error {
 			if err := os.WriteFile(filepath.Join(dir, "workload-claude-code.key"), pemb, 0o600); err != nil {
 				return err
@@ -377,11 +380,11 @@ func TestReturnedCertificateCheckedBeforeUse(t *testing.T) {
 		"another key's leaf": func(c *people.AgentCertified, _ *ecdsa.PublicKey, ca *provenance.CA) {
 			spki, _ := x509.MarshalPKIXPublicKey(&otherKey.PublicKey)
 			leaf, _ := ca.IssueLeaf(&otherKey.PublicKey, c.Identity, schema.DeviceID(spki), c.Grant, time.Hour, time.Now())
-			c.Chain[0] = leaf.Raw
+			c.Chain[0], c.Expires = leaf.Raw, leaf.NotAfter
 		},
 		"another agent's leaf": func(c *people.AgentCertified, pub *ecdsa.PublicKey, ca *provenance.CA) {
 			leaf, _ := ca.IssueLeaf(pub, provenance.AgentIdentity("other-agent"), c.Device, c.Grant, time.Hour, time.Now())
-			c.Chain[0] = leaf.Raw
+			c.Chain[0], c.Expires = leaf.Raw, leaf.NotAfter
 		},
 		"a grant its leaf doesn't name": func(c *people.AgentCertified, _ *ecdsa.PublicKey, _ *provenance.CA) {
 			c.Grant = provtest.ID("another grant")
@@ -389,7 +392,7 @@ func TestReturnedCertificateCheckedBeforeUse(t *testing.T) {
 		"no person": func(c *people.AgentCertified, _ *ecdsa.PublicKey, _ *provenance.CA) { c.Person = "" },
 		"another farm's CA": func(c *people.AgentCertified, pub *ecdsa.PublicKey, _ *provenance.CA) {
 			leaf, _ := other.CA.IssueLeaf(pub, c.Identity, c.Device, c.Grant, time.Hour, time.Now())
-			c.Chain = [][]byte{leaf.Raw, other.CA.Cert.Raw}
+			c.Chain, c.Expires = [][]byte{leaf.Raw, other.CA.Cert.Raw}, leaf.NotAfter
 		},
 		"a device other than its key's": func(c *people.AgentCertified, _ *ecdsa.PublicKey, _ *provenance.CA) {
 			c.Device = provtest.ID("another key")

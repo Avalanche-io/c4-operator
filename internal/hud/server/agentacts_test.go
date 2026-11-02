@@ -292,3 +292,15 @@ func TestDecideRequestNamesTheWait(t *testing.T) {
 		t.Errorf("the decide request: %+v", reqs)
 	}
 }
+
+// An agent's act under its person's grant, on its person's job, is taken
+// only from that person: noor's agent's act on noor's job, sent by dana,
+// is refused.
+func TestAgentActTakenOnlyFromItsPerson(t *testing.T) {
+	a := newAgentDecide(t, "agent:assistant")
+	a.s.m.byKey["show-a/sh040-light-v007"].job.Annotations[c4v1.AnnotationOwner] = "noor"
+	k := a.agent("assistant", "noor", false)
+	if code, _ := a.decide(agentRequest(ownWait, map[string]string{ActHeader: a.act(k, "noor", ownWait)})); code != http.StatusForbidden {
+		t.Errorf("noor's agent's act sent by dana: %d, want 403", code)
+	}
+}
