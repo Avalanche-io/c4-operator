@@ -460,17 +460,19 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			if until, err := time.Parse(time.RFC3339, pc.TouchKeyUntil); err == nil && time.Now().Before(until) {
 				return fmt.Errorf("the window to make your touch key is open until %s: run c4 farm touch-key now", until.Local().Format("Jan 2 15:04"))
 			}
+			// the issuer agrees first, on the token in hand; then the token
+			// rotates, so the window is the new token's to use
+			until, err := farmcli.ReopenTouchWindow(ctx, c)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(stdout, "reopened  the window to make your touch key, until %s\n", until.Local().Format("Jan 2 15:04"))
 			fmt.Fprintf(stdout, "rotating the farm's installer token; a browser signed in with the old one signs in again with c4 farm open\n")
 			tok, err := localfarm.RotateInstallerToken(ctx, name, f.HUD)
 			if err != nil {
 				return err
 			}
 			c.Installer = tok
-			until, err := farmcli.ReopenTouchWindow(ctx, c)
-			if err != nil {
-				return err
-			}
-			fmt.Fprintf(stdout, "reopened  the window to make your touch key, until %s; making it now\n", until.Local().Format("Jan 2 15:04"))
 		}
 		keys := farmcli.KeysFor(name)
 		if runtime.GOOS == "darwin" && !keys.FileOnly {

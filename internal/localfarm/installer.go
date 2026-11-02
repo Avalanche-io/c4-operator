@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Avalanche-io/c4-operator/internal/keystore"
 )
 
 // The installer token is what makes a request the installer's on a local
@@ -84,7 +86,8 @@ func writeToken(p, t string) error {
 	if err := os.Mkdir(filepath.Dir(p), 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
 		return err
 	}
-	if err := os.WriteFile(p, []byte(t+"\n"), 0o600); err != nil {
+	// whole or not at all, and never through a symlink
+	if err := keystore.WriteFile(p, []byte(t+"\n")); err != nil {
 		return fmt.Errorf("the farm's installer token: %w", err)
 	}
 	return nil

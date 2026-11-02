@@ -12,12 +12,13 @@ import (
 )
 
 // RotateInstallerToken gives farm name a new installer token: the
-// person's copy and the manager's Secret, then the manager restarted to
-// read it, and the HUD waited for with the new one. The old token works
-// no more, and a browser signed in with it signs in again (c4 farm open).
-// c4 farm touch-key --reopen rotates it before it reopens the touch-key
-// window. A run that stops partway leaves the new token in the person's
-// copy; c4 farm up puts it in the Secret and the manager again.
+// manager's Secret first, then the manager restarted to read it and the
+// HUD waited for with the new one, and only then the person's copy. The
+// old token works no more, and a browser signed in with it signs in again
+// (c4 farm open). c4 farm touch-key --reopen rotates it once the issuer
+// has agreed to reopen the touch-key window. A run that stops before the
+// person's copy is written leaves the old one there, which c4 farm up puts
+// back in the Secret and the manager.
 func RotateInstallerToken(ctx context.Context, name, hud string) (string, error) {
 	c, err := kubeClient(name)
 	if err != nil {
@@ -29,9 +30,6 @@ func RotateInstallerToken(ctx context.Context, name, hud string) (string, error)
 	}
 	t, err := newToken()
 	if err != nil {
-		return "", err
-	}
-	if err := writeToken(p, t); err != nil {
 		return "", err
 	}
 	var sec corev1.Secret
@@ -57,6 +55,9 @@ func RotateInstallerToken(ctx context.Context, name, hud string) (string, error)
 	}
 	if err := waitHUD(ctx, c, hud, t, 5*time.Minute); err != nil {
 		return "", err
+	}
+	if err := writeToken(p, t); err != nil {
+		return "", fmt.Errorf("the farm's installer token is rotated, and this machine's copy of it is not written: %w; c4 farm up puts the old one back", err)
 	}
 	return t, nil
 }
