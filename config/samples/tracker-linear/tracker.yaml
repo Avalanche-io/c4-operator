@@ -30,6 +30,10 @@ spec:
   events: {mode: webhook, pollSeconds: 60, resyncSeconds: 900}
   # Linear allows 2,500 requests an hour per API key.
   rate: {perSecond: "0.5", burst: 10}
+  # c4-sync relays this Tracker's decisions and signs each one as itself,
+  # naming the person; the farm's issuer certifies it while a Tracker
+  # names it here
+  sync: {namespace: c4-system, serviceAccount: c4-sync}
   people:
     dana@example.com: dana
   intake:

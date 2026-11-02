@@ -211,6 +211,8 @@ func TrackerObjects(o Options) ([]obj, error) {
 				// a stand-in on the farm has no rate limit; a pass is a second, not a minute
 				"rate":   obj{"perSecond": "50", "burst": 100},
 				"people": people,
+				// c4-sync relays and signs its decisions (spec.sync)
+				"sync": syncAccount,
 				"intake": []obj{{"match": obj{"type": "Issue", "labels": []string{sandbox.Label}}, "as": "job",
 					"for": obj{"assignee": true}, "rework": "nextVersion", "job": job}},
 				"statusOut": obj{"commitStatus": true, "fieldSeconds": 30}}},
@@ -227,6 +229,7 @@ func TrackerObjects(o Options) ([]obj, error) {
 				"events":     obj{"mode": "eventlog", "pollSeconds": 5, "resyncSeconds": 300},
 				"rate":       obj{"perSecond": "50", "burst": 100},
 				"people":     people,
+				"sync":       syncAccount,
 				"intake": []obj{{"match": obj{"type": "Task", "fields": obj{"sg_status_list": "rdy", "step.Step.short_name": "LGT"}},
 					"as": "job", "for": obj{"assignee": true}, "rework": "nextVersion", "job": flowJob}},
 				"statusOut":  obj{"states": obj{"running": "ip", "rework": "ip", "in-review": "rev", "needs-person": "hld"}, "fieldSeconds": 15},
@@ -234,13 +237,19 @@ func TrackerObjects(o Options) ([]obj, error) {
 	}, nil
 }
 
+// syncAccount is c4-sync's service account, as a Tracker names its sync.
+var syncAccount = obj{"namespace": "c4-system", "serviceAccount": "c4-sync"}
+
 // syncArgs are c4-sync's arguments on the local farm: its own projected
 // token for the HUD, as on any farm (a pod never holds the installer's),
 // links to the HUD as this machine reaches it, a short pass, and the
 // farm's zone for the times it writes.
 func syncArgs(o Options) []string {
 	args := []string{"--hud=http://c4-hud.c4-system.svc", "--hud-token-file=/var/run/c4-sync/token",
-		"--hud-public-url=" + o.HUD(), "--interval=10s"}
+		"--hud-public-url=" + o.HUD(), "--interval=10s",
+		// the farm's issuer certifies it while a Tracker names it, and it
+		// signs each decision it relays
+		"--signer=http://c4-signer.c4-system.svc", "--sign-token-file=/var/run/c4-sync-signer/token"}
 	if o.TZ != "" {
 		args = append(args, "--tz="+o.TZ)
 	}

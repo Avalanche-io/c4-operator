@@ -119,6 +119,16 @@ func TestTrackerObjects(t *testing.T) {
 	if !strings.Contains(string(YAML(objs)), "C4_SANDBOX_FLOW_KEY") {
 		t.Fatal("the sandbox does not read the Flow key from the Secret")
 	}
+	// both Trackers name c4-sync as their sync, so it is certified and
+	// signs what it relays, and it is told where the issuer is
+	for _, tr := range []c4v1.Tracker{trackers[SandboxTracker], fl} {
+		if !tr.Spec.SyncedBy("c4-system", "c4-sync") {
+			t.Errorf("tracker %s names sync %+v", tr.Name, tr.Spec.Sync)
+		}
+	}
+	if args := strings.Join(syncArgs(Options{}), " "); !strings.Contains(args, "--signer=http://c4-signer.c4-system.svc") || !strings.Contains(args, "--sign-token-file=") {
+		t.Errorf("c4-sync's arguments: %s", args)
+	}
 }
 
 func TestSyncImageIsReplaced(t *testing.T) {

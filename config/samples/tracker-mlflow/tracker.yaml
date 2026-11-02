@@ -26,6 +26,10 @@ spec:
     secret: {name: denoiser-mlflow, key: password}
   webhookSecret: {name: denoiser-mlflow-webhook, key: secret}
   events: {mode: poll, pollSeconds: 60, resyncSeconds: 900}
+  # c4-sync relays this Tracker's decisions and signs each one as itself,
+  # naming the person; the farm's issuer certifies it while a Tracker
+  # names it here
+  sync: {namespace: c4-system, serviceAccount: c4-sync}
   people:
     mlflow-registry: party:ml-leads
   intake:

@@ -42,6 +42,10 @@ spec:
   events: {mode: eventlog, pollSeconds: 30, resyncSeconds: 900}
   # Kitsu publishes no request limit.
   rate: {perSecond: "3", burst: 10}
+  # c4-sync relays this Tracker's decisions and signs each one as itself,
+  # naming the person; the farm's issuer certifies it while a Tracker
+  # names it here
+  sync: {namespace: c4-system, serviceAccount: c4-sync}
   people:
     dana@saltmarsh.example: dana
   intake:

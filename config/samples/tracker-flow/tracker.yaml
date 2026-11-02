@@ -41,6 +41,10 @@ spec:
   webhookSecret: {name: saltmarsh-flow-webhook, key: token}
   events: {mode: eventlog, pollSeconds: 60, resyncSeconds: 900}
   rate: {perSecond: "2", burst: 10}
+  # c4-sync relays this Tracker's decisions and signs each one as itself,
+  # naming the person; the farm's issuer certifies it while a Tracker
+  # names it here
+  sync: {namespace: c4-system, serviceAccount: c4-sync}
   people:
     dana: dana
   intake:
