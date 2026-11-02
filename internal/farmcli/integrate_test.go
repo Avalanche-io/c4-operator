@@ -3,8 +3,11 @@ package farmcli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -288,5 +291,62 @@ func TestChooseEndOfInputIsNoAnswer(t *testing.T) {
 	on, err := Choose(cfg, found, "", false, true, Out{W: &bytes.Buffer{}, In: strings.NewReader("")})
 	if err != nil || len(on) != 0 || len(cfg.Integrations) != 0 {
 		t.Errorf("end of input: %v %v %v", on, err, cfg.Integrations)
+	}
+}
+
+// The agent's sandbox in Claude Code's user settings (a scratch config
+// directory here): the farm's directory denied to Read and Edit and to the
+// sandbox's reads; with enable, the sandbox on with no way around it.
+// Everything the person had stays, and off takes out only what c4 added.
+func TestSandboxDeniesTheFarmsDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfgDir := filepath.Join(t.TempDir(), "claude")
+	t.Setenv("CLAUDE_CONFIG_DIR", cfgDir)
+	os.MkdirAll(cfgDir, 0o700)
+	theirs := `{"model":"opus","permissions":{"deny":["Read(~/.ssh/**)"],"allow":["Bash(ls:*)"]},"sandbox":{"enabled":true}}`
+	os.WriteFile(filepath.Join(cfgDir, "settings.json"), []byte(theirs), 0o600)
+
+	added, err := SandboxOn("c4-local", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := func() map[string]any {
+		var s map[string]any
+		b, _ := os.ReadFile(filepath.Join(cfgDir, "settings.json"))
+		if err := json.Unmarshal(b, &s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	s := read()
+	deny := jsonStrings(s["permissions"].(map[string]any)["deny"])
+	sb := s["sandbox"].(map[string]any)
+	denyRead := jsonStrings(sb["filesystem"].(map[string]any)["denyRead"])
+	if !slices.Contains(deny, "Read(~/.c4/c4-local/**)") || !slices.Contains(deny, "Edit(~/.c4/c4-local/**)") || !slices.Contains(deny, "Read(~/.ssh/**)") ||
+		!slices.Contains(denyRead, "~/.c4/c4-local/**") || sb["enabled"] != true || sb["allowUnsandboxedCommands"] != false || s["model"] != "opus" {
+		t.Fatalf("settings after on: %v", s)
+	}
+	if added["enabled"] {
+		t.Error("recorded the person's own sandbox as c4's")
+	}
+	if again, err := SandboxOn("c4-local", true); err != nil || len(again) != 0 {
+		t.Errorf("on again added %v (%v)", again, err)
+	}
+	if err := SandboxOff(added); err != nil {
+		t.Fatal(err)
+	}
+	s = read()
+	if !reflect.DeepEqual(s, map[string]any{"model": "opus", "permissions": map[string]any{"deny": []any{"Read(~/.ssh/**)"}, "allow": []any{"Bash(ls:*)"}},
+		"sandbox": map[string]any{"enabled": true}}) {
+		t.Errorf("off left %v", s)
+	}
+	// settings that aren't JSON are left alone, and said
+	os.WriteFile(filepath.Join(cfgDir, "settings.json"), []byte("{oops"), 0o600)
+	if _, err := SandboxOn("c4-local", false); err == nil || !strings.Contains(err.Error(), "don't read as JSON") {
+		t.Errorf("broken settings: %v", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(cfgDir, "settings.json")); string(b) != "{oops" {
+		t.Error("broken settings were rewritten")
 	}
 }
