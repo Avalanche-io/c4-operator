@@ -2519,7 +2519,7 @@ keep taking the `c4:party:<name>` group, as before.
 | `GET /parties/{name}`              |                                                     | `{ ok, party, record }`; `404` for no such party                                                                                                                                                                                                                                       |
 | `POST /parties`                    | `{ name, kind, displayName, legalName?, signIns? }` | `{ ok, message, party, record }` (`make-party`): a farm admin (who may create `parties`) makes a party; whoever makes an organisation is its first admin, holding `member` and `admin`. The same make again by its maker answers `existing: true`; any other make of the name is `409` |
 | `PATCH /parties/{name}`            | `{ displayName?, legalName?, perPersonViews? }`     | `{ ok, message, party, record }` (`change-party`): the party's admin changes its names, and an organisation's per-person views policy                                                                                                                                                  |
-| `PUT /parties/{name}/sign-ins`     | `{ signIns }`                                       | `{ ok, message, party, record }` (`set-sign-ins`): a person's sign-in subjects, all of them, set by a farm admin or by the person, who adds only the sign-in they are using. One sign-in is one person's (`409`)                                                                       |
+| `PUT /parties/{name}/sign-ins`     | `{ signIns }`                                       | `{ ok, message, party, record }` (`set-sign-ins`): a person's sign-in subjects, all of them, set by a farm admin or by the person, who adds only the HUD sign-in they are using (a provider's subject is a farm admin's to add). One sign-in is one person's (`409`)                   |
 | `POST /parties/{name}/members`     | `{ person \| group, purposes }`                     | `{ ok, message, party, record }` (`add-member`): an admin adds a member, by name or by a group of the studio's own; `409` for one in force already                                                                                                                                     |
 | `PUT /parties/{name}/members`      | `{ person \| group, purposes }`                     | the same (`set-purposes`): an admin changes a membership's purposes; `404` for none in force                                                                                                                                                                                           |
 | `POST /parties/{name}/members/end` | `{ person \| group }`                               | the same (`end-member`): an admin, or the member themselves, ends a membership; it is kept in the book, never deleted                                                                                                                                                                  |
@@ -2532,8 +2532,11 @@ booked, yours?, actOn }`.
   `organisation`, and never changes.
 - `legalName` (an organisation's) is what a contract carries, and what the
   farm CA will name (ORGANIZATION 4). `signIns` (a person's) are the sign-in
-  subjects that are them: a token username, an SSO subject, a development
-  name. They go only to the person and to farm admins.
+  subjects that are them, each `{ issuer?, subject }`: with `issuer`, a
+  provider's subject ID, which the people's issuer certifies their devices
+  on; without, a name the HUD signs them in as (a token username, an SSO
+  header's value, a development name). One subject is one person's across
+  every Party. They go only to the person and to farm admins.
 - `members` and `groups` are the organisation's memberships in force, each
   `{ person | group, purposes, inEffect, by, record, since, pending? }`:
   who granted it, its record, and when its book entry counts from. An
@@ -2795,7 +2798,11 @@ the index already books is `409` at any replica, after any restart.
   enrolled before it.
 - **From a removal's position on,** the device's certificates are no longer
   in force. A removed key never comes back.
-- **Before ORGANIZATION's Parties,** an admin is the farm binding's owner.
+- **An admin** is, on a farm with Parties, a person holding `admin` by
+  name in the farm owner's Party, in force in the farm book (for a
+  person's Party, that person); with Parties and no Party of the farm
+  owner's name, no one. On a farm with no Parties yet, the farm binding's
+  owner. The same admins read others' ID tokens and addresses.
 - **`set-sign-in-provider` is refused** (`403`) until a touch can confirm
   it (K9). Until then the provider changes only by redeploying the farm
   with `--sign-in-provider` and `--sign-in-client-id`.
@@ -2921,11 +2928,14 @@ its C4 ID:
     `azp`);
   - the sign-ins in force there (`sub`).
 
-**Sign-ins** are matched by subject, never by email. Until ORGANIZATION's
-Parties carry `signIns`, they are the Secret `c4-sign-ins` in the signing
-namespace: one key per person, each line `<issuer URL> <subject ID>`. It
-ships empty with the install, so the manager can't create it, and a
-cluster administrator fills it in.
+**Sign-ins** are matched by subject, never by email. They are the person
+Parties' `signIns` that name a provider (`{ issuer, subject }`, see
+Parties). A farm with no Parties yet reads the Secret `c4-sign-ins` in the
+signing namespace instead: one key per person, each line `<issuer URL>
+<subject ID>`, which ships empty with the install and a cluster
+administrator fills in. With Parties the Secret is never read. One subject
+is one person's: a subject in two people's sign-ins signs in no one
+(`409`).
 
 **The sign-in provider** is the install's: `--sign-in-provider` and
 `--sign-in-client-id`, booked with grade `install`, and booked again when
