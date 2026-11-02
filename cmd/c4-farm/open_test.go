@@ -65,3 +65,13 @@ func TestLoginKeyOnlyAtATerminal(t *testing.T) {
 		t.Errorf("a farm with no provider: %q", out.String())
 	}
 }
+
+// c4 farm touch-key is a person's at a terminal: never from a script.
+func TestTouchKeyOnlyAtATerminal(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CLAUDECODE", "")
+	var out bytes.Buffer
+	if err := run([]string{"touch-key"}, &out, strings.NewReader("")); err == nil || !strings.Contains(err.Error(), "at a terminal") {
+		t.Errorf("from a script: %v", err)
+	}
+}

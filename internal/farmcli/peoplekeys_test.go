@@ -298,3 +298,20 @@ func TestOpenBrowserCountersignsWhatEnrolled(t *testing.T) {
 		t.Errorf("opened %s", opened)
 	}
 }
+
+// c4 farm touch-key needs this machine's owner key enrolled, and a machine
+// that makes touch keys: a key file store makes none, and says why.
+func TestTouchKeyNeedsTheOwnerKeyAndASecureEnclave(t *testing.T) {
+	o := newOwnerIssuer(t)
+	ctx := context.Background()
+	st := keystore.Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
+	if _, err := EnrolTouchKey(ctx, o.client, st); err == nil || !strings.Contains(err.Error(), "c4 farm up enrols it") {
+		t.Errorf("before up: %v", err)
+	}
+	if _, err := EnrolOwner(ctx, o.client, st, "noor"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EnrolTouchKey(ctx, o.client, st); err == nil || !strings.Contains(err.Error(), "makes no touch key") {
+		t.Errorf("a key file store: %v", err)
+	}
+}

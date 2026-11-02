@@ -521,3 +521,52 @@ func hasBrowser(ctx context.Context, c *Client, person string) bool {
 	}
 	return false
 }
+
+// EnrolTouchKey is c4 farm touch-key on a one-person farm: the owner's
+// first touch key, for a farm up made with no one at the terminal to give
+// its touch, enrolled on the installer token for this machine's owner key.
+// The issuer takes it only while the owner key never had a touch key.
+// Making it asks for the person's touch, so only a person at a terminal
+// runs it.
+func EnrolTouchKey(ctx context.Context, c *Client, st keystore.Store) (*people.Certified, error) {
+	dev, err := LoadCert(st, keystore.Device)
+	if err != nil {
+		return nil, err
+	}
+	if dev == nil {
+		return nil, errors.New("this machine's key is not enrolled at the farm: c4 farm up enrols it")
+	}
+	if tc, err := LoadCert(st, keystore.Touch); err != nil || tc != nil {
+		if err == nil {
+			err = fmt.Errorf("this machine has a touch key at the farm already (%s)", ShortDevice(tc.Device))
+		}
+		return nil, err
+	}
+	cfg, err := PeopleConfig(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Owner == "" {
+		return nil, errors.New("this is not a one-person farm: a touch key is enrolled on a step-up sign-in there")
+	}
+	touch, err := st.Key(keystore.Touch)
+	if errors.Is(err, keystore.ErrNoTouch) {
+		return nil, errors.New("this machine makes no touch key: it has no Secure Enclave, or C4_KEYS=file keeps its keys in files")
+	}
+	if err != nil {
+		return nil, err
+	}
+	person := strings.TrimPrefix(dev.Identity, provenance.IdentityBase+"user/")
+	e, err := enrolment(touch, cfg.Farm, person, dev.Device)
+	if err != nil {
+		return nil, err
+	}
+	var cert people.Certified
+	if err := c.Issuer(ctx, http.MethodPost, "/v1/people/owner/touch", e, &cert); err != nil {
+		return nil, fmt.Errorf("enrolling the touch key: %w", err)
+	}
+	if err := saveCert(st, keystore.Touch, &cert); err != nil {
+		return nil, err
+	}
+	return &cert, nil
+}

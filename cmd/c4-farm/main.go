@@ -88,6 +88,7 @@ Agents
   agents                   the Claude Code sessions on this machine, read-only: each one's state, and what needs you (--all, --open for the HUD)
   enroll NODE CODE         make a machine yours with the code c4-agent enroll-offer prints on it: your host work runs there (--for PERSON adds them, on your sign-in)
   device approve DEVICE    let another machine act as you on a one-person farm: the device ID it shows, approved with your touch
+  touch-key                make your touch key on a one-person farm whose up ran with no one at the terminal
   agents add [NAME]        make a Claude Code session an agent the farm can run, with c4-agent's hooks in its folder (asked first; no NAME lists the sessions to pick from)
   agents rm NAME           take out what agents add put in
   agents ls                your agents: busy, idle or stopped, and the last turn saved
@@ -426,6 +427,32 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 
 	case "tool":
 		return toolCommand(ctx, fs, rest, stdout, isTerminal(stdin), connect)
+
+	case "touch-key":
+		if _, err := parse(fs, rest); err != nil {
+			return err
+		}
+		switch {
+		case farmcli.InsideAgent():
+			return errors.New("an agent never makes your touch key: run c4 farm touch-key yourself, at a terminal")
+		case !isTerminal(stdin):
+			return errors.New("a touch key asks for your touch: run c4 farm touch-key yourself, at a terminal")
+		}
+		name, _, err := cfg.Resolve(cm.farm)
+		if err != nil {
+			return err
+		}
+		c, _, _, _, err := connect()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "Your Mac asks for your touch next, to make the touch key.\n")
+		cert, err := farmcli.EnrolTouchKey(ctx, c, farmcli.KeysFor(name))
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "touch key %s, enrolled: the acts that ask for your touch are signed with it from now on\n", farmcli.ShortDevice(cert.Device))
+		return nil
 
 	case "device":
 		name, _, err := cfg.Resolve(cm.farm)
@@ -1282,7 +1309,7 @@ func upKeys(ctx context.Context, o localfarm.Options, pinned string, touch bool,
 	if out.Owner.Device != pinned {
 		line := "and your touch key, for the acts that ask for your touch"
 		if out.Touch == nil {
-			line = "no touch key yet, so the acts that ask for your touch go unsigned for now"
+			line = "no touch key yet, so the acts that ask for your touch go unsigned for now: c4 farm touch-key, at a terminal, makes one"
 		}
 		fmt.Fprintf(stdout, "keys      %s's key on this machine is the farm's owner key (%s), %s\n", o.Owner, farmcli.ShortDevice(out.Owner.Device), line)
 	}
