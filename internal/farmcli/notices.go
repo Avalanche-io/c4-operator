@@ -72,7 +72,7 @@ func saveWatch(st keystore.Store, w *indexWatch) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(watchPath(st), b, 0o600)
+	return keystore.WriteFile(watchPath(st), b)
 }
 
 // DeviceNotice is a new device of the person's, as the index booked it.

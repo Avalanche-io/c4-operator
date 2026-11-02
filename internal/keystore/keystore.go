@@ -17,6 +17,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -82,13 +83,38 @@ func (s Store) Key(kind Kind) (Key, error) {
 	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
 		return nil, err
 	}
-	if !s.FileOnly && seAvailable() {
-		return makeSE(s.path(kind, seExt), kind)
-	}
-	if kind == Touch {
+	var k Key
+	var err error
+	switch {
+	case !s.FileOnly && seAvailable():
+		k, err = makeSE(s.path(kind, seExt), kind)
+	case kind == Touch:
 		return nil, ErrNoTouch
+	default:
+		k, err = makeFile(s.path(kind, fileExt))
 	}
-	return makeFile(s.path(kind, fileExt))
+	// two first runs at once: the one that made the key first wins, and
+	// the other uses it
+	if errors.Is(err, fs.ErrExist) {
+		return s.load(kind)
+	}
+	return k, err
+}
+
+// WriteFile writes data to path, readable only by the person, whole or not
+// at all: through a new file beside it, renamed over it, so a reader never
+// sees half of it and a symlink at path is replaced, never followed.
+func WriteFile(path string, data []byte) error {
+	tmp := fmt.Sprintf("%s.%d.tmp", path, os.Getpid())
+	os.Remove(tmp)
+	if err := writePrivate(tmp, data); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // Has reports whether the store has a key of this kind.

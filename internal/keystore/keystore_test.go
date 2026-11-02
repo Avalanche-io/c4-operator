@@ -145,3 +145,47 @@ func TestPlantedTouchKeyFileRefused(t *testing.T) {
 		t.Errorf("C4_KEYS=file reads its touch key file: %v", err)
 	}
 }
+
+// Two first runs at once make one key: the second uses the first's.
+func TestFirstRunsAtOnceMakeOneKey(t *testing.T) {
+	s := Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
+	keys := make(chan string, 8)
+	for range 8 {
+		go func() {
+			k, err := s.Key(Device)
+			if err != nil {
+				keys <- "error: " + err.Error()
+				return
+			}
+			keys <- string(k.SPKI())
+		}()
+	}
+	first := <-keys
+	for range 7 {
+		if got := <-keys; got != first {
+			t.Fatalf("two keys, or %s", got)
+		}
+	}
+}
+
+// WriteFile writes whole or not at all, the person's alone, and replaces
+// a symlink at its path rather than writing through it.
+func TestWriteFileReplacesASymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "elsewhere")
+	os.WriteFile(target, []byte("theirs"), 0o644)
+	p := filepath.Join(dir, "device.cert")
+	if err := os.Symlink(target, p); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFile(p, []byte("mine")); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(target); string(b) != "theirs" {
+		t.Errorf("wrote through the symlink: %q", b)
+	}
+	fi, err := os.Lstat(p)
+	if err != nil || fi.Mode()&os.ModeSymlink != 0 || fi.Mode().Perm() != 0o600 {
+		t.Errorf("the file: %v %v", err, fi.Mode())
+	}
+}

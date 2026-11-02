@@ -85,7 +85,7 @@ func saveCert(st keystore.Store, kind keystore.Kind, c *people.Certified) error 
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(certPath(st, kind), b, 0o600)
+	return keystore.WriteFile(certPath(st, kind), b)
 }
 
 // LoadCert is a key's certificate as the issuer gave it, or nil when it

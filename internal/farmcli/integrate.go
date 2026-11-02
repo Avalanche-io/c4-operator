@@ -361,7 +361,23 @@ func enterYes(o Out, q string) (yes, answered bool) {
 
 // InsideAgent says this runs inside Claude Code (its CLAUDECODE
 // environment): an agent, not the person, whatever its flags say.
-func InsideAgent() bool { return os.Getenv("CLAUDECODE") != "" }
+func InsideAgent() bool {
+	// Claude Code sets CLAUDECODE in every process it starts; set at all,
+	// it decides. Unset, any other agent's own mark does.
+	if v, ok := os.LookupEnv("CLAUDECODE"); ok {
+		return v != ""
+	}
+	for _, k := range agentVars {
+		if os.Getenv(k) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// agentVars are what other agents set in the processes they run: Claude
+// Code's beyond CLAUDECODE, Codex's sandbox and Gemini CLI's.
+var agentVars = []string{"CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID", "CODEX_SANDBOX", "CODEX_SANDBOX_NETWORK_DISABLED", "GEMINI_CLI"}
 
 // Consent is the person's leave to change this machine: never from inside
 // an agent, even with --yes (an agent must not give itself the

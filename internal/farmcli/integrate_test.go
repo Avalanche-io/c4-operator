@@ -195,7 +195,12 @@ func TestChooseOffersUpdates(t *testing.T) {
 
 // These tests run as a person would, whatever shell runs them (an agent's
 // included); the ones about an agent set CLAUDECODE themselves.
-func init() { os.Unsetenv("CLAUDECODE") }
+func init() {
+	os.Unsetenv("CLAUDECODE")
+	for _, k := range agentVars {
+		os.Unsetenv(k)
+	}
+}
 
 // Nothing that changes this machine runs from inside an agent, even with
 // --yes, nor without a terminal unless --yes; each refusal names the
