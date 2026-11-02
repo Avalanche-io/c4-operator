@@ -1798,8 +1798,9 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 		if tools != nil {
 			jobTool := v.job.Spec.Tool != nil
 			proxy, _ := q.proxyURL(ctx)
-			applyTools(pod, v.job.Name, tools, jobTool, proxy, q.hudURL(), q.signerURL(ctx))
+			applyTools(pod, v.job.Name, tools, jobTool, proxy, q.hudURL())
 		}
+		addSignerToken(pod, q.signerURL(ctx))
 		q.leaseOutside(ctx, pod, p.spec.Name)
 		if err := q.Client.Create(ctx, pod); err != nil {
 			v.mem.attempts[idx]--

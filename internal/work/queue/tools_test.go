@@ -494,7 +494,7 @@ func TestEgressDeniedReadsEveryPolicy(t *testing.T) {
 	if q.egressDenied(ctx, ns, unit) {
 		t.Fatal("sealed with no policy at all")
 	}
-	if err := q.ensurePolicy(ctx, unitsPolicy(ns)); err != nil {
+	if err := q.ensurePolicy(ctx, unitsPolicy(ns, nil)); err != nil {
 		t.Fatal(err)
 	}
 	if !q.egressDenied(ctx, ns, unit) {
@@ -660,6 +660,80 @@ func TestToolJobClaimsOnlyDeclaredNetworks(t *testing.T) {
 		}
 		if c := meta.FindStatusCondition(get(t, ns, job).Status.Conditions, "Tools"); c == nil || c.Status != metav1.ConditionFalse || !strings.Contains(c.Message, want) {
 			t.Errorf("%s: Tools condition %+v, want %q", job, c, want)
+		}
+	}
+}
+
+// Every unit has its own key, whatever its tool: its pod gets the
+// issuer's pod-bound token, and the namespace's default policy allows it
+// the issuer and nothing else. A unit under that rule alone is still
+// sealed, and says so; a wider rule (another port, another peer) is a way
+// out like any other.
+func TestEveryUnitHasItsKeyAndStaysSealed(t *testing.T) {
+	ns, q, now, _ := graphFarm(t)
+	ctx := context.Background()
+	farmNS := ns + "-farm"
+	if err := k8s.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: farmNS}}); err != nil {
+		t.Fatal(err)
+	}
+	q.Namespace, q.SignerService = farmNS, "c4-signer:80"
+	if err := k8s.Create(ctx, &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: farmNS, Name: "c4-signer"},
+		Spec: corev1.ServiceSpec{Selector: map[string]string{"app.kubernetes.io/component": "manager"},
+			Ports: []corev1.ServicePort{{Port: 80, TargetPort: intstr.FromInt32(8092)}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := k8s.Create(ctx, job(ns, "plain", "render", "cpu-"+ns, map[string]string{"frames": "1-1"}, now.Add(4*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	p := podOfUnit(t, ns, "plain", 0)
+	audiences := map[string]bool{}
+	for _, v := range p.Spec.Volumes {
+		if v.Projected != nil && len(v.Projected.Sources) == 1 && v.Projected.Sources[0].ServiceAccountToken != nil {
+			audiences[v.Projected.Sources[0].ServiceAccountToken.Audience] = true
+		}
+	}
+	if !audiences[c4v1.SignerAudience] || envOf(p.Spec.Containers[0], "C4_SIGNER") != "http://c4-signer."+farmNS+".svc:80" || p.Labels[c4v1.LabelTool] != "" {
+		t.Fatalf("a unit with no tool has no key: %v %v", p.Spec.Volumes, p.Spec.Containers[0].Env)
+	}
+
+	var np networkingv1.NetworkPolicy
+	if err := k8s.Get(ctx, types.NamespacedName{Namespace: ns, Name: UnitsPolicyName}, &np); err != nil {
+		t.Fatal(err)
+	}
+	rule, ok := q.issuerEgress(ctx)
+	if !ok || len(np.Spec.Egress) != 1 || !equality.Semantic.DeepEqual(np.Spec.Egress[0], rule) ||
+		len(rule.Ports) != 1 || rule.Ports[0].Port.IntValue() != 8092 {
+		t.Fatalf("the default allows the issuer alone: %+v", np.Spec.Egress)
+	}
+	if denied, toIssuer := q.egressDeniedBut(ctx, ns, p.Labels); !denied || !toIssuer {
+		t.Fatalf("a unit that reaches only the issuer: sealed %v, to the issuer %v", denied, toIssuer)
+	}
+
+	// anything wider than the exact rule unseals
+	wider := map[string]networkingv1.NetworkPolicyEgressRule{}
+	extraPort := *rule.DeepCopy()
+	p9 := intstr.FromInt32(9000)
+	extraPort.Ports = append(extraPort.Ports, networkingv1.NetworkPolicyPort{Port: &p9})
+	wider["another port too"] = extraPort
+	anyPod := *rule.DeepCopy()
+	anyPod.To[0].PodSelector = &metav1.LabelSelector{}
+	wider["every pod in the issuer's namespace"] = anyPod
+	noPorts := *rule.DeepCopy()
+	noPorts.Ports = nil
+	wider["every port"] = noPorts
+	for name, r := range wider {
+		extra := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "wider"},
+			Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{},
+				PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}, Egress: []networkingv1.NetworkPolicyEgressRule{r}}}
+		if err := k8s.Create(ctx, extra); err != nil {
+			t.Fatal(err)
+		}
+		if denied, _ := q.egressDeniedBut(ctx, ns, p.Labels); denied {
+			t.Errorf("%s: still sealed", name)
+		}
+		if err := k8s.Delete(ctx, extra); err != nil {
+			t.Fatal(err)
 		}
 	}
 }

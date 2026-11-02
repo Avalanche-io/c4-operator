@@ -3,6 +3,7 @@ package process
 import (
 	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -184,5 +185,28 @@ func TestBookProducer(t *testing.T) {
 	}
 	if pr, ok := RestoreBook(s).ProducerOf(k); !ok || pr.Job != "show/sh011" {
 		t.Fatalf("restored producer %+v %v", pr, ok)
+	}
+}
+
+// A run sealed but for the farm's own issuer stays sealed, and its
+// record says what it could reach, through a snapshot and back.
+func TestSealedToTheIssuerIsSaid(t *testing.T) {
+	var b Book
+	r := run("p", "i", "o", 10, Exact, true)
+	r.SealedTo = SealedToIssuer
+	b.Record(r)
+	js, err := json.Marshal(b.Snapshot())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(js), `"sealedTo":"egress only to this farm's issuer"`) {
+		t.Fatalf("the record does not say it: %s", js)
+	}
+	var s BookSnapshot
+	if err := json.Unmarshal(js, &s); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := RestoreBook(s).Class("p"); c != Exact {
+		t.Fatalf("sealed to the issuer is %s, not exact", c)
 	}
 }

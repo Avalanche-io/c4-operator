@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
@@ -144,11 +145,22 @@ func unitContainers(j *c4v1.WorkJob, u class.Unit, digestOf map[string]string) [
 // AdminNetworkPolicy) is not seen, and a CNI that does not enforce
 // NetworkPolicy is not detected.
 func (q *Queue) egressDenied(ctx context.Context, ns string, podLabels map[string]string) bool {
+	denied, _ := q.egressDeniedBut(ctx, ns, podLabels)
+	return denied
+}
+
+// egressDeniedBut is egressDenied, but for the one rule to the farm's own
+// workload issuer (issuerEgress), exactly: its peer and its port, nothing
+// wider. That rule takes nothing off the farm and brings back only a
+// certificate chain, never an input, so a pod that may reach only the
+// issuer is still sealed; toIssuer says one such rule was set aside, which
+// its derivation record says.
+func (q *Queue) egressDeniedBut(ctx context.Context, ns string, podLabels map[string]string) (denied, toIssuer bool) {
 	var l networkingv1.NetworkPolicyList
 	if err := q.Client.List(ctx, &l, client.InNamespace(ns)); err != nil {
-		return false
+		return false, false
 	}
-	denied := false
+	issuer, hasIssuer := q.issuerEgress(ctx)
 	for _, np := range l.Items {
 		sel, err := metav1.LabelSelectorAsSelector(&np.Spec.PodSelector)
 		if err != nil || !sel.Matches(labels.Set(podLabels)) {
@@ -161,12 +173,16 @@ func (q *Queue) egressDenied(ctx context.Context, ns string, podLabels map[strin
 		if !egress {
 			continue
 		}
-		if len(np.Spec.Egress) > 0 {
-			return false
+		for _, r := range np.Spec.Egress {
+			if hasIssuer && equality.Semantic.DeepEqual(r, issuer) {
+				toIssuer = true
+				continue
+			}
+			return false, false
 		}
 		denied = true
 	}
-	return denied
+	return denied, denied && toIssuer
 }
 
 // inputViews resolves the views a job mounts: each input's mount path
@@ -280,8 +296,15 @@ func (q *Queue) recordDerivation(ctx context.Context, v *view, idx int, p *corev
 	if !ok {
 		return
 	}
-	if sealed && !q.egressDenied(ctx, p.Namespace, p.Labels) {
-		sealed, why = false, "its NetworkPolicies allow the pod some egress, or none denies it egress"
+	sealedTo := ""
+	if sealed {
+		switch denied, toIssuer := q.egressDeniedBut(ctx, p.Namespace, p.Labels); {
+		case !denied:
+			sealed, why = false, "its NetworkPolicies allow the pod some egress, or none denies it egress"
+		case toIssuer:
+			// said in the record, so no one reads sealed as no network
+			sealedTo = process.SealedToIssuer
+		}
 	}
 	declared := process.ParseClass(v.job.Annotations[AnnotationDerivationClass])
 	slots := max(1, u.Slots)
@@ -292,7 +315,7 @@ func (q *Queue) recordDerivation(ctx context.Context, v *view, idx int, p *corev
 		producer = process.Producer{Job: v.job.Namespace + "/" + v.job.Name, Unit: idx}
 	}
 	q.book(v.project).Record(process.Run{Key: process.Key{Process: proc, Inputs: in}, Program: program, Inputs: inputs, Declared: declared,
-		Sealed: sealed, Output: out, Changeset: p.Annotations[c4v1.AnnotationOutputChangeset], Record: p.Annotations[c4v1.AnnotationOutputProvenance],
+		Sealed: sealed, SealedTo: sealedTo, Output: out, Changeset: p.Annotations[c4v1.AnnotationOutputChangeset], Record: p.Annotations[c4v1.AnnotationOutputProvenance],
 		Producer: producer, Work: float64(ms) / 1000 * float64(slots), Duration: float64(ms) / 1000, At: finishOf(p, time.Now())})
 	q.calp.touch(v.project)
 	m := v.mem

@@ -131,9 +131,9 @@ func (q *Queue) signerService() (ns, name string, port int32, ok bool) {
 	return ns, name, int32(n), true
 }
 
-// signerURL is the workload issuer for a unit with a c4 grant
-// ($C4_SIGNER), or "" on a farm that has none: no Service named, or none
-// there.
+// signerURL is the workload issuer every unit has its own key certified
+// at ($C4_SIGNER), or "" on a farm that has none: no Service named, or
+// none there.
 func (q *Queue) signerURL(ctx context.Context) string {
 	ns, name, port, ok := q.signerService()
 	if !ok {
@@ -502,30 +502,21 @@ func (q *Queue) toolsPolicy(ctx context.Context, ns string, p *c4v1.Tool) (*netw
 		}
 		np.Spec.Egress = append(np.Spec.Egress, networkingv1.NetworkPolicyEgressRule{To: []networkingv1.NetworkPolicyPeer{peer},
 			Ports: []networkingv1.NetworkPolicyPort{{Protocol: &tcp, Port: &target}}})
-		// The workload issuer, where the farm has one: the unit has its
-		// own key certified there (signerURL).
-		if sns, sname, sport, ok := q.signerService(); ok {
-			if speer, err := q.servicePeer(ctx, sns, sname); err == nil {
-				starget := intstr.FromInt32(sport)
-				var ssvc corev1.Service
-				if q.Client.Get(ctx, types.NamespacedName{Namespace: sns, Name: sname}, &ssvc) == nil {
-					for _, sp := range ssvc.Spec.Ports {
-						if sp.Port == sport && sp.TargetPort.IntValue() > 0 {
-							starget = intstr.FromInt32(int32(sp.TargetPort.IntValue()))
-						}
-					}
-				}
-				np.Spec.Egress = append(np.Spec.Egress, networkingv1.NetworkPolicyEgressRule{To: []networkingv1.NetworkPolicyPeer{speer},
-					Ports: []networkingv1.NetworkPolicyPort{{Protocol: &tcp, Port: &starget}}})
-			}
-		}
+	}
+	// The workload issuer, where the farm has one, for every unit whatever
+	// its tool: each has its own key certified there (signerURL,
+	// addSignerToken), to sign what it asks, answers and needs.
+	rule, signer := q.issuerEgress(ctx)
+	if signer {
+		np.Spec.Egress = append(np.Spec.Egress, rule)
 	}
 	// DNS, from the cluster's DNS servers alone, for what a unit reaches by
-	// name itself: an address block or service rule, the HUD, or the proxy
-	// when it has no cluster IP. A unit that reaches only hosts names the
-	// proxy by its IP and needs none.
+	// name itself: an address block or service rule, the HUD, the issuer,
+	// or the proxy when it has no cluster IP. A unit that reaches only
+	// hosts, on a farm with no issuer, names the proxy by its IP and needs
+	// none.
 	_, proxyByIP := q.proxyURL(ctx)
-	if named || p.Spec.C4 != "" || (hostRules(p) && !proxyByIP) {
+	if named || p.Spec.C4 != "" || signer || (hostRules(p) && !proxyByIP) {
 		dns := intstr.FromInt32(53)
 		np.Spec.Egress = append(np.Spec.Egress, networkingv1.NetworkPolicyEgressRule{To: []networkingv1.NetworkPolicyPeer{clusterDNS},
 			Ports: []networkingv1.NetworkPolicyPort{{Protocol: &udp, Port: &dns}, {Protocol: &tcp, Port: &dns}}})
@@ -541,8 +532,16 @@ func (q *Queue) toolsPolicy(ctx context.Context, ns string, p *c4v1.Tool) (*netw
 const UnitsPolicyName = "c4-units-deny-egress"
 
 // unitsPolicy is namespace ns's unit egress default: every unit pod (the
-// queue labels each with its job and its unit), egress, no rule.
-func unitsPolicy(ns string) *networkingv1.NetworkPolicy {
+// queue labels each with its job and its unit), egress, and no rule but
+// the one to the farm's workload issuer (issuer, when the farm has one),
+// where each unit has its own key certified. That rule takes nothing off
+// the farm and brings back only a certificate chain, so a unit under this
+// policy alone is still sealed (egressDenied).
+func unitsPolicy(ns string, issuer *networkingv1.NetworkPolicyEgressRule) *networkingv1.NetworkPolicy {
+	egress := []networkingv1.NetworkPolicyEgressRule{}
+	if issuer != nil {
+		egress = append(egress, *issuer)
+	}
 	return &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: UnitsPolicyName,
 		Labels: map[string]string{"app.kubernetes.io/managed-by": "c4-operator"}},
 		Spec: networkingv1.NetworkPolicySpec{
@@ -550,8 +549,34 @@ func unitsPolicy(ns string) *networkingv1.NetworkPolicy {
 				{Key: c4v1.LabelJob, Operator: metav1.LabelSelectorOpExists},
 				{Key: c4v1.LabelUnit, Operator: metav1.LabelSelectorOpExists}}},
 			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
-			Egress:      []networkingv1.NetworkPolicyEgressRule{},
+			Egress:      egress,
 		}}
+}
+
+// issuerEgress is the one egress rule to the farm's workload issuer: its
+// Service's pods, by namespace and selector, on the port they listen on,
+// TCP alone. False on a farm with no issuer Service.
+func (q *Queue) issuerEgress(ctx context.Context) (networkingv1.NetworkPolicyEgressRule, bool) {
+	sns, sname, sport, ok := q.signerService()
+	if !ok {
+		return networkingv1.NetworkPolicyEgressRule{}, false
+	}
+	peer, err := q.servicePeer(ctx, sns, sname)
+	if err != nil {
+		return networkingv1.NetworkPolicyEgressRule{}, false
+	}
+	target := intstr.FromInt32(sport)
+	var svc corev1.Service
+	if q.Client.Get(ctx, types.NamespacedName{Namespace: sns, Name: sname}, &svc) == nil {
+		for _, sp := range svc.Spec.Ports {
+			if sp.Port == sport && sp.TargetPort.IntValue() > 0 {
+				target = intstr.FromInt32(int32(sp.TargetPort.IntValue()))
+			}
+		}
+	}
+	tcp := corev1.ProtocolTCP
+	return networkingv1.NetworkPolicyEgressRule{To: []networkingv1.NetworkPolicyPeer{peer},
+		Ports: []networkingv1.NetworkPolicyPort{{Protocol: &tcp, Port: &target}}}, true
 }
 
 // sealNamespaces writes (or puts back) the unit egress default in every
@@ -568,9 +593,13 @@ func (q *Queue) sealNamespaces(ctx context.Context, jobs []c4v1.WorkJob, pods []
 	for ns := range nsProject {
 		nss[ns] = true
 	}
+	var issuer *networkingv1.NetworkPolicyEgressRule
+	if rule, ok := q.issuerEgress(ctx); ok {
+		issuer = &rule
+	}
 	out := make(map[string]error, len(nss))
 	for ns := range nss {
-		err := q.ensurePolicy(ctx, unitsPolicy(ns))
+		err := q.ensurePolicy(ctx, unitsPolicy(ns, issuer))
 		out[ns] = err
 		if err != nil && !apierrors.IsNotFound(err) {
 			q.Log.Error(err, "unit egress policy", "namespace", ns)
@@ -618,7 +647,7 @@ func (q *Queue) ensurePolicy(ctx context.Context, want *networkingv1.NetworkPoli
 // policy selects), the view mounted at $C4_TOOLS, for hosts the
 // egress proxy as its HTTPS_PROXY and HTTP_PROXY, and its sidecars, native
 // sidecars that start before the unit and end with it.
-func applyTools(pod *corev1.Pod, job string, p *c4v1.Tool, jobTool bool, proxy, hud, signer string) {
+func applyTools(pod *corev1.Pod, job string, p *c4v1.Tool, jobTool bool, proxy, hud string) {
 	if pod.Labels == nil {
 		pod.Labels = map[string]string{}
 	}
@@ -643,21 +672,6 @@ func applyTools(pod *corev1.Pod, job string, p *c4v1.Tool, jobTool bool, proxy, 
 				corev1.VolumeMount{Name: "c4-hud-token", MountPath: "/etc/c4/hud", ReadOnly: true})
 			pod.Spec.Containers[k].Env = append(pod.Spec.Containers[k].Env, corev1.EnvVar{Name: "C4_HUD", Value: hud},
 				corev1.EnvVar{Name: "C4_HUD_TOKEN_FILE", Value: "/etc/c4/hud/token"})
-		}
-		if signer != "" {
-			// A second token, for this pod alone and the workload issuer
-			// alone: the unit's own key is certified as itself on it,
-			// for this attempt (PEOPLE-KEYS 5.1). It is added after the
-			// template's tokens were dropped, so no template adds one.
-			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{Name: "c4-signer-token", VolumeSource: corev1.VolumeSource{
-				Projected: &corev1.ProjectedVolumeSource{Sources: []corev1.VolumeProjection{{ServiceAccountToken: &corev1.ServiceAccountTokenProjection{
-					Audience: c4v1.SignerAudience, ExpirationSeconds: &exp, Path: "token"}}}}}})
-			for k := range pod.Spec.Containers {
-				pod.Spec.Containers[k].VolumeMounts = append(pod.Spec.Containers[k].VolumeMounts,
-					corev1.VolumeMount{Name: "c4-signer-token", MountPath: "/etc/c4/signer", ReadOnly: true})
-				pod.Spec.Containers[k].Env = append(pod.Spec.Containers[k].Env, corev1.EnvVar{Name: "C4_SIGNER", Value: signer},
-					corev1.EnvVar{Name: "C4_SIGNER_TOKEN_FILE", Value: "/etc/c4/signer/token"})
-			}
 		}
 	}
 	always := corev1.ContainerRestartPolicyAlways
@@ -706,5 +720,32 @@ func applyTools(pod *corev1.Pod, job string, p *c4v1.Tool, jobTool bool, proxy, 
 		pod.Spec.Containers[c].VolumeMounts = append(pod.Spec.Containers[c].VolumeMounts,
 			corev1.VolumeMount{Name: "c4-tools", MountPath: ToolsMount, ReadOnly: true})
 		pod.Spec.Containers[c].Env = append(pod.Spec.Containers[c].Env, corev1.EnvVar{Name: "C4_TOOLS", Value: ToolsMount})
+	}
+}
+
+// addSignerToken gives a unit pod its way to its own key (PEOPLE-KEYS
+// 5.1): a token for this pod alone and the workload issuer alone, renewed
+// by the kubelet, on which the issuer certifies the unit's key as this
+// attempt, and the issuer's address. Every unit has one, whatever its
+// tools, since every unit signs what it asks, answers and needs. It is
+// added after the template's tokens were dropped, so no template adds one.
+func addSignerToken(pod *corev1.Pod, signer string) {
+	if signer == "" {
+		return
+	}
+	if pod.Spec.ServiceAccountName == "" {
+		// a projected token needs a named account (admission names
+		// "default" too, where it runs)
+		pod.Spec.ServiceAccountName = "default"
+	}
+	exp := int64(3600)
+	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{Name: "c4-signer-token", VolumeSource: corev1.VolumeSource{
+		Projected: &corev1.ProjectedVolumeSource{Sources: []corev1.VolumeProjection{{ServiceAccountToken: &corev1.ServiceAccountTokenProjection{
+			Audience: c4v1.SignerAudience, ExpirationSeconds: &exp, Path: "token"}}}}}})
+	for k := range pod.Spec.Containers {
+		pod.Spec.Containers[k].VolumeMounts = append(pod.Spec.Containers[k].VolumeMounts,
+			corev1.VolumeMount{Name: "c4-signer-token", MountPath: "/etc/c4/signer", ReadOnly: true})
+		pod.Spec.Containers[k].Env = append(pod.Spec.Containers[k].Env, corev1.EnvVar{Name: "C4_SIGNER", Value: signer},
+			corev1.EnvVar{Name: "C4_SIGNER_TOKEN_FILE", Value: "/etc/c4/signer/token"})
 	}
 }

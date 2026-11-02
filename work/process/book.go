@@ -51,6 +51,11 @@ type Run struct {
 	// whatever else it read is not in the record.
 	Declared Class
 	Sealed   bool
+	// SealedTo is the one way out a sealed pod had, when it had one:
+	// SealedToIssuer, the farm's own workload issuer, where the unit has
+	// its key certified. It takes nothing off the farm and brings back
+	// only a certificate chain, never an input.
+	SealedTo string
 	// Output is the C4 ID of the view the unit wrote (its input view
 	// with its changes applied), Changeset the C4 ID of those changes
 	// (empty when it changed nothing), and Record its signed task record.
@@ -136,13 +141,20 @@ type entry struct {
 	Producer *Producer `json:"producer,omitempty"`
 }
 
+// SealedToIssuer is what a sealed run's record says when its pod could
+// reach only the farm's own workload issuer.
+const SealedToIssuer = "egress only to this farm's issuer"
+
 type procRecord struct {
-	Declared   Class `json:"declared"`
-	Unsealed   bool  `json:"unsealed"`
-	Verified   int   `json:"verified"`
-	Mismatched int   `json:"mismatched"`
-	Work       stats `json:"work"`
-	Duration   stats `json:"duration"`
+	Declared Class `json:"declared"`
+	Unsealed bool  `json:"unsealed"`
+	// SealedTo says what a sealed run's pod could still reach
+	// (SealedToIssuer), so no one reads sealed as no network at all.
+	SealedTo   string `json:"sealedTo,omitempty"`
+	Verified   int    `json:"verified"`
+	Mismatched int    `json:"mismatched"`
+	Work       stats  `json:"work"`
+	Duration   stats  `json:"duration"`
 }
 
 // class is the effective class: the declared one, with an exact
@@ -220,6 +232,9 @@ func (b *Book) Record(r Run) {
 	p.Declared = ParseClass(string(r.Declared))
 	if !r.Sealed {
 		p.Unsealed = true
+	}
+	if r.Sealed && r.SealedTo != "" {
+		p.SealedTo = r.SealedTo
 	}
 	e := b.entries[r.Key]
 	if e == nil {
