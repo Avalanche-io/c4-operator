@@ -231,3 +231,18 @@ func TestOwnersFirstTouchKey(t *testing.T) {
 		t.Errorf("a second: %d %s", code, body)
 	}
 }
+
+// A removed owner key gets no touch key on the installer token: its
+// certificate lives on, but the route needs the key in force.
+func TestNoTouchKeyForARemovedOwnerKey(t *testing.T) {
+	r := onePerson(t)
+	cli := newDev(t)
+	_, _, owner := r.up(cli, nil)
+	if code, body, _ := r.book(r.act(r.key(cli, owner.Owner), "noor", "remove-device", deviceSubject(cli.id), nil, false), local); code != http.StatusOK {
+		t.Fatalf("removing the owner key: %d %s", code, body)
+	}
+	code, body := r.call("POST", "/v1/people/owner/touch", local, r.enrolment(newDev(t), "noor", cli.id, "mac"), nil, people.InstallerHeader, installerToken)
+	if code != http.StatusForbidden || !strings.Contains(body, "not in force") {
+		t.Errorf("a touch key for a removed owner key: %d %s", code, body)
+	}
+}

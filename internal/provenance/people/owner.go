@@ -204,6 +204,9 @@ func (i *Issuer) handleOwnerTouch(w http.ResponseWriter, r *http.Request) {
 			return nil, refuse(http.StatusForbidden, "this farm's owner is not enrolled yet: c4 farm up enrols them")
 		case p.TouchFor != oe.Device:
 			return nil, refuse(http.StatusForbidden, "the touch key confirms for the owner's key %.16s, and the request names %.16s", oe.Device, p.TouchFor)
+		case x.inForce(int64(len(x.entries)), now)[oe.Device] == nil:
+			// a removed or lapsed owner key gets no touch key
+			return nil, refuse(http.StatusForbidden, "the owner's key %.16s is not in force: a removed key gets no touch key", oe.Device)
 		case x.touchKeyFor(oe.Device):
 			return nil, refuse(http.StatusConflict, "the owner's key has a touch key already: the installer token enrols the first one only, and a touch on it enrols another")
 		}
