@@ -50,6 +50,8 @@ jobs:
   # both architectures, and the keystore's tests run. A hosted Mac runner
   # has no Secure Enclave, so its tests of the chip itself skip there; they
   # run on a developer's Mac (make test-keystore-se).
+  # The Secure Enclave tests skip here (a hosted runner has none): this
+  # builds and links the keystore's Swift library for both architectures.
   macos-keystore:
     runs-on: macos-15
     steps:

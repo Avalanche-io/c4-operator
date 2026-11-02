@@ -138,6 +138,10 @@ jobs:
       with:
         name: tool-locks
         path: tools
+    # The keystore's Secure Enclave tests skip on hosted runners, which have
+    # no Secure Enclave: this builds and links it, and its key files and
+    # wiring are tested; the Secure Enclave path itself is tested only by a
+    # run on a Mac that has one (make test-keystore-se there, unlocked).
     - run: make test-keystore-se
     - run: |
         tag=${{ github.ref_name }}
@@ -153,7 +157,10 @@ jobs:
         done
         cd dist/mac
         gh release download "$tag" -p checksums.txt --clobber
-        shasum -a 256 c4-farm_${ver}_darwin_*.tar.gz >> checksums.txt
+        # a rerun replaces this job's lines rather than adding a second hash
+        grep -v "  c4-farm_${ver}_darwin_" checksums.txt > checksums.new || true
+        shasum -a 256 c4-farm_${ver}_darwin_*.tar.gz >> checksums.new
+        mv checksums.new checksums.txt
         gh release upload "$tag" c4-farm_${ver}_darwin_*.tar.gz checksums.txt --clobber
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
