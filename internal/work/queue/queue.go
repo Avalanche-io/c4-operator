@@ -379,7 +379,9 @@ type jobMem struct {
 	// refusedControls are the control requests already reported as
 	// refused (controltrust.go), by annotation and token.
 	refusedControls map[string]bool
-	decisions       []decisionRecord
+	// reports are each unit pod's signed acts as last read (unitacts.go).
+	reports   map[types.UID]*podReports
+	decisions []decisionRecord
 	// waits are the job's wait units and escalated units, open and
 	// decided (wait.go).
 	waits *waitMem
@@ -1190,7 +1192,7 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 				m.foldedPod[p.UID] = true
 			}
 			v.done = append(v.done, p)
-		case p.Status.Phase == corev1.PodFailed && isNeeds(p):
+		case p.Status.Phase == corev1.PodFailed && isNeeds(p) && q.needsHolds(ctx, v, p, now):
 			// It stopped for information its brief lacked: no retry, no
 			// mark on the node (needs.go).
 			q.noteSpend(ctx, v, idx, p, pools, float64(runMillis(p, now))/3.6e6)

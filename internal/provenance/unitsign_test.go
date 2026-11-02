@@ -78,3 +78,45 @@ func TestParseUnitIdentity(t *testing.T) {
 		}
 	}
 }
+
+// A unit's report on itself verifies when the farm reads it, however
+// long after, and as often as it reads it; a person's act, or a unit's
+// act that is no report, does not.
+func TestVerifyUnitReport(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	ca, err := NewCA(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(ca.Cert)
+	const jobUID = "9c1d2e7f-0000-4000-8000-000000000001"
+	unit, err := NewSigner(ctx, LocalIssuer(ca, UnitIdentity("show-a", "sh040-comp", "3", jobUID, 2), time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	on := ActSubject("pod", "show-a", "sh040-comp-u3", "5e1f0c2a-0000-4000-8000-0000000000a3", strings.Repeat("ab", 32))
+	b, err := SignUnitAct(ctx, unit, UnitAct{Subject: on, Act: "needs", Params: json.RawMessage(`{"what":"the frame rate"}`), Owner: "dana"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, at := range []time.Time{now, now.Add(3 * time.Hour), now.Add(3 * time.Hour)} {
+		if v, a, err := VerifyUnitReport(b, roots, at); err != nil || a.Predicate.Act != "needs" || v.Identity != UnitIdentity("show-a", "sh040-comp", "3", jobUID, 2) {
+			t.Fatalf("read at %s: %v", at, err)
+		}
+	}
+	if _, _, err := VerifyUnitReport(b, roots, now.Add(-time.Hour)); err == nil {
+		t.Fatal("a report signed after it was read")
+	}
+	steer, _ := SignUnitAct(ctx, unit, UnitAct{Subject: on, Act: "steer", Owner: "dana"}, now)
+	if _, _, err := VerifyUnitReport(steer, roots, now); err == nil {
+		t.Fatal("a unit's steer read as its report")
+	}
+	other := x509.NewCertPool()
+	ca2, _ := NewCA(now)
+	other.AddCert(ca2.Cert)
+	if _, _, err := VerifyUnitReport(b, other, now); err == nil {
+		t.Fatal("another farm's roots took it")
+	}
+}

@@ -57,6 +57,9 @@ type askRec struct {
 	// needs: the question a unit stopped for, put to the job's answerer;
 	// its answer supplies it (escalate.go).
 	needs bool
+	// report is how a unit's own question stands against its signed act
+	// (unitacts.go), booked with it.
+	report map[string]any
 }
 
 func (a *askRec) open() bool { return a.answeredAt.IsZero() }
@@ -178,6 +181,9 @@ func (q *Queue) ask(ctx context.Context, v *view, a *askRec, to string, now time
 	if a.needs {
 		extra["needs"] = true
 	}
+	for k, val := range a.report {
+		extra[k] = val
+	}
 	q.recordPolicyDecision(ctx, v, a.from, "ask", a.text, now, refusedBy, extra)
 	if why != "" {
 		q.answer(ctx, v, a, "", why, now)
@@ -194,6 +200,12 @@ func (q *Queue) ask(ctx context.Context, v *view, a *askRec, to string, now time
 // answer records an answer to a question and takes it to the asker: a
 // steering message, and the decision of a wait the answerer serves.
 func (q *Queue) answer(ctx context.Context, v *view, a *askRec, text, cannot string, now time.Time) {
+	q.answerWith(ctx, v, a, text, cannot, now, nil)
+}
+
+// answerWith is answer, booked with how a unit's own answer stands against
+// its signed act (unitacts.go).
+func (q *Queue) answerWith(ctx context.Context, v *view, a *askRec, text, cannot string, now time.Time, report map[string]any) {
 	m := v.mem
 	a.answer, a.cannot, a.answeredAt = text, cannot, now
 	by := "c4"
@@ -204,7 +216,11 @@ func (q *Queue) answer(ctx context.Context, v *view, a *askRec, text, cannot str
 	if cannot != "" {
 		note = "cannot: " + cannot
 	}
-	q.recordDecision(ctx, v, max(a.to, a.from), "answer", note, "", now, map[string]any{"id": a.id, "from": nameOf(m, a.from)})
+	extra := map[string]any{"id": a.id, "from": nameOf(m, a.from)}
+	for k, val := range report {
+		extra[k] = val
+	}
+	q.recordDecision(ctx, v, max(a.to, a.from), "answer", note, "", now, extra)
 	ws := m.waitRecs()
 	if w := ws.recs[a.from]; w != nil && !w.done() && a.to >= 0 && w.server == "unit:"+by {
 		// The wait it was asked in: a wait unit completes, a block that
@@ -251,7 +267,11 @@ func (q *Queue) answersFrom(ctx context.Context, v *view, idx int, p *corev1.Pod
 	for _, n := range answers {
 		for _, a := range v.mem.asks {
 			if a.id == n.Ask && a.open() && a.to == idx && (n.Answer != "" || n.Cannot != "") {
-				q.answer(ctx, v, a, n.Answer, n.Cannot, now)
+				report, err := q.answerReport(ctx, v, p, n, now)
+				if err != nil {
+					continue
+				}
+				q.answerWith(ctx, v, a, n.Answer, n.Cannot, now, report)
 			}
 		}
 	}
@@ -308,7 +328,12 @@ func (q *Queue) routeAsks(ctx context.Context, v *view, now time.Time) {
 			if n.Seq <= 0 || strings.TrimSpace(n.Ask) == "" || known[id] != nil {
 				continue
 			}
-			a := &askRec{id: id, from: idx, to: -1, text: strings.TrimSpace(n.Ask), at: now}
+			report, err := q.unitControl(ctx, v, pod, "ask", bySeq(n.Seq),
+				map[string]any{"seq": n.Seq, "to": n.To, "ask": strings.TrimSpace(n.Ask)}, now)
+			if err != nil {
+				continue // not carried out (reported once on the job)
+			}
+			a := &askRec{id: id, from: idx, to: -1, text: strings.TrimSpace(n.Ask), at: now, report: report}
 			q.ask(ctx, v, a, n.To, now)
 			known[id] = a
 		}
@@ -317,7 +342,11 @@ func (q *Queue) routeAsks(ctx context.Context, v *view, now time.Time) {
 			if a == nil || !a.open() || a.to != idx || n.Answer == "" && n.Cannot == "" {
 				continue
 			}
-			q.answer(ctx, v, a, n.Answer, n.Cannot, now)
+			report, err := q.answerReport(ctx, v, pod, n, now)
+			if err != nil {
+				continue
+			}
+			q.answerWith(ctx, v, a, n.Answer, n.Cannot, now, report)
 		}
 	}
 }

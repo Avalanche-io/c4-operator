@@ -102,8 +102,10 @@ type spChoice struct {
 	forJob        string
 	move          string // the pool the unit moves to
 	drain         bool   // the pod is being deleted
-	// wait is the wait the unit asked for and stops for.
-	wait *class.Wait
+	// wait is the wait the unit asked for and stops for, and report how
+	// it stands against the unit's signed act (unitacts.go).
+	wait   *class.Wait
+	report map[string]any
 }
 
 // safepointChoice decides for one running unit as things stand. free is
@@ -203,7 +205,7 @@ func (q *Queue) decideSafepoints(ctx context.Context, now time.Time, dec sched.D
 			}
 			last, _ := podDecision(pod)
 			if at && n.Seq > last.Seq && len(n.Wait) > 0 {
-				q.answerSafepoint(ctx, v, idx, pod, n, waitChoice(v, idx, n), free, now)
+				q.answerSafepoint(ctx, v, idx, pod, n, q.waitChoice(ctx, v, idx, pod, n, now), free, now)
 				continue
 			}
 			c := q.safepointChoice(v, idx, pod, ri, dec, free, cost, now)
@@ -222,7 +224,19 @@ func (q *Queue) decideSafepoints(ctx context.Context, now time.Time, dec sched.D
 
 // waitChoice answers a safe point that asks for a wait (c4-unit wait):
 // stop, the wait opening for the unit, or continue when the wait is
-// refused, saying why.
+// refused, saying why: one whose signed act doesn't hold is refused.
+func (q *Queue) waitChoice(ctx context.Context, v *view, idx int, pod *corev1.Pod, n spNote, now time.Time) spChoice {
+	report, err := q.waitReport(ctx, v, pod, n, now)
+	if err != nil {
+		return spChoice{do: "continue", why: "the farm did not take this wait: " + err.Error(), next: "continue"}
+	}
+	c := waitChoice(v, idx, n)
+	c.report = report
+	return c
+}
+
+// waitChoice is the choice at a safe point that asks for a wait, its act
+// aside.
 func waitChoice(v *view, idx int, n spNote) spChoice {
 	name := v.mem.plan.Units[idx].Name
 	if name == "" {
@@ -277,6 +291,9 @@ func (q *Queue) answerSafepoint(ctx context.Context, v *view, idx int, pod *core
 		extra["server"] = c.wait.Server
 		if c.wait.Ask != "" {
 			extra["ask"] = c.wait.Ask
+		}
+		for k, val := range c.report {
+			extra[k] = val
 		}
 		q.recordDecision(ctx, v, idx, "safepoint-wait", c.why, "", now, extra)
 	case c.move != "":

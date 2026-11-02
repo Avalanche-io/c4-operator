@@ -112,6 +112,26 @@ signed, and a person's touch key signed the same payload too; only a person
 confirms. `relayed`: a tracker's relay signed it. `direct` and `claimed` stay
 readable, because records made before personal keys keep them.
 
+**A unit's reports.** A unit signs what it reports about itself as acts,
+by the unit, for its job's owner, under the job's ownership. Each is on
+the unit's own pod, `pod:<namespace>/<pod>@<pod UID>`, with the sha256 of
+the job spec the pod was made under (`$C4_SPEC`). c4-unit signs them; the
+node daemon or host runner relays them to the pod as
+`c4.avalanche.io/unit-acts`; the farm holds each control to its act. The
+verbs and their params:
+
+| act        | params                                           | what it says                                                                                                                                                                                                                 |
+| ---------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ask`      | `{seq, to, ask}`                                 | the unit's `seq`th question, `ask`, to `unit:<name>` (`to`), or to the job's answerer when `to` is empty                                                                                                                     |
+| `answer`   | `{seq, ask, answer}` or `{seq, ask, cannot}`     | the unit's `seq`th answer: to question `ask` (its id, as `<unit>#<n>`), or why it can't                                                                                                                                      |
+| `needs`    | `{what, why, about}`                             | the unit stops for `what` its brief lacks, `why`, and the work (`path:`, `unit:`, `job:`) whose landing may settle it                                                                                                        |
+| `withdraw` | `{why}`                                          | a re-check withdraws the question its unit stopped for: what settled it                                                                                                                                                      |
+| `wait`     | `{seq, server, ask?, choices?, reply?, expect?}` | at its `seq`th safe point the unit waits for `server` (`person:<id>`, `party:<name>` or `clock:<time>`) to decide `ask`, with the decisions besides approve, whether one carries content, and how long it's expected to take |
+
+A unit's report is never a person's act: deciding a person's wait stays a
+person's, whatever a unit reports. A safe point that opens no wait is a
+report on the node's word, not an act.
+
 **Keys and signatures.**
 - **A device's ID** is the C4 ID of its public key's DER
   SubjectPublicKeyInfo (`DeviceID`), the same in the leaf, the act and the

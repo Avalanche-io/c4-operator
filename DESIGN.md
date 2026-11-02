@@ -2581,6 +2581,15 @@ and a sweep planner that spawns trials are all generators.
       (--answer TEXT | --cannot WHY)`. Both commands write lists in the
       unit's `.c4/` (`asks`, `answers`), which the node daemon or host
       runner relays as pod annotations.
+    - **Signed as the unit:** where the farm has a workload issuer, every
+      unit has a key of its own (PEOPLE-KEYS 5.1). c4-unit signs each
+      question, answer, needs, withdrawal and wait as the unit, in
+      `.c4/acts`, before the control itself, and the relay carries the acts
+      first. The queue carries out a control only if its act is that pod's
+      own (its attempt, for the job's owner, the same params). One whose
+      act doesn't hold is refused and reported on the job; one with no act
+      is carried out on the node's word and booked "relayed, unsigned",
+      until K8. A safe point that opens no wait stays a report.
     - **Routing:** the queue routes each question, once, as a steering
       message marked `ask: {id, from}` to the answerer, and each answer
       back marked `answer: {id, from, cannot?}`. The answerer is the

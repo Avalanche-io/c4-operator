@@ -403,8 +403,9 @@ func (q *Queue) endRecheck(ctx context.Context, v *view, idx int, p *corev1.Pod,
 	}
 	n.inFlight = false
 	switch {
-	case p.Status.Phase == corev1.PodSucceeded && withdrawWhy(p) != "":
-		q.withdrawNeeds(ctx, v, idx, "unit:"+v.key+"/"+nameOf(m, idx), withdrawWhy(p), "", now)
+	case p.Status.Phase == corev1.PodSucceeded && withdrawWhy(p) != "" && q.withdrawHolds(ctx, v, p, now):
+		report, _ := q.withdrawReport(ctx, v, p, now)
+		q.withdrawNeeds(ctx, v, idx, "unit:"+v.key+"/"+nameOf(m, idx), withdrawWhy(p), "", now, report)
 	case p.Status.Phase == corev1.PodSucceeded:
 		// It ended without withdrawing (it ignored the re-check, or said
 		// nothing): still needed.

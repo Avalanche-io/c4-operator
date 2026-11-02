@@ -158,6 +158,10 @@ func (q *Queue) noteNeeds(ctx context.Context, v *view, idx int, p *corev1.Pod, 
 	}
 	n := &needsRec{text: text, why: why, about: about, at: now, state: needsRaised}
 	extra := map[string]any{"needs": text}
+	report, _ := q.needsReport(ctx, v, p, now)
+	for k, val := range report {
+		extra[k] = val
+	}
 	if why != "" {
 		extra["why"] = why
 	}
@@ -258,7 +262,7 @@ func (q *Queue) applyWithdraws(ctx context.Context, v *view, ctl *c4v1.WorkJob, 
 
 // withdrawNeeds makes unit i's question moot: it runs again without an
 // answer, told why ($C4_WITHDRAWN).
-func (q *Queue) withdrawNeeds(ctx context.Context, v *view, i int, by, why, control string, now time.Time) {
+func (q *Queue) withdrawNeeds(ctx context.Context, v *view, i int, by, why, control string, now time.Time, report ...map[string]any) {
 	m := v.mem
 	if !m.finished.IsZero() {
 		q.Log.Info("a withdrawal from a finished job dropped", "job", v.key, "unit", i, "by", by)
@@ -270,6 +274,11 @@ func (q *Queue) withdrawNeeds(ctx context.Context, v *view, i int, by, why, cont
 	extra := map[string]any{"needs": n.text, "by": by, "why": why}
 	if control != "" {
 		extra["control"] = control
+	}
+	for _, r := range report {
+		for k, val := range r {
+			extra[k] = val
+		}
 	}
 	q.recordDecision(ctx, v, i, "needs-withdrawn", why, "", now, extra)
 	n.withdrawn.Record = m.lastRecord(i)
