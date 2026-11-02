@@ -12,11 +12,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Avalanche-io/c4"
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
@@ -445,6 +448,22 @@ func TestPartyWaitsTakeMembers(t *testing.T) {
 	if !strings.Contains(pred.Authorization, "a member of kestrel holding member (record ") {
 		t.Errorf("the decision's record: %q", pred.Authorization)
 	}
+	// and the wait is on her page of what needs her, and not on maya's
+	needs := func(as string) bool {
+		t.Helper()
+		r, v := p.viewer(as)
+		snap := &api.Snapshot{Jobs: []api.Job{{Namespace: "show-a", Name: "sh040-light-v007", Project: "show-a",
+			Waits: []api.Wait{{Unit: 9, Name: "registry", WaitsFor: "party:kestrel"}}}}}
+		for _, it := range p.s.needsMe(r, v, snap).Items {
+			if it.ID == "decision:show-a/sh040-light-v007/9" {
+				return true
+			}
+		}
+		return false
+	}
+	if !needs("sam") || needs("maya") {
+		t.Errorf("kestrel's wait needs sam %v (want true), maya %v (want false)", needs("sam"), needs("maya"))
+	}
 	// an agent and a unit still never decide for the party
 	r, v := p.viewer("dana")
 	d := p.s.decider(r, v)
@@ -584,5 +603,104 @@ func TestPartyRelayNeedsAMember(t *testing.T) {
 	s.Client = fake.NewClientBuilder().WithScheme(scheme).WithObjects(rec.job.DeepCopy(), tr, ml).Build()
 	if code, out := post(); code != http.StatusForbidden || !says(out, "a Party on this farm") {
 		t.Errorf("relayed for a kept Party: %d %v", code, out)
+	}
+}
+
+// The act needs of a Party's verbs: making a party, adding a member and
+// changing purposes or sign-ins give authority, so need a touch; ending a
+// membership and changing a party's names are a person's, silent.
+func TestPartyActNeeds(t *testing.T) {
+	for verb, want := range map[string]provenance.ActNeed{
+		"make-party": {Person: true, Touch: true}, "add-member": {Person: true, Touch: true},
+		"set-purposes": {Person: true, Touch: true}, "set-sign-ins": {Person: true, Touch: true},
+		"end-member": {Person: true}, "change-party": {Person: true},
+	} {
+		if got := provenance.ActNeeds(verb, nil, time.Now()); got != want {
+			t.Errorf("%s needs %+v, want %+v", verb, got, want)
+		}
+		if !farmbook.IsControlAct(verb) {
+			t.Errorf("the farm book does not take %s", verb)
+		}
+	}
+}
+
+// A membership is read from the record that opened it, checked: an entry
+// citing a record the HUD didn't sign, or a record of another act, gives
+// no one anything, though the entry waits pending where any writer of the
+// system store could put it.
+func TestPartyMembershipRecordsChecked(t *testing.T) {
+	p := newPartyRig(t)
+	ctx := context.Background()
+	code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", kestrel(), nil)
+	if code != http.StatusOK {
+		t.Fatalf("make kestrel: %d %v", code, out)
+	}
+	_, maya := p.viewer("maya")
+	key := farmbook.MemberKey("kestrel", "maya")
+	forge := func(signer *provenance.Signer) {
+		t.Helper()
+		pred := controlPredicate{Actor: "ines", Action: "add-member", Target: key,
+			Change: map[string]any{"party": "kestrel", "member": "maya", "purposes": []string{"member", "admin"}}}
+		rec, err := provenance.SignStatement(ctx, signer, provenance.PredicateControl, []provenance.Subject{{Name: key, Digest: map[string]string{"sha256": "00"}}}, pred, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		id := c4.Identify(bytes.NewReader(rec)).String()
+		if err := p.store.Put(ctx, id, rec); err != nil {
+			t.Fatal(err)
+		}
+		e, err := farmbook.ControlEntry(rec, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.s.FarmBook.Append(ctx, farmbook.Submission{Entry: e}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	queue, err := provenance.NewSigner(ctx, provenance.LocalIssuer(p.f.CA, provenance.ComponentIdentity("queue"), time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	forge(queue)
+	if p.s.holdsFor(ctx, maya, "kestrel", PurposeAdmin) {
+		t.Error("a pending entry citing the queue's record makes maya an admin")
+	}
+	// The HUD's own make-party record, cited by an entry that says it adds
+	// maya: the record is the HUD's, of another act.
+	made, _ := out["record"].(string)
+	raw, err := p.store.Get(ctx, made)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := farmbook.ControlEntry(raw, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Act, e.Subject, e.Person = "add-member", key, "maya"
+	if _, err := p.s.FarmBook.Append(ctx, farmbook.Submission{Entry: e}); err != nil {
+		t.Fatal(err)
+	}
+	if p.s.holdsFor(ctx, maya, "kestrel", PurposeAdmin) {
+		t.Error("an entry citing the make-party record as maya's add-member makes her an admin")
+	}
+}
+
+// When the farm's Parties cannot be read, every party may be one the farm
+// keeps, so the c4:party: group decides for none.
+func TestPartyWaitsWhenPartiesUnreadable(t *testing.T) {
+	p := newPartyRig(t)
+	scheme := runtime.NewScheme()
+	clientgoscheme.AddToScheme(scheme)
+	c4v1.AddToScheme(scheme)
+	p.s.Client = fake.NewClientBuilder().WithScheme(scheme).WithInterceptorFuncs(interceptor.Funcs{
+		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if _, ok := list.(*c4v1.PartyList); ok {
+				return errors.New("the API server is away")
+			}
+			return c.List(ctx, list, opts...)
+		}}).Build()
+	r, kim := p.viewer("kim")
+	if err := MayControl("decide", "party:kestrel", p.s.decider(r, kim)); err == nil {
+		t.Error("the c4:party: group decides while the farm's Parties can't be read")
 	}
 }
