@@ -244,3 +244,23 @@ func (b *booked) asIssuerAt(e *people.Entry) {
 	}
 	e.Sig, _ = schema.Canonical(sig)
 }
+
+// Refused agent certificate requests from one address are answered 429,
+// without reading the book, past AgentRefusalsPerMinute in a minute; a
+// minute later they are answered again.
+func TestRefusedAgentCertificatesRateLimited(t *testing.T) {
+	a := agentFarm(t)
+	for n := 0; n < people.AgentRefusalsPerMinute; n++ {
+		if code, body, _ := a.certify(assistant, a.agent, a.agent); code != http.StatusForbidden {
+			t.Fatalf("refusal %d: %d %s", n+1, code, body)
+		}
+	}
+	if code, _, _ := a.certify(assistant, a.agent, a.agent); code != http.StatusTooManyRequests {
+		t.Errorf("past %d refusals in a minute: %d, want 429", people.AgentRefusalsPerMinute, code)
+	}
+	a.now = a.now.Add(time.Minute)
+	a.granted()
+	if code, body, _ := a.certify(assistant, a.agent, a.agent); code != http.StatusOK {
+		t.Errorf("a minute later, granted: %d %s", code, body)
+	}
+}
