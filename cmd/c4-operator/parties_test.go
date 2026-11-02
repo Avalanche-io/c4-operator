@@ -221,10 +221,15 @@ func TestIssuerFailsClosed(t *testing.T) {
 	r := newIssuerFarm(t, "noor")
 	scheme := runtime.NewScheme()
 	c4v1.AddToScheme(scheme)
-	r.reader = fake.NewClientBuilder().WithScheme(scheme).WithInterceptorFuncs(interceptor.Funcs{
+	// the binding still reads; only the Parties don't
+	r.reader = fake.NewClientBuilder().WithScheme(scheme).WithObjects(&c4v1.DeploymentBinding{ObjectMeta: metav1.ObjectMeta{Name: c4v1.FarmBindingName},
+		Spec: c4v1.DeploymentBindingSpec{Owner: "noor", To: "laptop-1/*", For: []string{"task/v1"}, By: "noor"}}).WithInterceptorFuncs(interceptor.Funcs{
 		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 			return errors.New("the API server is away")
 		}}).Build()
+	if farmBinding(context.Background(), r.reader) == nil {
+		t.Fatal("the binding doesn't read")
+	}
 	if _, err := (&partySignIns{reader: r.reader, secret: &secretSignIns{kube: r.kube, ns: "c4-signing"}}).Load(context.Background()); err == nil {
 		t.Error("sign-ins load while the Parties can't be read")
 	}
