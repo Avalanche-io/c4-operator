@@ -75,3 +75,24 @@ func TestTouchKeyOnlyAtATerminal(t *testing.T) {
 		t.Errorf("from a script: %v", err)
 	}
 }
+
+// Inside an agent the CLI reaches no local farm on its installer token:
+// the agent uses the farm's tools, whose server signs as it.
+func TestNoInstallerTokenInsideAnAgent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDECODE", "1")
+	cfg, err := farmcli.LoadConfig(farmcli.ConfigPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Farms = map[string]farmcli.Farm{"c4-walk": {HUD: "http://127.0.0.1:1", As: "noor", Local: true, InstallerTokenFile: "~/.c4/c4-walk/installer-token"}}
+	cfg.Current = "c4-walk"
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := run([]string{"ls"}, &out, strings.NewReader("")); err == nil || !strings.Contains(err.Error(), "the farm is reached through its tools") {
+		t.Errorf("ls inside an agent: %v", err)
+	}
+}

@@ -186,6 +186,14 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if err != nil {
 			return nil, f, farmcli.Out{}, "", err
 		}
+		// One signer per agent (PEOPLE-KEYS-2 5.2, K5): inside an agent the
+		// CLI never reads the installer token, which the agent's sandbox
+		// denies it; the agent reaches the farm through its tools, whose
+		// server signs as the agent with its own key. c4 farm mcp is that
+		// server, and Claude Code starts it outside the sandbox.
+		if farmcli.InsideAgent() && cmd != "mcp" && f.InstallerTokenFile != "" {
+			return nil, f, farmcli.Out{}, "", errors.New("inside an agent, the farm is reached through its tools (the c4-farm MCP server signs as the agent with its own key), not c4 farm: ask for the farm's tools, or run c4 farm yourself, at a terminal")
+		}
 		c, err := farmcli.NewClient(f)
 		if err != nil {
 			return nil, f, farmcli.Out{}, "", err
