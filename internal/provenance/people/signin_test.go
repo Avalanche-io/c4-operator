@@ -463,3 +463,22 @@ func TestReadsNeedACaller(t *testing.T) {
 		}
 	}
 }
+
+// One spelling for an issuer: scheme and host in lower case and no
+// trailing slash, so "one subject, one person" can't be split by how an
+// issuer URL is written.
+func TestIssuerSpelledOneWay(t *testing.T) {
+	for in, want := range map[string]string{
+		"HTTPS://SSO.Studio.Example/":                "https://sso.studio.example",
+		"https://sso.studio.example":                 "https://sso.studio.example",
+		"https://sso.studio.example/oauth2/default/": "https://sso.studio.example/oauth2/default",
+	} {
+		if got := people.CanonicalIssuer(in); got != want {
+			t.Errorf("CanonicalIssuer(%q) = %q, want %q", in, got, want)
+		}
+	}
+	ins := people.StaticSignIns{"dana": {{Issuer: "https://sso.studio.example", Subject: "00u-x"}}, "lee": {{Issuer: "HTTPS://SSO.studio.example/", Subject: "00u-x"}}}
+	if got := ins.People("https://Sso.Studio.Example", "00u-x"); len(got) != 2 {
+		t.Errorf("a subject under two spellings of one issuer: %v, want both holders", got)
+	}
+}

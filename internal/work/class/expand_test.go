@@ -160,3 +160,14 @@ func TestStrictDocuments(t *testing.T) {
 		}
 	}
 }
+
+// A wait's party is named as the farm's Parties are, in one case: a
+// party:Kestrel wait is refused, never one nobody keeps.
+func TestWaitPartyNameOneCase(t *testing.T) {
+	if _, err := docWait("registry", &DocWait{Server: "party:Kestrel"}, false); err == nil || !strings.Contains(err.Error(), "lower case") {
+		t.Errorf("party:Kestrel: %v", err)
+	}
+	if _, err := docWait("registry", &DocWait{Server: "party:kestrel"}, false); err != nil {
+		t.Errorf("party:kestrel: %v", err)
+	}
+}

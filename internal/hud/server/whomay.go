@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 )
 
@@ -133,7 +134,7 @@ func MayControl(control, server string, who Decider) error {
 			return nil
 		case by == ByWaitsPerson && kind == "person" && (name == "" || who.User == name || who.Person != "" && who.Person == name):
 			return nil
-		case by == ByWaitsPerson && kind == "party" && who.speaksFor(name):
+		case by == ByWaitsPerson && kind == "party" && c4v1.PartyName.MatchString(name) && who.speaksFor(name):
 			return nil
 		case by == ByWaitsPerson && kind == "role" && who.Role != "" && who.Role == name:
 			// a wait addressed to a role, by someone who has it

@@ -166,6 +166,8 @@ func docWait(name string, w *DocWait, planned bool) (*Wait, error) {
 	switch {
 	case who == "":
 		return nil, fmt.Errorf("unit %s waits for %q: want person:<id>, party:<name>, unit:<name> or clock:<time>", name, w.Server)
+	case kind == "party" && !c4v1.PartyName.MatchString(who):
+		return nil, fmt.Errorf("unit %s waits for party %q: a party's name is lower case letters, digits, dots and dashes, as the farm's Parties are named", name, who)
 	case kind == "unit" && w.Reply:
 		return nil, fmt.Errorf("unit %s waits for a unit's answer, which is text: it takes no reply", name)
 	case kind == "person" || kind == "party" || kind == "unit":

@@ -1,6 +1,8 @@
 package v1alpha1
 
 import (
+	"regexp"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -32,6 +34,11 @@ type Party struct {
 	// +kubebuilder:validation:XValidation:rule="!has(self.perPersonViews) || !self.perPersonViews || self.kind == 'organisation'",message="only an organisation sets per-person views"
 	Spec PartySpec `json:"spec"`
 }
+
+// PartyName is a party's bare name: chain/1's party pattern, narrowed to
+// an object name and to one case, so "Kestrel" and "kestrel" are never two
+// parties, nor a wait's party:Kestrel one nobody keeps.
+var PartyName = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]{0,61}[a-z0-9])?$`)
 
 // The kinds of party.
 const (

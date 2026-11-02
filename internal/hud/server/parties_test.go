@@ -892,3 +892,21 @@ func TestPartyViewerRights(t *testing.T) {
 		t.Errorf("rights on a farm with no book: %+v", v)
 	}
 }
+
+// One spelling for each thing: a party's name has one case, and so does a
+// wait's party; an issuer URL is kept and compared in its one spelling.
+func TestPartySpelledOneWay(t *testing.T) {
+	p := newPartyRig(t)
+	upper := kestrel()
+	upper["name"] = "Kestrel"
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", upper, nil); code != http.StatusBadRequest {
+		t.Errorf("a party named Kestrel: %d %v", code, out)
+	}
+	if err := MayControl("decide", "party:Kestrel", Decider{User: "kim", Parties: []string{"Kestrel"}}); err == nil {
+		t.Error("a party:Kestrel wait is decided")
+	}
+	got, err := validSignIns(ins("HTTPS://SSO.Studio.Example/ 00u-x"))
+	if err != nil || len(got) != 1 || got[0].Issuer != "https://sso.studio.example" {
+		t.Errorf("an issuer kept as written: %v %v", got, err)
+	}
+}

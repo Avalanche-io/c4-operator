@@ -42,6 +42,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
+	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
 )
 
 // The purposes a member may hold (ORGANIZATION 2).
@@ -86,9 +87,8 @@ var (
 var firstAdmin = []string{PurposeMember, PurposeAdmin}
 
 var (
-	// partyName is a party's bare name: chain/1's party pattern, narrowed
-	// to an object name, so it has no colon or slash.
-	partyName = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]{0,61}[a-z0-9])?$`)
+	// partyName is a party's bare name (c4v1.PartyName).
+	partyName = c4v1.PartyName
 	// personName is a person as a membership names them: their party's
 	// name or their sign-in name.
 	personName = regexp.MustCompile(`^[^\s:/,]{1,253}$`)
@@ -617,7 +617,7 @@ func validSignIns(in []api.SignIn) ([]c4v1.PartySignIn, error) {
 	}
 	out := []c4v1.PartySignIn{}
 	for _, x := range in {
-		y := c4v1.PartySignIn{Issuer: strings.TrimSpace(x.Issuer), Subject: strings.TrimSpace(x.Subject)}
+		y := c4v1.PartySignIn{Issuer: people.CanonicalIssuer(strings.TrimSpace(x.Issuer)), Subject: strings.TrimSpace(x.Subject)}
 		if !subjectName.MatchString(y.Subject) {
 			return nil, fmt.Errorf("signIns: %q is not a sign-in subject (no spaces or commas, at most 253 characters)", y.Subject)
 		}

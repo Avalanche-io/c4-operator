@@ -288,7 +288,7 @@ func (s *partySignIns) Load(ctx context.Context) (people.StaticSignIns, error) {
 		hasParty[p.Name] = true
 		for _, x := range p.Spec.SignIns {
 			if x.Issuer != "" {
-				out[p.Name] = append(out[p.Name], people.SignIn{Issuer: x.Issuer, Subject: x.Subject})
+				out[p.Name] = append(out[p.Name], people.SignIn{Issuer: people.CanonicalIssuer(x.Issuer), Subject: x.Subject})
 			}
 		}
 	}

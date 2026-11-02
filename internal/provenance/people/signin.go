@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -71,13 +72,28 @@ func (s StaticSignIns) Person(issuer, subject string) string {
 // sorted: one, normally; more than one is a mistake an admin corrects.
 func (s StaticSignIns) People(issuer, subject string) []string {
 	var out []string
+	issuer = CanonicalIssuer(issuer)
 	for person, ins := range s {
-		if slices.Contains(ins, SignIn{Issuer: issuer, Subject: subject}) {
+		if slices.ContainsFunc(ins, func(x SignIn) bool { return x.Subject == subject && CanonicalIssuer(x.Issuer) == issuer }) {
 			out = append(out, person)
 		}
 	}
 	slices.Sort(out)
 	return out
+}
+
+// CanonicalIssuer is an issuer URL in its one spelling, as "one subject,
+// one person" compares it: scheme and host in lower case, no trailing
+// slash. One that doesn't parse as a URL is left as it is.
+func CanonicalIssuer(s string) string {
+	u, err := url.Parse(strings.TrimSpace(s))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return s
+	}
+	u.Scheme, u.Host = strings.ToLower(u.Scheme), strings.ToLower(u.Host)
+	u.Path = strings.TrimRight(u.Path, "/")
+	u.RawPath = ""
+	return u.String()
 }
 
 // canonical is the sign-ins as the index books them: canonical JSON, each
