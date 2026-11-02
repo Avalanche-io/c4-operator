@@ -632,6 +632,58 @@ func claimed(ps []c4v1.Party, except string, subjects []c4v1.PartySignIn) (strin
 	return "", ""
 }
 
+// ownerMakesOwn says whether the farm binding's owner may make body
+// without a farm admin's right: their own person Party, while it doesn't
+// exist, signed in only as themselves. So the owner can always make the
+// owner's Party, which the people's issuer's admins then come from.
+func (s *Server) ownerMakesOwn(ctx context.Context, ps []c4v1.Party, person string, body *api.PartyRequest, signIns []c4v1.PartySignIn) bool {
+	b, err := s.farmBinding(ctx)
+	if err != nil || b == nil || person == "" || person != b.Spec.Owner || body.Name != b.Spec.Owner ||
+		body.Kind != c4v1.PartyPerson || findParty(ps, body.Name) != nil {
+		return false
+	}
+	for _, x := range signIns {
+		// a provider's subject is a farm admin's to add
+		if x.Issuer != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// standInHolder is who else the c4-sign-ins Secret (K2's stand-in) gives
+// one of a person Party's provider subjects: a person with no person
+// Party of their own, who so still signs in by it. "" for no one.
+func (s *Server) standInHolder(ctx context.Context, ps []c4v1.Party, party string, signIns []c4v1.PartySignIn) (string, string, error) {
+	if s.StandInSignIns == nil {
+		return "", "", nil
+	}
+	stand, err := s.StandInSignIns.Load(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	for _, x := range signIns {
+		if x.Issuer == "" {
+			continue
+		}
+		for _, who := range stand.People(x.Issuer, x.Subject) {
+			if q := findParty(ps, who); who != party && (q == nil || q.Spec.Kind != c4v1.PartyPerson) {
+				return who, signInWords(x), nil
+			}
+		}
+	}
+	return "", "", nil
+}
+
+// standInRefusal answers a sign-in the stand-in Secret gives another.
+func standInRefusal(w http.ResponseWriter, who, x string, err error) {
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "the c4-sign-ins Secret: %v", err)
+		return
+	}
+	fail(w, http.StatusConflict, "signIns: %s is %s's in the c4-sign-ins Secret; one sign-in is one person's", x, who)
+}
+
 // partyPredicate is a party write's control record, before its act.
 func (s *Server) partyPredicate(r *http.Request, v *api.Viewer, authz, action, target string, change map[string]any) controlPredicate {
 	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Authorization: authz,
@@ -701,22 +753,30 @@ func (s *Server) handleMakeParty(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	if err := s.authorize(ctx, r, v, "", "create", "parties", body.Name); err != nil {
-		fail(w, http.StatusForbidden, "a farm admin keeps the party list: %v", err)
-		return
-	}
 	ps, err := s.parties(ctx)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, "%v", err)
 		return
 	}
 	person := s.partyPerson(ctx, v, ps)
+	authz := s.authorization(v, "create", "parties", "", body.Name)
+	if err := s.authorize(ctx, r, v, "", "create", "parties", body.Name); err != nil {
+		if !s.ownerMakesOwn(ctx, ps, person, &body, signIns) {
+			fail(w, http.StatusForbidden, "a farm admin keeps the party list: %v", err)
+			return
+		}
+		authz = "the farm binding's owner, making their own party"
+	}
 	if old := findParty(ps, body.Name); old != nil {
 		s.partyExists(w, r, v, old, &body, signIns)
 		return
 	}
 	if who, x := claimed(ps, "", signIns); who != "" {
 		fail(w, http.StatusConflict, "signIns: %s is %s's already; one sign-in is one person's", x, who)
+		return
+	}
+	if who, x, err := s.standInHolder(ctx, ps, body.Name, signIns); err != nil || who != "" {
+		standInRefusal(w, who, x, err)
 		return
 	}
 	if body.Kind == c4v1.PartyOrganisation && person == "" {
@@ -734,7 +794,7 @@ func (s *Server) handleMakeParty(w http.ResponseWriter, r *http.Request) {
 		// Whoever makes an organisation is its first admin.
 		change["member"], change["purposes"] = person, firstAdmin
 	}
-	pred := s.partyPredicate(r, v, s.authorization(v, "create", "parties", "", body.Name), "make-party", farmbook.PartyKey(body.Name), change)
+	pred := s.partyPredicate(r, v, authz, "make-party", farmbook.PartyKey(body.Name), change)
 	// making a party is an act on the farm itself
 	var act *citedAct
 	if on, ok := s.farmSubject(ctx); ok {
@@ -951,6 +1011,10 @@ func (s *Server) handleSignIns(w http.ResponseWriter, r *http.Request) {
 	}
 	if who, x := claimed(st.parties, p.Name, signIns); who != "" {
 		fail(w, http.StatusConflict, "signIns: %s is %s's already; one sign-in is one person's", x, who)
+		return
+	}
+	if who, x, err := s.standInHolder(r.Context(), st.parties, p.Name, signIns); err != nil || who != "" {
+		standInRefusal(w, who, x, err)
 		return
 	}
 	if slices.Equal(signIns, p.Spec.SignIns) || len(signIns) == 0 && len(p.Spec.SignIns) == 0 {

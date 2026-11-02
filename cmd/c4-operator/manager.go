@@ -543,6 +543,9 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		// The HUD takes an agent's own act under its grant, which the
 		// issuer books (PEOPLE-KEYS-2 5.2).
 		srv.AgentGrants = iss
+		if ps, ok := iss.SignIns.(*partySignIns); ok {
+			srv.StandInSignIns = ps.secret
+		}
 	}
 	if sandbox != "" {
 		if srv.DevViewers == nil {

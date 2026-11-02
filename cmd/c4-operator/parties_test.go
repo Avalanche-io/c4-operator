@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	ktesting "k8s.io/client-go/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/farmbook"
@@ -124,34 +126,63 @@ func TestIssuerBeforeParties(t *testing.T) {
 	}
 }
 
-// With Parties, the issuer reads nothing of K2's stand-ins: the sign-ins
-// are the person Parties' provider subjects, and the c4-sign-ins Secret
-// is never read; the admins are those holding admin by name in the farm
-// owner's Party, in force in the book, and never the binding's owner by
-// that alone.
-func TestIssuerReadsParties(t *testing.T) {
+// Making an unrelated Party first changes no one's admin and no one's
+// sign-in: an organisation, or a person Party for someone the Secret
+// doesn't name, leaves the Secret's people signing in by it and the
+// binding's owner the admin.
+func TestIssuerUnrelatedPartyChangesNothing(t *testing.T) {
 	ctx := context.Background()
-	// the farm bound to a person, who has a Party
+	r := newIssuerFarm(t, "noor", organisation("saltmarsh"), person("dana", c4v1.PartySignIn{Issuer: sso, Subject: "00u-dana"}))
+	r.bookControl(t, "make-party", farmbook.PartyKey("saltmarsh"), map[string]any{"name": "saltmarsh", "member": "dana", "purposes": []string{"member", "admin"}})
+	ins := r.signIns(t)
+	if ins.Person(sso, "00u-noor") != "noor" || ins.Person(sso, "00u-lee") != "lee" || ins.Person(sso, "00u-dana") != "dana" {
+		t.Errorf("an unrelated Party changed the sign-ins: %v", ins)
+	}
+	admin := farmAdmins(r.reader, r.book)
+	if !admin(ctx, "noor") || admin(ctx, "dana") {
+		t.Errorf("an unrelated Party changed the admins: noor %v (want true), dana %v", admin(ctx, "noor"), admin(ctx, "dana"))
+	}
+	// a studio farm bound to an organisation with no Party yet: its
+	// owner's name stays the admin, as before
+	r = newIssuerFarm(t, "kestrel", organisation("saltmarsh"))
+	if !farmAdmins(r.reader, r.book)(ctx, "kestrel") {
+		t.Error("another Party took the admins from the binding's owner")
+	}
+}
+
+// Sign-ins go over person by person: a person with a person Party signs
+// in by its provider subjects alone, the Secret's lines for them ignored;
+// a person without one keeps the Secret's lines.
+func TestIssuerSignInsPerPerson(t *testing.T) {
 	r := newIssuerFarm(t, "noor", person("noor", c4v1.PartySignIn{Issuer: sso, Subject: "00u-noor-2"}, c4v1.PartySignIn{Subject: "noor"}))
 	ins := r.signIns(t)
 	switch {
-	case *r.secrets != 0:
-		t.Errorf("the Secret is read %d times with Parties", *r.secrets)
-	case ins.Person(sso, "00u-noor") != "" || ins.Person(sso, "00u-lee") != "":
-		t.Errorf("the Secret's sign-ins hold with Parties: %v", ins)
-	case ins.Person(sso, "00u-noor-2") != "noor" || ins.Person("", "noor") != "":
-		t.Errorf("the issuer's sign-ins are not noor's Party's provider subjects: %v", ins)
+	case ins.Person(sso, "00u-noor") != "":
+		t.Errorf("the Secret's line signs in noor, who has a Party: %v", ins)
+	case ins.Person(sso, "00u-noor-2") != "noor":
+		t.Errorf("noor's Party's provider subject doesn't sign her in: %v", ins)
+	case ins.Person("", "noor") != "":
+		t.Errorf("a HUD sign-in reaches the issuer: %v", ins)
+	case ins.Person(sso, "00u-lee") != "lee":
+		t.Errorf("lee, with no Party, lost the Secret's line: %v", ins)
 	}
-	admin := farmAdmins(r.reader, r.book)
-	if !admin(ctx, "noor") || admin(ctx, "lee") {
-		t.Error("a person's Party: its person is not the one admin")
+	// a subject in a Party and in another person's Secret lines is no one's
+	r = newIssuerFarm(t, "noor", person("dana", c4v1.PartySignIn{Issuer: sso, Subject: "00u-lee"}))
+	if ins := r.signIns(t); len(ins.People(sso, "00u-lee")) != 2 || ins.Person(sso, "00u-lee") != "" {
+		t.Errorf("a subject in dana's Party and lee's Secret lines: %v", ins.People(sso, "00u-lee"))
 	}
+}
 
-	// the farm bound to an organisation: its admins by name, in the book
-	r = newIssuerFarm(t, "kestrel", organisation("kestrel"), person("dana"))
-	admin = farmAdmins(r.reader, r.book)
-	if admin(ctx, "kestrel") || admin(ctx, "dana") {
-		t.Fatal("an admin before the book names one: the binding's owner, or a person with no membership")
+// Admins come from the farm owner's Party once it exists and its
+// make-party is booked: before, the binding's owner, as before Parties;
+// after, those holding admin by name in it, never the binding's owner by
+// that alone.
+func TestIssuerAdminsFromTheOwnersParty(t *testing.T) {
+	ctx := context.Background()
+	r := newIssuerFarm(t, "kestrel", organisation("kestrel"), person("dana"))
+	admin := farmAdmins(r.reader, r.book)
+	if !admin(ctx, "kestrel") || admin(ctx, "dana") {
+		t.Fatal("before kestrel's make-party is booked, the binding's owner is not the one admin")
 	}
 	r.bookControl(t, "make-party", farmbook.PartyKey("kestrel"), map[string]any{"name": "kestrel", "member": "dana", "purposes": []string{"member", "admin"}})
 	r.bookControl(t, "add-member", farmbook.MemberKey("kestrel", "lee"), map[string]any{"party": "kestrel", "member": "lee", "purposes": []string{"member", "view-spend"}})
@@ -159,8 +190,8 @@ func TestIssuerReadsParties(t *testing.T) {
 		t.Errorf("kestrel's admins: dana %v (want true), lee %v, kestrel %v", admin(ctx, "dana"), admin(ctx, "lee"), admin(ctx, "kestrel"))
 	}
 	r.bookControl(t, "end-member", farmbook.MemberKey("kestrel", "dana"), map[string]any{"party": "kestrel", "member": "dana", "purposes": []string{}})
-	if admin(ctx, "dana") {
-		t.Error("dana is an admin after her membership ended")
+	if admin(ctx, "dana") || admin(ctx, "kestrel") {
+		t.Error("an admin after dana's membership ended")
 	}
 
 	// a membership signed at another farm, whose CA the roots trust too,
@@ -173,10 +204,32 @@ func TestIssuerReadsParties(t *testing.T) {
 		t.Error("another farm's record makes mallory an admin")
 	}
 
-	// the farm bound to someone with no Party: no one, not the owner
-	r = newIssuerFarm(t, "noor", organisation("kestrel"))
-	if farmAdmins(r.reader, r.book)(ctx, "noor") {
-		t.Error("with Parties, the farm binding's owner is an admin by that alone")
+	// a person's own Party: that person, before and after it is booked
+	r = newIssuerFarm(t, "noor", person("noor"))
+	admin = farmAdmins(r.reader, r.book)
+	if !admin(ctx, "noor") || admin(ctx, "lee") {
+		t.Error("before noor's Party is booked, noor is not the one admin")
+	}
+	r.bookControl(t, "make-party", farmbook.PartyKey("noor"), map[string]any{"name": "noor", "kind": "person"})
+	if !admin(ctx, "noor") || admin(ctx, "lee") {
+		t.Error("noor's Party: noor is not the one admin")
+	}
+}
+
+// Parties that can't be listed sign no one in and make no one an admin.
+func TestIssuerFailsClosed(t *testing.T) {
+	r := newIssuerFarm(t, "noor")
+	scheme := runtime.NewScheme()
+	c4v1.AddToScheme(scheme)
+	r.reader = fake.NewClientBuilder().WithScheme(scheme).WithInterceptorFuncs(interceptor.Funcs{
+		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			return errors.New("the API server is away")
+		}}).Build()
+	if _, err := (&partySignIns{reader: r.reader, secret: &secretSignIns{kube: r.kube, ns: "c4-signing"}}).Load(context.Background()); err == nil {
+		t.Error("sign-ins load while the Parties can't be read")
+	}
+	if farmAdmins(r.reader, r.book)(context.Background(), "noor") {
+		t.Error("an admin while the Parties can't be read")
 	}
 }
 

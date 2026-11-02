@@ -244,45 +244,57 @@ func (h *secretHead) Write(ctx context.Context, from, to people.HeadState) error
 	return err
 }
 
-// farmParties lists the farm's Parties (ORGANIZATION 1); kept is false on
-// a farm with none yet, or without the kind installed.
-func farmParties(ctx context.Context, reader client.Reader) (ps []c4v1.Party, kept bool, err error) {
+// farmParties lists the farm's Parties (ORGANIZATION 1): none on a farm
+// without the kind installed.
+func farmParties(ctx context.Context, reader client.Reader) ([]c4v1.Party, error) {
 	var l c4v1.PartyList
 	if err := reader.List(ctx, &l); err != nil {
 		if meta.IsNoMatchError(err) || runtime.IsNotRegisteredError(err) {
-			return nil, false, nil
+			return nil, nil
 		}
-		return nil, false, err
+		return nil, err
 	}
-	return l.Items, len(l.Items) > 0, nil
+	return l.Items, nil
 }
 
-// partySignIns are the people's sign-ins from the farm's Parties: each
-// person Party's signIns that name a provider (PEOPLE-KEYS-2 3.1). Only a
-// farm with no Parties yet reads K2's stand-in, the c4-sign-ins Secret.
-// Parties that can't be read sign no one in.
+// partySignIns are the people's sign-ins (PEOPLE-KEYS-2 3.1), person by
+// person: a person who has a person Party signs in by that Party's
+// signIns that name a provider, and nothing else; a person who has none
+// yet keeps K2's stand-in, their lines in the c4-sign-ins Secret, which so
+// drops out as people get Parties (O2 makes them at up). A subject both
+// sources give, to two people, is held by both, so it signs in neither
+// (one subject, one person: holder, 409). Parties that can't be read
+// sign no one in.
 type partySignIns struct {
 	reader client.Reader
 	secret people.SignIns
 }
 
 func (s *partySignIns) Load(ctx context.Context) (people.StaticSignIns, error) {
-	ps, kept, err := farmParties(ctx, s.reader)
+	ps, err := farmParties(ctx, s.reader)
 	if err != nil {
 		return nil, fmt.Errorf("the farm's parties: %w", err)
 	}
-	if !kept {
-		return s.secret.Load(ctx)
+	stand, err := s.secret.Load(ctx)
+	if err != nil {
+		return nil, err
 	}
 	out := people.StaticSignIns{}
+	hasParty := map[string]bool{}
 	for _, p := range ps {
 		if p.Spec.Kind != c4v1.PartyPerson {
 			continue
 		}
+		hasParty[p.Name] = true
 		for _, x := range p.Spec.SignIns {
 			if x.Issuer != "" {
 				out[p.Name] = append(out[p.Name], people.SignIn{Issuer: x.Issuer, Subject: x.Subject})
 			}
+		}
+	}
+	for person, ins := range stand {
+		if !hasParty[person] {
+			out[person] = append(out[person], ins...)
 		}
 	}
 	return out, nil
@@ -290,38 +302,42 @@ func (s *partySignIns) Load(ctx context.Context) (people.StaticSignIns, error) {
 
 // farmAdmins decides who the farm owner's admins are, who may remove
 // anyone's devices and read others' ID tokens and addresses (Issuer.Sees,
-// the farm book's private parts). With Parties, a person holding admin by
-// name in the farm owner's Party, in force in the farm book now, or for a
-// person's Party, that person; with Parties and no Party of the farm
-// owner's name, or no book to judge by, no one. Before Parties, the farm
-// binding's owner.
+// the farm book's private parts):
+//   - once the farm owner's Party (the binding owner's name) exists and its
+//     make-party is in the farm book, a person holding admin by name in it,
+//     in force in the book now; for a person's Party, that person;
+//   - until then, whatever other Parties exist, the farm binding's owner,
+//     as before Parties.
+//
+// Parties or a book that can't be read make no one an admin.
 func farmAdmins(reader client.Reader, book *farmBook) func(ctx context.Context, person string) bool {
 	return func(ctx context.Context, person string) bool {
-		ps, kept, err := farmParties(ctx, reader)
-		if err != nil {
-			return false
-		}
+		ps, err := farmParties(ctx, reader)
 		b := farmBinding(ctx, reader)
-		if !kept {
-			return b != nil && b.Spec.Owner == person
+		if err != nil || b == nil || person == "" {
+			return false
 		}
 		var owner *c4v1.Party
 		for i := range ps {
-			if b != nil && ps[i].Name == b.Spec.Owner {
+			if ps[i].Name == b.Spec.Owner {
 				owner = &ps[i]
 			}
 		}
-		switch {
-		case owner == nil:
-			return false
-		case owner.Spec.Kind == c4v1.PartyPerson:
-			return owner.Name == person
-		case book == nil || book.reader == nil:
-			return false
+		if owner == nil || book == nil || book.reader == nil {
+			return b.Spec.Owner == person
 		}
 		view, err := book.reader.View(ctx, time.Now())
 		if err != nil {
 			return false
+		}
+		if on, err := view.InForceAt(farmbook.ForceParty, farmbook.PartyKey(owner.Name), view.Position(), view.Now); err != nil {
+			return false
+		} else if on == nil {
+			// made, its record not booked yet: the binding's owner still
+			return b.Spec.Owner == person
+		}
+		if owner.Spec.Kind == c4v1.PartyPerson {
+			return owner.Name == person
 		}
 		ok, _ := farmbook.HoldsByName(ctx, view, book.store, book.roots, owner.Name, person, server.PurposeAdmin)
 		return ok

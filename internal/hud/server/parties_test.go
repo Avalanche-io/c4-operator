@@ -25,6 +25,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
+	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/provtest"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 )
@@ -743,4 +744,65 @@ func ins(list ...string) []api.SignIn {
 		out = append(out, api.SignIn{Subject: x})
 	}
 	return out
+}
+
+// The farm binding's owner can always make the owner's Party while it
+// doesn't exist, as themselves, with no farm admin's right: their own
+// person Party, signed in only as they are; nothing else.
+func TestPartyOwnerMakesOwn(t *testing.T) {
+	p := newPartyRig(t)
+	ctx := context.Background()
+	if err := p.s.Client.Create(ctx, &c4v1.DeploymentBinding{ObjectMeta: metav1.ObjectMeta{Name: c4v1.FarmBindingName},
+		Spec: c4v1.DeploymentBindingSpec{Owner: "noor", To: "laptop-1/*", For: []string{"task/v1"}, By: "noor"}}); err != nil {
+		t.Fatal(err)
+	}
+	mk := func(as, name, kind string, signIns ...string) (int, map[string]any) {
+		return p.call(t, http.MethodPost, "/api/v1/parties", as, map[string]any{"name": name, "kind": kind, "displayName": name, "signIns": ins(signIns...)}, nil)
+	}
+	for _, c := range []struct{ as, name, kind string }{{"noor", "saltmarsh", "organisation"}, {"noor", "dana", "person"}, {"maya", "noor", "person"}, {"noor", "noor", "organisation"}} {
+		if code, out := mk(c.as, c.name, c.kind); code != http.StatusForbidden {
+			t.Errorf("%s makes the %s %s: %d %v", c.as, c.kind, c.name, code, out)
+		}
+	}
+	if code, out := mk("noor", "noor", "person", "noor", "https://sso.studio.example 00u-noor"); code != http.StatusForbidden {
+		t.Errorf("the owner adds a provider subject to her own Party: %d %v", code, out)
+	}
+	code, out := mk("noor", "noor", "person", "noor")
+	if code != http.StatusOK {
+		t.Fatalf("the owner makes her own Party: %d %v", code, out)
+	}
+	if pred := p.g.predicate(t, "show-a", out["record"].(string)); pred.Authorization != "the farm binding's owner, making their own party" {
+		t.Errorf("the record's authorization: %q", pred.Authorization)
+	}
+	p.seal(t)
+}
+
+// One subject stays one person's across the Parties and the c4-sign-ins
+// Secret: a provider subject the Secret gives someone with no person Party
+// of their own is refused on a Party's write, while the same person's own
+// Party, or a subject of someone who has a Party now, is not.
+func TestPartySignInsAgainstTheSecret(t *testing.T) {
+	p := newPartyRig(t)
+	const sso = "https://sso.studio.example"
+	p.s.StandInSignIns = people.StaticSignIns{"lee": {{Issuer: sso, Subject: "00u-lee"}}, "dana": {{Issuer: sso, Subject: "00u-dana"}}}
+	mk := func(name string, signIns ...string) (int, map[string]any) {
+		return p.call(t, http.MethodPost, "/api/v1/parties", "ines", map[string]any{"name": name, "kind": "person", "displayName": name, "signIns": ins(signIns...)}, nil)
+	}
+	if code, out := mk("noor", sso+" 00u-lee"); code != http.StatusConflict || !says(out, "is lee's in the c4-sign-ins Secret") {
+		t.Errorf("noor takes lee's Secret subject: %d %v", code, out)
+	}
+	if code, out := mk("lee", sso+" 00u-lee"); code != http.StatusOK {
+		t.Errorf("lee's own Party takes her Secret subject: %d %v", code, out)
+	}
+	if code, out := mk("dana"); code != http.StatusOK {
+		t.Fatalf("dana's Party: %d %v", code, out)
+	}
+	// dana has a Party now, so the Secret's line for her signs in no one
+	if code, out := p.call(t, http.MethodPut, "/api/v1/parties/lee/sign-ins", "ines", map[string]any{"signIns": ins(sso+" 00u-lee", sso+" 00u-dana")}, nil); code != http.StatusOK {
+		t.Errorf("lee takes a subject only dana's ignored Secret line names: %d %v", code, out)
+	}
+	p.s.StandInSignIns = people.StaticSignIns{"kai": {{Issuer: sso, Subject: "00u-kai"}}}
+	if code, out := p.call(t, http.MethodPut, "/api/v1/parties/lee/sign-ins", "ines", map[string]any{"signIns": ins(sso+" 00u-lee", sso+" 00u-kai")}, nil); code != http.StatusConflict {
+		t.Errorf("lee takes kai's Secret subject: %d %v", code, out)
+	}
 }

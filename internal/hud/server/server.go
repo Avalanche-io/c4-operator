@@ -39,6 +39,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/imageref"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
+	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
 	"github.com/Avalanche-io/c4-operator/internal/telemetry/ring"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
@@ -167,6 +168,12 @@ type Server struct {
 	// nil serves none. It trusts the HUD for nothing: it certifies on an
 	// ID token, or a one-person farm's installer token or code.
 	People http.Handler
+	// StandInSignIns are K2's stand-in sign-ins, the c4-sign-ins Secret,
+	// which a person with no person Party yet still signs in by: a Party
+	// write naming a provider subject they hold is refused, so one subject
+	// stays one person's across both. nil on a farm with no people's
+	// issuer.
+	StandInSignIns people.SignIns
 	// HostIssuer is the farm's workload issuer for host runners, served at
 	// /workload/v1/certificate: a machine outside the cluster reaches the
 	// farm only at the HUD's address. It certifies on the runner's own
