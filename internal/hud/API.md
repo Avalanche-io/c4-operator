@@ -2225,8 +2225,26 @@ takes any user the map names); otherwise `403`, `400` for a malformed
 them (`dana via tracker github (@dana)`), `authenticated` says who relayed
 it, `relay` is `via`, and `custody` is `relayed`, or
 `relayed-party` when `people` maps the user to a party rather than
-a person (a model registry, which names no person). A decision made in the
+a person (a model registry, which names no person), for a login its
+person has confirmed (People); for one nobody has confirmed it is
+`unattributed`, the chain saying what is missing. A decision made in the
 HUD is `direct`.
+
+The sync signs the decision it relays (PEOPLE-KEYS-2 6.1) when the Tracker
+names it as its `sync`: an `act/v1` in `X-C4-Act`, on the job
+(`workjob:<ns>/<name>@<uid>` at its `specDigest`), `decide`, with the
+request body as its params, `chain.by` the tracker and user, `chain.for`
+the person (or the party) `people` names, `chain.under` the person's
+confirmation of the login (`people-map`, its record) when there is one,
+and `signer` the sync's own `sa/<ns>/<account>` identity, which the
+farm's issuer certifies only while a Tracker names that account. The HUD
+takes it only with the relayed decision (`via`), only signed by the
+account the Tracker names, sent by that account, and naming the same
+tracker, user, person and confirmation; otherwise `403`. The control
+record cites it, graded as above. A relay's act on any other request is
+refused, and so is any act kind that needs a person's touch (a grant, a
+send, a spend approval): those wait for the person in C4. A relayed
+decision with no act is taken as before, until signed acts are required.
 
 An `agent:` wait is decided by the agent it names: a unit of the same job
 whose pod the queue labelled as running that agent

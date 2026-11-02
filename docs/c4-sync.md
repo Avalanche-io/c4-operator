@@ -206,6 +206,11 @@ Each Tracker says:
   calls it; name any other state (`state:Changes Requested: rework`);
 - `people`: tracker users mapped to C4 people: GitHub and Flow logins,
   Kitsu and Linear emails;
+- `sync`: the service account of the c4-sync that relays the Tracker's
+  decisions (`{namespace: c4-system, serviceAccount: c4-sync}`). While a
+  Tracker names it, the farm's certificate issuer certifies that account,
+  and c4-sync signs each decision it relays as itself (see People, below).
+  Without it, decisions are relayed unsigned, as before;
 - `scope.spend_field` and `scope.spend_on` (Flow and Kitsu): the field
   that carries what C4 has spent, and where it goes. `shot`, the default,
   writes the total of every C4 job on the entity's shot or asset, every
@@ -228,8 +233,19 @@ build on it (`-v002`), so renaming the shot in the tracker renames nothing.
 user `people` maps to `dana`. The map is the project's offer: each person
 confirms their own login in the HUD, on their own page (a party's, a
 member of it), and a decision relayed from a confirmed login names that
-confirmation. One from a login nobody has confirmed is relayed marked
-unaccountable until they do. Anyone else's decision is refused and
+confirmation. One from a login nobody has confirmed still goes through,
+graded `unattributed` and marked unaccountable until they do; a later
+release refuses it, and asks the person instead.
+
+A decision you make in Flow is signed by C4's Flow sync, which names you
+and keeps Flow's own record of it. Your C4 key doesn't sign it, because
+you made it in Flow. You confirm your Flow login once, so the sync can name
+you. It is the same for Kitsu, GitHub, Linear and MLflow, wherever the
+Tracker names its `sync`. The HUD takes the sync's signed act
+only with the decision it relays, only from the sync the Tracker names,
+and only when it names the same tracker user, person and confirmation;
+the record cites it. Acts that need your touch (a grant, a send, a spend
+approval) are never relayed: made in a tracker, they wait for you in C4. Anyone else's decision is refused and
 recorded on the link. Roles never come from the tracker: a tracker admin
 cannot grant farm access. MLflow records no author for an alias or a tag.
 Its decisions are attributed to `mlflow-registry`, which you map to a
@@ -404,10 +420,11 @@ job does afterwards.
 - Experimental API. The jobs c4-sync submits carry their tracker
   entity (`c4.avalanche.io/tracker-ref`) and the version they follow
   (`spec.follows`), both in their records. A decision relayed from a
-  tracker is signed as `relayed` (or `relayed-party`, by a party
-  such as a model registry), naming the tracker, the entity, the tracker
-  user and the stored evidence; the HUD checks it against the Tracker's
-  `people`.
+  tracker is graded `relayed` (or `relayed-party`, by a party such as a
+  model registry) when its login is confirmed, `unattributed` when not,
+  naming the tracker, the entity, the tracker user and the stored
+  evidence; the HUD checks it against the Tracker's `people`, and cites
+  the sync's own signed act where the Tracker names its `sync`.
 - One c4-sync replica: there is no leader election yet.
 - Tracker request limits are those each vendor publishes (GitHub's,
   Linear's 2,500 requests an hour per API key), or a conservative default
