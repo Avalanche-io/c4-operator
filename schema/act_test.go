@@ -71,9 +71,12 @@ func TestCanonical(t *testing.T) {
 	// Refused, so two values never share a canonical form: a number a
 	// double can't hold as written (RFC 8785's own 333333333.33333329
 	// among them, which is why the example above writes 333333333.3333333),
-	// and a lone surrogate, which Go would read as U+FFFD.
+	// a lone surrogate, which Go would read as U+FFFD, and keys that differ
+	// only in case (the Kelvin sign folds to k), which Go's encoding/json
+	// would read as one.
 	for _, bad := range []string{`{"a": 1, "a": 2}`, "\"\xff\"", `{"a": 1} {}`,
 		`{"n": 12345678901234567890}`, `{"n": 12345678901234567891}`, `[333333333.33333329]`, `[9007199254740993]`, `[0.1000000000000000000001]`,
+		`{"Do": "fail", "do": "approve"}`, `{"a": {"Kelvin": 1, "\u212Aelvin": 2}}`, `[{"x": 1, "X": 2}]`,
 		`{"s": "\ud800"}`, `{"s": "\udc00"}`, `{"s": "\ud800x"}`, `{"s": "\ud800\u0041"}`, `{"\ud800": 1}`} {
 		if _, err := Canonical([]byte(bad)); err == nil {
 			t.Errorf("%q: canonical, want refused", bad)
@@ -104,6 +107,12 @@ func TestParamsID(t *testing.T) {
 	}
 	if id, err := ParamsID(json.RawMessage(`"` + a + `"`)); err != nil || id != a {
 		t.Errorf("a C4 ID names itself: %s, %v", id, err)
+	}
+	// The params an act signs and the body the HUD decodes must be one
+	// value: Go's decoder takes {"Do":"fail","do":"approve"} as do: approve
+	// or fail by order, so neither is an ID.
+	if _, err := ParamsID(json.RawMessage(`{"Do": "fail", "do": "approve"}`)); err == nil {
+		t.Error("params with keys that differ only in case have an ID")
 	}
 	if _, err := ParamsID(json.RawMessage(`"plate"`)); err == nil {
 		t.Error("a string that isn't a C4 ID was taken as params")

@@ -93,7 +93,8 @@ is (`https://cccc.io/provenance/act/v1`).
   share a form, a number a double can't hold exactly as written (an integer
   past 2^53, more digits than a double keeps) and a lone surrogate escape are
   refused, as I-JSON (RFC 7493) rules them out: send such a number as a
-  string.
+  string. Two keys that differ only in case are refused too, because Go's
+  JSON decoder, which the farm reads bodies with, takes them as one.
 - **`signedAt`** is when the signer signed, RFC 3339 in UTC, the time every
   C4 record carries. The farm refuses an act more than five minutes from its
   own clock. **`nonce`** is 16 random bytes, base64url.

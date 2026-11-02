@@ -226,7 +226,9 @@ func DeviceID(spki []byte) string { return c4.Identify(bytes.NewReader(spki)).St
 // only the escapes JSON requires, and numbers as ECMAScript writes them. A
 // browser gets the same bytes from JSON.stringify of a key-sorted value.
 // Refused, so two different values never share a form: a key written
-// twice, text that isn't UTF-8, an unpaired surrogate escape, and a number
+// twice, or two that differ only in case (Go's encoding/json matches keys
+// that way and takes the last, so {"Do":"fail","do":"approve"} would read
+// as either), text that isn't UTF-8, an unpaired surrogate escape, and a number
 // a double can't hold exactly as written (an integer past 2^53, more
 // digits than a double keeps), which I-JSON (RFC 7493) rules out. Send
 // such a number as a string.
@@ -303,6 +305,11 @@ func canonValue(d *json.Decoder, w *bytes.Buffer) error {
 				k := kt.(string)
 				if seen[k] {
 					return fmt.Errorf("%q is written twice", k)
+				}
+				for _, m := range ms {
+					if strings.EqualFold(m.key, k) {
+						return fmt.Errorf("%q and %q differ only in case, and a reader may take either", m.key, k)
+					}
 				}
 				seen[k] = true
 				var v bytes.Buffer
