@@ -133,11 +133,15 @@ function deviceRow(ctx, d, signing) {
   const mine = d.device === enrol.status.device;
   return h('div', { class: 'grow', 'data-key': 'd-' + d.device },
     h('div', { class: 'gmain' },
-      h('b', null, d.label || KINDS[d.kind] || d.kind), mine ? h('span', { class: 'dim' }, ' · this browser') : null,
+      // a label is what the device called itself when it enrolled: shown
+      // as that, never as the farm's word for it
+      h('b', null, KINDS[d.kind] || d.kind), d.label ? h('span', null, ` that calls itself “${d.label}”`) : null,
+      mine ? h('span', { class: 'dim' }, ' · this browser') : null,
       d.touchFor ? h('span', { class: 'dim' }, ' · your touch key') : null,
       h('div', { class: 'gline' }, `${KINDS[d.kind] || d.kind}: ${KEPT[d.protection] || d.protection}.`),
       ctx.level >= 2 ? h('div', { class: 'gline dim' }, `Enrolled ${EVIDENCE[d.evidence] || d.evidence}${d.renewedAt ? `, last renewed ${f.when(d.renewedAt)}` : ''}.${d.countersigned ? ' The farm’s machine countersigned it.' : ''}`) : null,
       (d.flags || []).map((x) => h('div', { class: 'gline t-fail' }, `Seen from two places at once: ${(x.seen || []).join(' and ')}. If that wasn’t you, remove it.`)),
+      ctx.level >= 3 ? h('div', { class: 'gline dim' }, 'Its kind, its name and how its key is kept are what it said of itself when it enrolled; the farm doesn’t vouch for them.') : null,
       ctx.level >= 3 ? h('div', { class: 'gline dim' }, 'device ', c4idEl(d.device, { tail: 4, label: 'device ID' }), ' · record ', c4idEl(d.record, { tail: 4, label: 'device record' })) : null),
     signing ? h('button', { class: 'btn small', 'data-device': d.device, title: mine ? 'Remove this browser’s key. It stops signing your acts at once, and this browser makes a new key.' : 'Remove it. Its key stops signing your acts at once and never comes back.' }, 'Remove') : null);
 }

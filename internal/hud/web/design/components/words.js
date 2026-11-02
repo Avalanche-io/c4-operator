@@ -184,16 +184,18 @@ export function fromTracker(j) {
 }
 
 // actBy: who took an act a record cites, and how it was signed
-// (PEOPLE-KEYS-2 K3), in the words every view shows: "dana, signed in
-// Safari on macOS, software key". e.act is what the farm read from the
+// (PEOPLE-KEYS-2 K3), in the words every view shows: "dana, signed in a
+// browser that calls itself “Safari on macOS”, software key". e.act is what the farm read from the
 // act's own record: { grade, kind, label?, protection, as? }. A person's
 // record from before personal keys has none, and says so: "signed by the
 // HUD for dana". Anything else is its actor and signer as before.
 const KEY_KIND = { hardware: 'hardware key', 'software-browser': 'software key', 'software-file': 'key in a file' };
 const DEVICE_KIND = { browser: 'a browser', mac: 'a Mac', windows: 'a Windows PC', linux: 'a Linux machine' };
-// where: the device an act was signed with: in a browser ("in Safari on
-// macOS"), on a machine ("on noor's laptop", "on a Mac")
-const where = (a) => `${a.kind === 'browser' ? 'in' : 'on'} ${a.label || DEVICE_KIND[a.kind] || a.kind}`;
+// where: the device an act was signed with, in the farm's own word for its
+// kind ("in a browser", "on a Mac"). A label is only what the device called
+// itself when it enrolled, so it follows in quotes as that, never as fact:
+// "on a Mac that calls itself “noor's laptop”"
+const where = (a) => `${a.kind === 'browser' ? 'in' : 'on'} ${DEVICE_KIND[a.kind] || a.kind}${a.label ? ` that calls itself “${a.label}”` : ''}`;
 export function actBy(e) {
   if (!e) return '';
   const a = e.act;
