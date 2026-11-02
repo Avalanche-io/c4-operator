@@ -865,13 +865,13 @@ func (c *checker) say(kind string, shape []string, path []elem, v any, ctx map[s
 	case "pattern request predicate.path":
 		return fmt.Sprintf("%s is not a request target", quote(v)), "write the target exactly as sent, in origin form: /api/v1/jobs/show-a?state=running, never a full URL"
 	case "pattern request predicate.signer":
-		return fmt.Sprintf("%s does not sign requests", quote(v)), "a request is signed by its client: a person's CLI (user/), an agent (agent/), a unit (unit/) or a host runner (runner/)"
+		return fmt.Sprintf("%s does not sign requests", quote(v)), "a request is signed by its client: a person's CLI (user/), an agent (agent/), a unit (unit/), a host runner (runner/) or a tracker's relay (sa/)"
 	case "required request predicate":
 		if ctx["field"] == "device" {
 			return "a person's request names the device that signed it", "add device: the device key's ID, as its certificate names it"
 		}
 	case "forbidden request predicate.device":
-		return "only a person's own device signs with a device key", "remove device: an agent, a unit or a runner signs with its own certificate"
+		return "only a person's own device signs with a device key", "remove device: an agent, a unit, a runner or a relay signs with its own certificate"
 	case "const request subject[].name":
 		return "a signed request is on its body", "write subject: [{name: body, digest: {sha256: <the body's SHA-256>}}]"
 	case "pattern request predicate.nonce":

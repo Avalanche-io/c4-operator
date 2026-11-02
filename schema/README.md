@@ -169,8 +169,8 @@ JSON of `{farm, person, key, touchFor, nonce, requestedAt}`
 ## A signed request: request/v1
 
 Every client that isn't a browser signs each request it sends: a person's
-CLI, an agent's MCP server, a host runner, a unit. A browser rides the
-session its device key opens instead.
+CLI, an agent's MCP server, a host runner, a unit, a tracker's relay. A
+browser rides the session its device key opens instead.
 - **What it proves:** who is calling, for this farm, now, and nothing more.
 - **Never an act:** a request that changes something carries its act beside
   it (`X-C4-Act`), and neither stands in for the other. The signer policy
@@ -189,8 +189,9 @@ statement in a DSSE envelope, sent base64 in the `X-C4-Request` header.
   with the request line (`http.Request.RequestURI`), so nothing is decoded
   or re-encoded between. A proxy in front of the HUD must pass the target
   through unchanged.
-- **`signer`:** the leaf's identity: `user/`, `agent/`, `unit/` or
-  `runner/`. A person's request also names its `device`, as an act does.
+- **`signer`:** the leaf's identity: `user/`, `agent/`, `unit/`,
+  `runner/`, or `sa/` for a tracker's relay, whose certificate is bound to its
+  Tracker. A person's request also names its `device`, as an act does.
   Nobody else's does.
 - **`nonce` and `signedAt`:** as an act's. The farm refuses a request more
   than five minutes from its clock, and takes each once by the SHA-256 of

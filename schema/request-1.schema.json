@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://cccc.io/schema/request-1.schema.json",
   "title": "C4 signed request (request/v1)",
-  "description": "One HTTP request, signed by the client that sends it, for every client that isn't a browser: the CLI, the MCP server, host runners and units. It proves who is calling, for this farm, now, and nothing more: it is never an act, and a request that changes something carries its act beside it. It is an in-toto statement in a DSSE envelope, as every C4 record is, sent base64 in the X-C4-Request header.",
+  "description": "One HTTP request, signed by the client that sends it, for every client that isn't a browser: the CLI, the MCP server, host runners, units and trackers' relays. It proves who is calling, for this farm, now, and nothing more: it is never an act, and a request that changes something carries its act beside it. It is an in-toto statement in a DSSE envelope, as every C4 record is, sent base64 in the X-C4-Request header.",
   "type": "object",
   "required": [
     "_type",
@@ -92,8 +92,8 @@
         },
         "signer": {
           "type": "string",
-          "pattern": "^https://cccc\\.io/id/(user|agent|unit|runner)/\\S+$",
-          "description": "Who sends it: the identity in the leaf certificate. A person's CLI (user/), an agent's MCP server (agent/), a unit (unit/) or a host runner (runner/)."
+          "pattern": "^https://cccc\\.io/id/(user|agent|unit|runner|sa)/\\S+$",
+          "description": "Who sends it: the identity in the leaf certificate. A person's CLI (user/), an agent's MCP server (agent/), a unit (unit/), a host runner (runner/), or a tracker's relay (sa/, bound to its Tracker)."
         },
         "device": {
           "$ref": "#/$defs/id",

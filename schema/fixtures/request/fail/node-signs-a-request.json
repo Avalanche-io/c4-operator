@@ -1,0 +1,20 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "body",
+      "digest": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  ],
+  "predicateType": "https://cccc.io/provenance/request/v1",
+  "predicate": {
+    "farm": "c44idf4JMNHVz2qxyvz7f6uEYWzv4JCZ9sAfgtubwd7WeHAXcGjbK4pUuZtQ5uoUoafSYNFdhgUWohqTkLtNMvYjBy",
+    "method": "GET",
+    "path": "/api/v1/jobs/saltmarsh/sm0140-comp-v003",
+    "signer": "https://cccc.io/id/node/node-3",
+    "nonce": "BDmTXv6NXxIO8KzjKlEjdg",
+    "signedAt": "2026-11-01T19:20:05Z"
+  }
+}

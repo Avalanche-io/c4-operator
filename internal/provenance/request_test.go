@@ -20,6 +20,7 @@ func TestSignedRequest(t *testing.T) {
 		"an agent":       f.Agent(t, "assistant", ""),
 		"a host runner":  f.Part(t, provenance.RunnerIdentity("laptop-1")),
 		"a unit, by pod": f.Unit(t, "saltmarsh", "sm0140-light", "7", provtest.JobUID, 1),
+		"a relay":        f.Relay(t, "saltmarsh", "flow-sync", "flow", "noor.k"),
 	} {
 		h := f.SignRequest(t, k, "POST", "/api/v1/observed?since=7", body)
 		b, err := base64.StdEncoding.DecodeString(h)
