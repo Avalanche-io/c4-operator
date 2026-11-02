@@ -89,6 +89,31 @@ type TrackerSpec struct {
 	// studio's groups, never from the tracker.
 	// +optional
 	People map[string]string `json:"people,omitempty"`
+	// Sync names the service account of the c4-sync that relays this
+	// Tracker's decisions (config/sync: c4-system/c4-sync). While a
+	// Tracker names it, the farm's certificate issuer certifies that
+	// account, and it signs each decision it relays as itself, naming the
+	// person (PEOPLE-KEYS-2 6.1); the HUD takes a relay's signed act only
+	// from the account its Tracker names. Unset, the relay signs nothing,
+	// as before.
+	// +optional
+	Sync *TrackerSync `json:"sync,omitempty"`
+}
+
+// TrackerSync is the service account of a Tracker's sync.
+type TrackerSync struct {
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	Namespace string `json:"namespace"`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	ServiceAccount string `json:"serviceAccount"`
+}
+
+// SyncedBy reports whether the Tracker names namespace/account as its
+// sync.
+func (s *TrackerSpec) SyncedBy(namespace, account string) bool {
+	return s.Sync != nil && s.Sync.Namespace == namespace && s.Sync.ServiceAccount == account
 }
 
 // TrackerCredential names the Secret key holding the tracker token.

@@ -585,6 +585,28 @@ spec:
                       tracker's (docs/c4-sync.md, "What it writes").
                     type: object
                 type: object
+              sync:
+                description: |-
+                  Sync names the service account of the c4-sync that relays this
+                  Tracker's decisions (config/sync: c4-system/c4-sync). While a
+                  Tracker names it, the farm's certificate issuer certifies that
+                  account, and it signs each decision it relays as itself, naming the
+                  person (PEOPLE-KEYS-2 6.1); the HUD takes a relay's signed act only
+                  from the account its Tracker names. Unset, the relay signs nothing,
+                  as before.
+                properties:
+                  namespace:
+                    maxLength: 63
+                    minLength: 1
+                    type: string
+                  serviceAccount:
+                    maxLength: 253
+                    minLength: 1
+                    type: string
+                required:
+                - namespace
+                - serviceAccount
+                type: object
               verdictsIn:
                 additionalProperties:
                   type: string

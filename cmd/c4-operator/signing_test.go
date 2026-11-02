@@ -31,7 +31,12 @@ func TestIssuerCertifiesOnlyImporters(t *testing.T) {
 		Importers:  []c4v1.Importer{{Namespace: "show-a", ServiceAccount: "import-git"}, {Namespace: "show-a-plates", ServiceAccount: "ingest"}},
 	}}
 	other := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: "show-b"}, Spec: c4v1.ProjectSpec{Namespaces: []string{"show-b"}}}
-	r := fake.NewClientBuilder().WithScheme(scheme).WithObjects(show, other).Build()
+	// A Tracker names the account that relays its decisions; one that
+	// names none certifies no one.
+	flow := &c4v1.Tracker{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "flow"}, Spec: c4v1.TrackerSpec{Kind: "flow",
+		Sync: &c4v1.TrackerSync{Namespace: "c4-system", ServiceAccount: "c4-sync"}}}
+	plain := &c4v1.Tracker{ObjectMeta: metav1.ObjectMeta{Namespace: "show-b", Name: "gh"}, Spec: c4v1.TrackerSpec{Kind: "github"}}
+	r := fake.NewClientBuilder().WithScheme(scheme).WithObjects(show, other, flow, plain).Build()
 	sa := func(ns, name string) *auth.Identity {
 		return &auth.Identity{User: "system:serviceaccount:" + ns + ":" + name, Namespace: ns, Account: name}
 	}
@@ -56,6 +61,10 @@ func TestIssuerCertifiesOnlyImporters(t *testing.T) {
 		// A host runner is its own machine's service account in c4-hosts.
 		{id: sa("c4-hosts", "laptop-1"), want: provenance.RunnerIdentity("laptop-1"), life: time.Hour},
 		{id: sa("show-a", "laptop-1"), err: "is not an importer of a project"},
+		// c4-sync, while a Tracker names it as its sync; another account
+		// in its namespace is not
+		{id: sa("c4-system", "c4-sync"), want: provenance.ServiceAccountIdentity("c4-system", "c4-sync"), life: time.Hour},
+		{id: sa("c4-system", "c4-sync-other"), err: "or a Tracker's sync"},
 	} {
 		got, life, err := signerIdentity(ctx, r, c.id, "c4-system")
 		if c.err != "" {

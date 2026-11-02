@@ -15,6 +15,7 @@ import (
 	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -299,7 +300,9 @@ const hostsNamespace = "c4-hosts"
 // for a day; a host runner (c4-hosts/<node>) as runner/<node> for an
 // hour; a unit, on its own pod's token, as that unit's attempt for an
 // hour (unitIdentity); a workload as itself for an hour, and only if a
-// project names it among its importers. Anything else is refused.
+// project names it among its importers or a Tracker names it as its sync
+// (the relay that signs the decisions it carries, PEOPLE-KEYS-2 6.1).
+// Anything else is refused.
 func signerIdentity(ctx context.Context, projects client.Reader, id *auth.Identity, namespace string) (string, time.Duration, error) {
 	switch {
 	case id.Namespace == "":
@@ -334,7 +337,20 @@ func signerIdentity(ctx context.Context, projects client.Reader, id *auth.Identi
 			return provenance.ServiceAccountIdentity(id.Namespace, id.Account), time.Hour, nil
 		}
 	}
-	return "", 0, fmt.Errorf("%s is not an importer of a project: a project names the accounts that sign its imports and ingests (spec.importers)", id.User)
+	var trackers c4v1.TrackerList
+	err := projects.List(ctx, &trackers)
+	switch {
+	case meta.IsNoMatchError(err) || apierrors.IsNotFound(err):
+		// a farm without c4-sync has no Trackers to name a sync
+	case err != nil:
+		return "", 0, fmt.Errorf("reading the Trackers' syncs: %w", err)
+	}
+	for i := range trackers.Items {
+		if trackers.Items[i].Spec.SyncedBy(id.Namespace, id.Account) {
+			return provenance.ServiceAccountIdentity(id.Namespace, id.Account), time.Hour, nil
+		}
+	}
+	return "", 0, fmt.Errorf("%s is not an importer of a project or a Tracker's sync: a project names the accounts that sign its imports and ingests (spec.importers), a Tracker the account that relays its decisions (spec.sync)", id.User)
 }
 
 // unitIdentity is the identity of the unit whose pod a reviewed token is
