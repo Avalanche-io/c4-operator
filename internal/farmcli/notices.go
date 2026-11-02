@@ -1,6 +1,7 @@
 package farmcli
 
 import (
+	"bytes"
 	"context"
 	"crypto/x509"
 	"encoding/base64"
@@ -14,6 +15,9 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/Avalanche-io/c4"
+
+	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/keystore"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
@@ -39,6 +43,14 @@ type indexWatch struct {
 	// each one's record (a device record's providerKey), with the
 	// provider's own key ID.
 	ProviderKeys map[string]string `json:"providerKeys,omitempty"`
+	// Book is the last head of the farm book this machine checked, on a
+	// farm that keeps one (farmbook.CheckPage).
+	Book farmbook.LastHead `json:"book"`
+	// Seen are the devices the index booked that this machine has read,
+	// so a renewal is not a new device; Owner is the farm's owner key as
+	// the index books it, its first device enrolled on the installer.
+	Seen  map[string]bool `json:"seen,omitempty"`
+	Owner string          `json:"owner,omitempty"`
 }
 
 func watchPath(st keystore.Store) string { return filepath.Join(st.Dir, "index.json") }
@@ -140,13 +152,70 @@ func NewDevices(ctx context.Context, c *Client, st keystore.Store, cfg *people.C
 	if w.ProviderKeys == nil {
 		w.ProviderKeys = map[string]string{}
 	}
+	if w.Seen == nil {
+		w.Seen = map[string]bool{}
+	}
+	var entries []*people.Entry
+	if cfg.Order == people.OrderBook {
+		entries, err = readBook(ctx, c, roots, cfg.Farm, w)
+	} else {
+		entries, err = readIndex(ctx, c, roots, cfg.Farm, w)
+	}
+	if err != nil {
+		return nil, err
+	}
+	person := strings.TrimPrefix(mine.Identity, provenance.IdentityBase+"user/")
+	var out []DeviceNotice
+	// On the first run the devices before this machine's own are known:
+	// only those after it are new.
+	mineSeen := !first
+	for _, e := range entries {
+		switch {
+		case e.Kind == people.KindProviderKey && e.Record != "":
+			w.ProviderKeys[e.Record] = e.KeyID
+		case e.Kind != people.KindDevice:
+		case w.Seen[e.Device]:
+			// a renewal
+		default:
+			w.Seen[e.Device] = true
+			if w.Owner == "" && e.TouchFor == "" {
+				// the farm's owner key: the first device the installer
+				// token enrolled, by its record
+				if d, err := deviceRecord(ctx, c, roots, e.Record); err == nil && d.Evidence == schema.EvidenceInstaller && d.TouchFor == "" {
+					w.Owner = e.Device
+				}
+			}
+			switch {
+			case e.Device == mine.Device:
+				mineSeen = true
+			case e.Person == person && mineSeen:
+				out = append(out, checkDevice(ctx, c, roots, cfg, e, w.ProviderKeys, mine))
+			}
+		}
+	}
+	return out, saveWatch(st, w)
+}
+
+// readIndex reads the people's own index from where this machine stopped:
+// each entry hashed from what was served and checked against its ID, the
+// page against the head the issuer signed, and the head against the last
+// one seen.
+func readIndex(ctx context.Context, c *Client, roots *x509.CertPool, farm string, w *indexWatch) ([]*people.Entry, error) {
 	var page people.IndexPage
+	var raw rawEntries
 	for try := 0; ; try++ {
-		page = people.IndexPage{}
-		if err := c.Issuer(ctx, http.MethodGet, "/v1/people/index?from="+strconv.FormatInt(w.Position, 10), nil, &page); err != nil {
+		var b json.RawMessage
+		if err := c.Issuer(ctx, http.MethodGet, "/v1/people/index?from="+strconv.FormatInt(w.Position, 10), nil, &b); err != nil {
 			return nil, fmt.Errorf("the farm's people index: %w", err)
 		}
-		err := checkPage(&page, w, roots, cfg.Farm)
+		page, raw = people.IndexPage{}, rawEntries{}
+		if err := json.Unmarshal(b, &page); err != nil {
+			return nil, fmt.Errorf("the farm's people index: %w", err)
+		}
+		if err := json.Unmarshal(b, &raw); err != nil || len(raw.Entries) != len(page.Entries) {
+			return nil, fmt.Errorf("the farm's people index: its entries don't read: %v", err)
+		}
+		err := checkPage(&page, w, roots, farm)
 		if err == nil {
 			break
 		}
@@ -156,25 +225,75 @@ func NewDevices(ctx context.Context, c *Client, st keystore.Store, cfg *people.C
 			return nil, err
 		}
 	}
-	person := strings.TrimPrefix(mine.Identity, provenance.IdentityBase+"user/")
-	var out []DeviceNotice
-	for _, e := range page.Entries {
-		if e.Entry == nil {
+	var out []*people.Entry
+	for k, e := range raw.Entries {
+		if e.ID != page.Entries[k].ID {
+			return nil, fmt.Errorf("%w: entry %d's ID", ErrIndexRollback, k)
+		}
+		if len(e.Entry) == 0 || string(e.Entry) == "null" {
 			continue
 		}
-		switch {
-		case e.Entry.Kind == people.KindProviderKey && e.Entry.Record != "":
-			w.ProviderKeys[e.Entry.Record] = e.Entry.KeyID
-		case e.Entry.Kind == people.KindDevice && e.Entry.Person == person && e.Entry.Device != mine.Device &&
-			(!first || e.Entry.Position > mine.Position):
-			out = append(out, checkDevice(ctx, c, roots, cfg, e.Entry, w.ProviderKeys, mine))
+		// the entry is what its ID names, byte for byte as the issuer
+		// wrote it: a HUD that rewrote it is refused, not believed
+		canon, err := schema.Canonical(e.Entry)
+		if err != nil || c4.Identify(bytes.NewReader(canon)).String() != e.ID {
+			return nil, fmt.Errorf("%w: entry %.16s is not the entry its ID names", ErrIndexRollback, e.ID)
 		}
+		var pe people.Entry
+		if err := json.Unmarshal(e.Entry, &pe); err != nil {
+			return nil, err
+		}
+		out = append(out, &pe)
 	}
 	w.Position = page.Position
 	if page.Head != "" {
 		w.Head, w.HeadPosition = page.Head, page.Position
 	}
-	return out, saveWatch(st, w)
+	return out, nil
+}
+
+// rawEntries are an index page's entries as served, to hash.
+type rawEntries struct {
+	Entries []struct {
+		ID    string          `json:"id"`
+		Entry json.RawMessage `json:"entry"`
+	} `json:"entries"`
+}
+
+// readBook reads a farm book from the last head this machine checked, as
+// a verifier does (farmbook.CheckPage): every segment the queue's and this
+// farm's, following the last by number, link and time, every entry the
+// one its segment seals and hashing to its ID. It returns the people's
+// entries the book sealed since; pending ones count once sealed.
+func readBook(ctx context.Context, c *Client, roots *x509.CertPool, farm string, w *indexWatch) ([]*people.Entry, error) {
+	var out []*people.Entry
+	for {
+		var p farmbook.Page
+		if err := c.Do(ctx, http.MethodGet, "/book/farm?since="+strconv.FormatInt(w.Book.Position, 10), nil, &p); err != nil {
+			return nil, fmt.Errorf("the farm book: %w", err)
+		}
+		last, err := farmbook.CheckPage(farm, roots, w.Book, &p)
+		if errors.Is(err, farmbook.ErrRollback) {
+			return nil, fmt.Errorf("%w: %v", ErrIndexRollback, err)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("the farm book doesn't check: %w", err)
+		}
+		for _, pe := range p.Entries {
+			if len(pe.Entry) == 0 || string(pe.Entry) == "null" {
+				continue
+			}
+			var e people.Entry
+			if json.Unmarshal(pe.Entry, &e) != nil || e.Kind == "" {
+				continue
+			}
+			out = append(out, &e)
+		}
+		w.Book = last
+		if !p.More {
+			return out, nil
+		}
+	}
 }
 
 // farmRoots is the farm's CA, from this machine's own certificate chain,

@@ -50,6 +50,8 @@ func KeepKeys(ctx context.Context, c *Client, a KeepArgs) {
 	}
 	cfg, err := PeopleConfig(ctx, c)
 	if err != nil {
+		// silence is how a HUD hides a device: say what couldn't be read
+		say("devices   couldn't check for new devices of yours: %v\n", err)
 		return
 	}
 	if renew {
@@ -80,8 +82,13 @@ func KeepKeys(ctx context.Context, c *Client, a KeepArgs) {
 		}
 	}
 	ns, err := NewDevices(ctx, c, a.Store, cfg)
-	if errors.Is(err, ErrIndexRollback) {
+	switch {
+	case errors.Is(err, ErrIndexRollback):
 		say("devices   %v: the farm may be hiding a device of yours; ask its admin, and trust no new device until it is explained\n", err)
+		return
+	case err != nil:
+		// silence is how a HUD hides a device: any failure is said
+		say("devices   couldn't check for new devices of yours: %v\n", err)
 		return
 	}
 	for _, n := range ns {
