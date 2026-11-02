@@ -370,6 +370,12 @@ func TestPartyWriteGuard(t *testing.T) {
 			t.Errorf("%s: %d %v, want %d %q", c.name, code, out, c.code, c.says)
 		}
 	}
+	// open development viewers: anyone may say they are ines
+	p.s.DevViewersOpen = true
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", kestrel(), map[string]string{InstallerHeader: ""}); code != http.StatusForbidden || !says(out, "a development viewer is no one") {
+		t.Errorf("an open development viewer: %d %v", code, out)
+	}
+	p.s.DevViewersOpen = false
 	p.s.FarmBook, p.s.FarmBookReader = nil, nil
 	if code, out := p.call(t, http.MethodPost, "/api/v1/parties", "ines", kestrel(), nil); code != http.StatusNotImplemented || !says(out, "no farm book") {
 		t.Errorf("no farm book: %d %v", code, out)
