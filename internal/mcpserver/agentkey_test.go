@@ -23,6 +23,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/keystore"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/provtest"
@@ -44,8 +45,8 @@ func keyDir(t *testing.T) string {
 // refused.
 func TestAgentKeyMadeOnceInItsFile(t *testing.T) {
 	dir := keyDir(t)
-	keys := KeyFiles{Dir: dir}
-	k, err := keys.Key(Workload("claude-code"))
+	keys := keystore.Store{Dir: dir, FileOnly: true}
+	k, err := keys.Key(keystore.Workload("claude-code"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,14 +58,14 @@ func TestAgentKeyMadeOnceInItsFile(t *testing.T) {
 	if di, _ := os.Stat(dir); di.Mode().Perm() != 0o700 {
 		t.Errorf("the key directory's mode %v", di.Mode().Perm())
 	}
-	again, err := keys.Key(Workload("claude-code"))
+	again, err := keys.Key(keystore.Workload("claude-code"))
 	if err != nil || string(again.SPKI()) != string(k.SPKI()) {
 		t.Errorf("the key read again is another: %v", err)
 	}
-	if other, _ := keys.Key(Workload("reviewer")); other == nil || string(other.SPKI()) == string(k.SPKI()) {
+	if other, _ := keys.Key(keystore.Workload("reviewer")); other == nil || string(other.SPKI()) == string(k.SPKI()) {
 		t.Error("another agent shares the key")
 	}
-	for _, bad := range []Kind{Workload(""), Workload("../people"), Workload("a/b"), Workload(".hidden"), Workload(strings.Repeat("a", 65)), "device", "touch"} {
+	for _, bad := range []keystore.Kind{keystore.Workload(""), keystore.Workload("../people"), keystore.Workload("a/b"), keystore.Workload(".hidden"), keystore.Workload(strings.Repeat("a", 65))} {
 		if _, err := keys.Key(bad); err == nil {
 			t.Errorf("key %q is made", bad)
 		}
@@ -179,7 +180,7 @@ func TestAgentSignsItsControlsUnderItsGrant(t *testing.T) {
 	h := newAgentHUD(t)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
-	c := &Client{Base: srv.URL, Agent: "claude-code", Keys: KeyFiles{Dir: keyDir(t)}}
+	c := &Client{Base: srv.URL, Agent: "claude-code", Keys: keystore.Store{Dir: keyDir(t), FileOnly: true}}
 	ctx := context.Background()
 	if why := c.Connect(ctx); why != "" {
 		t.Fatalf("the first connection: %s", why)
@@ -246,7 +247,7 @@ func TestAgentWithoutAGrantSendsAsBefore(t *testing.T) {
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 	dir := keyDir(t)
-	c := &Client{Base: srv.URL, Agent: "claude-code", Keys: KeyFiles{Dir: dir}}
+	c := &Client{Base: srv.URL, Agent: "claude-code", Keys: keystore.Store{Dir: dir, FileOnly: true}}
 	ctx := context.Background()
 	if why := c.Connect(ctx); !strings.Contains(why, "no agent grant") {
 		t.Fatalf("the first connection without a grant: %q", why)
@@ -275,7 +276,7 @@ func TestServeConnectsTheAgentKey(t *testing.T) {
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 	dir := keyDir(t)
-	c := &Client{Base: srv.URL, Agent: "claude-code", Keys: KeyFiles{Dir: dir}}
+	c := &Client{Base: srv.URL, Agent: "claude-code", Keys: keystore.Store{Dir: dir, FileOnly: true}}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	_, st := mcp.NewInMemoryTransports()
@@ -331,7 +332,7 @@ func TestPlantedOrBrokenKeyFileRefused(t *testing.T) {
 		if err := plant(dir); err != nil {
 			t.Fatal(err)
 		}
-		if got, err := (KeyFiles{Dir: dir}).Key(Workload("claude-code")); err == nil || got != nil {
+		if got, err := (keystore.Store{Dir: dir, FileOnly: true}).Key(keystore.Workload("claude-code")); err == nil || got != nil {
 			t.Errorf("%s: used, %v", name, err)
 		}
 	}
@@ -344,15 +345,15 @@ func TestPlantedOrBrokenKeyFileRefused(t *testing.T) {
 	if err := os.WriteFile(path, pemb[:20], 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := (KeyFiles{Dir: dir}).Key(Workload("claude-code"))
-	var remade *KeyRemade
+	got, err := (keystore.Store{Dir: dir, FileOnly: true}).Key(keystore.Workload("claude-code"))
+	var remade *keystore.KeyRemade
 	if !errors.As(err, &remade) || got == nil || !strings.Contains(err.Error(), "needs a new grant") {
 		t.Fatalf("a truncated key file: %v, key %v", err, got != nil)
 	}
 	if b, _ := os.ReadFile(remade.Aside); string(b) != string(pemb[:20]) {
 		t.Error("the broken file wasn't kept aside")
 	}
-	if again, err := (KeyFiles{Dir: dir}).Key(Workload("claude-code")); err != nil || string(again.SPKI()) != string(got.SPKI()) {
+	if again, err := (keystore.Store{Dir: dir, FileOnly: true}).Key(keystore.Workload("claude-code")); err != nil || string(again.SPKI()) != string(got.SPKI()) {
 		t.Errorf("the new key isn't the one kept: %v", err)
 	}
 	// The server says so until a person grants the new key.
@@ -363,7 +364,7 @@ func TestPlantedOrBrokenKeyFileRefused(t *testing.T) {
 	dir2 := keyDir(t)
 	os.MkdirAll(dir2, 0o700)
 	os.WriteFile(filepath.Join(dir2, "workload-claude-code.key"), pemb[:20], 0o600)
-	c := &Client{Base: srv.URL, Agent: "claude-code", Keys: KeyFiles{Dir: dir2}}
+	c := &Client{Base: srv.URL, Agent: "claude-code", Keys: keystore.Store{Dir: dir2, FileOnly: true}}
 	if why := c.Connect(context.Background()); !strings.Contains(why, "a new key was made, which needs a new grant") {
 		t.Errorf("the server's answer after remaking the key: %q", why)
 	}
@@ -408,7 +409,7 @@ func TestReturnedCertificateCheckedBeforeUse(t *testing.T) {
 		h := newAgentHUD(t)
 		h.tamper = tamper
 		srv := httptest.NewServer(h)
-		c := &Client{Base: srv.URL, Agent: "claude-code", Keys: KeyFiles{Dir: keyDir(t)}}
+		c := &Client{Base: srv.URL, Agent: "claude-code", Keys: keystore.Store{Dir: keyDir(t), FileOnly: true}}
 		if why := c.Connect(context.Background()); !strings.Contains(why, "the issuer's certificate") {
 			t.Errorf("%s: certified: %q", name, why)
 		}

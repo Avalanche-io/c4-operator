@@ -748,7 +748,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 				name, _, _ := cfg.Resolve(cm.farm)
 				dir = filepath.Join(filepath.Dir(farmcli.ConfigPath()), name, "keys")
 			}
-			mc.Keys = mcpserver.KeyFiles{Dir: dir}
+			mc.Keys = keystore.Store{Dir: dir, FileOnly: os.Getenv("C4_KEYS") == "file"}
 		}
 		mcpserver.Version = version
 		return mcpserver.Serve(ctx, mc, &mcp.StdioTransport{})

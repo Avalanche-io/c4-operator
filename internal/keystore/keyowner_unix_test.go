@@ -1,6 +1,6 @@
 //go:build unix
 
-package mcpserver
+package keystore
 
 import (
 	"os"

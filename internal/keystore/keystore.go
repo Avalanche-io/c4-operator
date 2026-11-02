@@ -21,6 +21,8 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/schema"
@@ -43,6 +45,31 @@ const (
 // silent, and works behind a locked screen: in the Secure Enclave, usable
 // after the Mac's first unlock.
 func Workload(name string) Kind { return Kind("workload-" + name) }
+
+// validKind reports whether kind is one a store keeps: Device, Touch, or a
+// workload's, named so its file stays in the store's directory.
+func validKind(kind Kind) bool {
+	if kind == Device || kind == Touch {
+		return true
+	}
+	name, ok := strings.CutPrefix(string(kind), "workload-")
+	return ok && ValidName(name)
+}
+
+// ValidName reports whether name may name a workload's key: letters,
+// digits, '.', '_' and '-', not first, at most 64.
+func ValidName(name string) bool {
+	if name == "" || len(name) > 64 {
+		return false
+	}
+	for i, r := range name {
+		ok := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || i > 0 && strings.ContainsRune("._-", r)
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
 
 // SecureEnclave reports whether this build and machine keep keys in the
 // Secure Enclave.
@@ -81,11 +108,20 @@ type Store struct {
 // file. A key already made is used where it is; a store never moves a key
 // from one place to another.
 func (s Store) Key(kind Kind) (Key, error) {
-	if k, err := s.load(kind); err == nil || !errors.Is(err, os.ErrNotExist) {
-		return k, err
+	if !validKind(kind) {
+		return nil, fmt.Errorf("key %q: a device, touch or workload key, a workload's named with letters, digits, '.', '_' and '-', at most 64", kind)
 	}
 	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
 		return nil, err
+	}
+	// the directory is the person's own and 0700, so no one else puts a
+	// file in it between a check and a read
+	if err := private(s.Dir, true); err != nil {
+		return nil, err
+	}
+	var remade *KeyRemade
+	if k, err := s.load(kind); err == nil || !errors.Is(err, os.ErrNotExist) || errors.As(err, &remade) {
+		return k, err
 	}
 	var k Key
 	var err error
@@ -174,12 +210,12 @@ const (
 func (s Store) path(kind Kind, ext string) string { return filepath.Join(s.Dir, string(kind)+ext) }
 
 func (s Store) load(kind Kind) (Key, error) {
-	if b, err := os.ReadFile(s.path(kind, seExt)); err == nil {
+	if b, err := readPrivate(s.path(kind, seExt)); err == nil {
 		return loadSE(b)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	b, err := os.ReadFile(s.path(kind, fileExt))
+	b, err := readPrivate(s.path(kind, fileExt))
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +226,23 @@ func (s Store) load(kind Kind) (Key, error) {
 	if !s.FileOnly && (kind == Touch || seAvailable()) {
 		return nil, fmt.Errorf("%w: %s (remove it, or set C4_KEYS=file to keep keys in files)", ErrFileKey, s.path(kind, fileExt))
 	}
-	return loadFile(b)
+	k, lerr := loadFile(b)
+	if lerr == nil || !strings.HasPrefix(string(kind), "workload-") {
+		return k, lerr
+	}
+	// A workload's key cut short or corrupt: kept aside for the person to
+	// look at, and replaced by a new key, which the old grant doesn't name.
+	// A person's key is never remade here: its certificate names it.
+	path := s.path(kind, fileExt)
+	aside := fmt.Sprintf("%s.corrupt-%d", path, time.Now().Unix())
+	if err := os.Rename(path, aside); err != nil {
+		return nil, fmt.Errorf("the key file %s doesn't read as a key (%v), and can't be moved aside: %w", path, lerr, err)
+	}
+	nk, err := makeFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return nk, &KeyRemade{Path: path, Aside: aside, Cause: lerr}
 }
 
 // ErrFileKey means a key file was found where only the Secure Enclave

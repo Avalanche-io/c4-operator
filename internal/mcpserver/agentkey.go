@@ -3,23 +3,20 @@ package mcpserver
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Avalanche-io/c4-operator/internal/keystore"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
 	"github.com/Avalanche-io/c4-operator/schema"
@@ -34,222 +31,21 @@ import (
 // sends them as before, on the person's token, and the HUD records the
 // agent as the client's claim.
 
-// AgentKey is an agent's key on this machine, shaped as the keystore's
-// Key (K4): its public key (DER SubjectPublicKeyInfo), a signature in the
-// farm's one form (raw r||s, low S, over the SHA-256 of msg), and what
-// keeps it.
-type AgentKey interface {
-	SPKI() []byte
-	Sign(msg []byte) ([]byte, error)
-	Protection() string
-}
-
-// Kind is which key, as the keystore names it (K4's keystore.Kind).
-type Kind string
-
-// Workload is a workload's own key, named for what it signs as: the
-// keystore's Workload(name), the file workload-<name>.key.
-func Workload(name string) Kind { return Kind("workload-" + name) }
-
-// AgentKeys keeps keys on this machine, shaped as the keystore's Store
-// (K4): Key makes the key the first time it is asked for, and loads it
-// after. K4's keystore.Store replaces it, its Key(keystore.Workload(name))
-// reading the file KeyFiles writes.
+// AgentKeys keeps keys on this machine: the keystore's Store (K4), in the
+// farm's key directory (~/.c4/<farm>/keys), which an integrated agent's
+// sandbox denies to the agent itself (P6). Key(keystore.Workload(name))
+// makes the agent's key the first time it is asked for, and loads it
+// after: the directory the person's own and 0700, the key 0600, a planted,
+// symlinked or readable key refused, and a key file that doesn't read as a
+// key remade with *keystore.KeyRemade. Only the MCP server reads it.
 type AgentKeys interface {
-	Key(kind Kind) (AgentKey, error)
+	Key(kind keystore.Kind) (keystore.Key, error)
 }
-
-// KeyFiles keeps each key in a file in Dir, the farm's key directory
-// (~/.c4/<farm>/keys, K4's keystore.Store.Dir), which an integrated
-// agent's sandbox denies to the agent itself (P6): <kind>.key, a PKCS#8
-// P-256 key in PEM, mode 0600, in a directory of mode 0700, as the
-// keystore keeps a key file. Only the MCP server reads it.
-type KeyFiles struct{ Dir string }
-
-// Key reads the key of this kind, or makes it the first time. The
-// directory must be the person's own, 0700, and the file a regular file
-// of theirs, 0600: a key file planted there, a symlink, or one others can
-// read is refused, never used. A file that doesn't read as a key (a
-// write cut short) is moved aside and a new key made, which needs a new
-// grant: Key returns the new key with a *KeyRemade saying so.
-func (k KeyFiles) Key(kind Kind) (AgentKey, error) {
-	if k.Dir == "" {
-		return nil, errors.New("no directory for the agent's key")
-	}
-	name, ok := strings.CutPrefix(string(kind), "workload-")
-	if !ok || !validAgent(name) {
-		return nil, fmt.Errorf("key %q: a workload's, named with letters, digits, '.', '_' and '-', at most 64", kind)
-	}
-	if err := os.MkdirAll(k.Dir, 0o700); err != nil {
-		return nil, err
-	}
-	if err := private(k.Dir, true); err != nil {
-		return nil, err
-	}
-	path := filepath.Join(k.Dir, string(kind)+".key")
-	b, err := readPrivate(path)
-	switch {
-	case err == nil:
-		key, lerr := loadKeyFile(b)
-		if lerr == nil {
-			return key, nil
-		}
-		// Cut short or corrupt: kept aside for the person to look at, and
-		// replaced by a new key, which the old grant doesn't name.
-		aside := fmt.Sprintf("%s.corrupt-%d", path, time.Now().Unix())
-		if err := os.Rename(path, aside); err != nil {
-			return nil, fmt.Errorf("the agent's key file %s doesn't read as a key (%v), and can't be moved aside: %w", path, lerr, err)
-		}
-		nk, err := makeKeyFile(path)
-		if err != nil {
-			return nil, err
-		}
-		return nk, &KeyRemade{Path: path, Aside: aside, Cause: lerr}
-	case !errors.Is(err, os.ErrNotExist):
-		return nil, err
-	}
-	return makeKeyFile(path)
-}
-
-// KeyRemade says a key file didn't read as a key and a new key was made in
-// its place: the agent's grant named the old key, so a person grants the
-// new one (c4 farm integrate) before the agent signs again.
-type KeyRemade struct {
-	Path, Aside string
-	Cause       error
-}
-
-func (e *KeyRemade) Error() string {
-	return fmt.Sprintf("the agent's key file %s didn't read as a key (%v): it is kept as %s, and a new key was made, which needs a new grant: run c4 farm integrate", e.Path, e.Cause, e.Aside)
-}
-
-// private checks a key directory, or a key file, is the person's own and
-// only theirs: not a symlink, owned by this user, mode 0700 (a directory)
-// or 0600 (a file).
-func private(path string, dir bool) error {
-	fi, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	want, kind, what := os.FileMode(0o600), "key file", "regular file"
-	if dir {
-		want, kind, what = 0o700, "key directory", "directory"
-	}
-	if fi.Mode()&os.ModeSymlink != 0 {
-		what += ", but a symlink"
-	}
-	switch {
-	case dir != fi.IsDir() || !dir && !fi.Mode().IsRegular() || fi.Mode()&os.ModeSymlink != 0:
-		return fmt.Errorf("the agent's %s %s is not a %s: refused; a key lives in a file of the person's own", kind, path, what)
-	case fi.Mode().Perm() != want:
-		return fmt.Errorf("the agent's %s %s is mode %v, not %v: refused, since others may have read it (chmod %o, or remove the key and grant a new one)", kind, path, fi.Mode().Perm(), want, want)
-	}
-	return ownedByMe(path, fi)
-}
-
-// readPrivate reads a key file after checking it is private. Its
-// directory is checked first (Key): the person's own and 0700, so no one
-// else can put another file in its place between the check and the read.
-func readPrivate(path string) ([]byte, error) {
-	if err := private(path, false); err != nil {
-		return nil, err
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	return io.ReadAll(io.LimitReader(f, 64<<10))
-}
-
-// makeKeyFile makes a P-256 key in a new file at path, 0600, exclusively:
-// two servers starting at once keep the first key made.
-func makeKeyFile(path string) (AgentKey, error) {
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return nil, err
-	}
-	der, err := x509.MarshalPKCS8PrivateKey(key)
-	if err != nil {
-		return nil, err
-	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if errors.Is(err, os.ErrExist) {
-		b, err := readPrivate(path)
-		if err != nil {
-			return nil, err
-		}
-		return loadKeyFile(b)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if _, err := f.Write(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})); err != nil {
-		f.Close()
-		os.Remove(path)
-		return nil, err
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		os.Remove(path)
-		return nil, err
-	}
-	if err := f.Close(); err != nil {
-		return nil, err
-	}
-	return newFileKey(key)
-}
-
-func validAgent(a string) bool {
-	if a == "" || len(a) > 64 {
-		return false
-	}
-	for i, r := range a {
-		ok := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || i > 0 && strings.ContainsRune("._-", r)
-		if !ok {
-			return false
-		}
-	}
-	return true
-}
-
-func loadKeyFile(b []byte) (AgentKey, error) {
-	block, _ := pem.Decode(b)
-	if block == nil {
-		return nil, errors.New("the agent's key file holds no PEM key")
-	}
-	k, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-	if err != nil {
-		return nil, err
-	}
-	key, ok := k.(*ecdsa.PrivateKey)
-	if !ok || key.Curve != elliptic.P256() {
-		return nil, errors.New("the agent's key file holds no P-256 key")
-	}
-	return newFileKey(key)
-}
-
-type fileKey struct {
-	key  *ecdsa.PrivateKey
-	spki []byte
-}
-
-func newFileKey(key *ecdsa.PrivateKey) (AgentKey, error) {
-	spki, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
-	if err != nil {
-		return nil, err
-	}
-	return &fileKey{key: key, spki: spki}, nil
-}
-
-func (k *fileKey) SPKI() []byte                    { return k.spki }
-func (k *fileKey) Sign(msg []byte) ([]byte, error) { return provenance.SignP256(k.key, msg) }
-func (k *fileKey) Protection() string              { return schema.ProtectionFile }
 
 // agentID is the agent's key and its certificate, once the issuer gave one.
 type agentID struct {
 	mu   sync.Mutex
-	key  AgentKey
+	key  keystore.Key
 	cert *people.AgentCertified
 	got  time.Time
 	// note is what the server says until the agent is certified again: a
@@ -289,8 +85,8 @@ func (c *Client) agentCert(ctx context.Context, force bool) (*agentID, string) {
 	id.mu.Lock()
 	defer id.mu.Unlock()
 	if id.key == nil {
-		k, err := c.Keys.Key(Workload(c.Agent))
-		var remade *KeyRemade
+		k, err := c.Keys.Key(keystore.Workload(c.Agent))
+		var remade *keystore.KeyRemade
 		switch {
 		case errors.As(err, &remade) && k != nil:
 			// A new key: said in the log and in what the server answers
@@ -327,7 +123,7 @@ func (c *Client) agentCert(ctx context.Context, force bool) (*agentID, string) {
 
 // certify asks the people's issuer, at the HUD's origin, to certify key
 // for the agent.
-func (c *Client) certify(ctx context.Context, key AgentKey) (*people.AgentCertified, error) {
+func (c *Client) certify(ctx context.Context, key keystore.Key) (*people.AgentCertified, error) {
 	var cfg people.Config
 	if err := c.issuer(ctx, "GET", "/config", nil, &cfg); err != nil {
 		return nil, err
