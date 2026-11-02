@@ -53,7 +53,9 @@ func makeSE(path string, kind Kind) (Key, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := writePrivate(path, blob[:n]); err != nil {
+	// whole and exclusively, as a key file is: a blob another first run
+	// made first wins, and this key is never used
+	if err := publish(path, blob[:n]); err != nil {
 		return nil, err
 	}
 	return &seKey{blob: blob[:n], spki: spki}, nil

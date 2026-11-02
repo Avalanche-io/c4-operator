@@ -6,10 +6,14 @@ import (
 	"crypto/elliptic"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"math/big"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/schema"
@@ -149,22 +153,33 @@ func TestPlantedTouchKeyFileRefused(t *testing.T) {
 // Two first runs at once make one key: the second uses the first's.
 func TestFirstRunsAtOnceMakeOneKey(t *testing.T) {
 	s := Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
-	keys := make(chan string, 8)
+	type got struct {
+		spki string
+		err  error
+	}
+	keys := make(chan got, 8)
 	for range 8 {
 		go func() {
 			k, err := s.Key(Device)
 			if err != nil {
-				keys <- "error: " + err.Error()
+				keys <- got{err: err}
 				return
 			}
-			keys <- string(k.SPKI())
+			keys <- got{spki: string(k.SPKI())}
 		}()
 	}
-	first := <-keys
-	for range 7 {
-		if got := <-keys; got != first {
-			t.Fatalf("two keys, or %s", got)
+	seen := map[string]bool{}
+	for range 8 {
+		g := <-keys
+		if g.err != nil {
+			// a key half written, read by another first run
+			t.Errorf("a first run failed: %v", g.err)
+			continue
 		}
+		seen[g.spki] = true
+	}
+	if len(seen) > 1 {
+		t.Errorf("%d keys from 8 first runs", len(seen))
 	}
 }
 
@@ -188,4 +203,61 @@ func TestWriteFileReplacesASymlink(t *testing.T) {
 	if err != nil || fi.Mode()&os.ModeSymlink != 0 || fi.Mode().Perm() != 0o600 {
 		t.Errorf("the file: %v %v", err, fi.Mode())
 	}
+}
+
+// Two first runs in two processes make one key, whole: helper processes
+// of this test binary start together at a barrier and each makes the key.
+func TestFirstRunsInProcessesMakeOneKey(t *testing.T) {
+	if os.Getenv("C4_KEYSTORE_HELPER") != "" {
+		t.Skip("a helper")
+	}
+	dir := filepath.Join(t.TempDir(), "keys")
+	barrier := filepath.Join(t.TempDir(), "go")
+	var cmds []*exec.Cmd
+	var outs []*strings.Builder
+	for range 6 {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestHelperMakeKey$", "-test.count=1")
+		cmd.Env = append(os.Environ(), "C4_KEYSTORE_HELPER="+dir, "C4_KEYSTORE_BARRIER="+barrier)
+		out := &strings.Builder{}
+		cmd.Stdout, cmd.Stderr = out, out
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		cmds, outs = append(cmds, cmd), append(outs, out)
+	}
+	time.Sleep(200 * time.Millisecond)
+	os.WriteFile(barrier, nil, 0o600)
+	keys := map[string]bool{}
+	for k, cmd := range cmds {
+		if err := cmd.Wait(); err != nil {
+			t.Fatalf("helper %d: %v\n%s", k, err, outs[k])
+		}
+		for _, l := range strings.Split(outs[k].String(), "\n") {
+			if spki, ok := strings.CutPrefix(l, "spki "); ok {
+				keys[spki] = true
+			}
+		}
+	}
+	if len(keys) != 1 {
+		t.Errorf("%d keys from 6 processes: %v", len(keys), keys)
+	}
+}
+
+// TestHelperMakeKey is one process of TestFirstRunsInProcessesMakeOneKey.
+func TestHelperMakeKey(t *testing.T) {
+	dir := os.Getenv("C4_KEYSTORE_HELPER")
+	if dir == "" {
+		t.Skip("run by TestFirstRunsInProcessesMakeOneKey")
+	}
+	for {
+		if _, err := os.Stat(os.Getenv("C4_KEYSTORE_BARRIER")); err == nil {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	k, err := Store{Dir: dir, FileOnly: true}.Key(Device)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Printf("spki %x\n", k.SPKI())
 }

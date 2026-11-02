@@ -109,9 +109,8 @@ func (s Store) Key(kind Kind) (Key, error) {
 // at all: through a new file beside it, renamed over it, so a reader never
 // sees half of it and a symlink at path is replaced, never followed.
 func WriteFile(path string, data []byte) error {
-	tmp := fmt.Sprintf("%s.%d.tmp", path, os.Getpid())
-	os.Remove(tmp)
-	if err := writePrivate(tmp, data); err != nil {
+	tmp, err := tempPrivate(path, data)
+	if err != nil {
 		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {
@@ -119,6 +118,34 @@ func WriteFile(path string, data []byte) error {
 		return err
 	}
 	return nil
+}
+
+// publish puts data at path only if nothing is there, and only whole: it
+// is written and synced under a name of its own beside path, then linked
+// to path, which fails with fs.ErrExist where a file is already there. So
+// two first runs at once, in one process or two, make one key, and a
+// reader never sees a key half written.
+func publish(path string, data []byte) error {
+	tmp, err := tempPrivate(path, data)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp)
+	return os.Link(tmp, path)
+}
+
+// tempPrivate writes data to a new file of its own beside path, the
+// person's alone and synced, and answers its name.
+func tempPrivate(path string, data []byte) (string, error) {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	tmp := fmt.Sprintf("%s.%x.tmp", path, b)
+	if err := writePrivate(tmp, data); err != nil {
+		return "", err
+	}
+	return tmp, nil
 }
 
 // Has reports whether the store has a key of this kind.
@@ -182,6 +209,12 @@ func writePrivate(path string, data []byte) error {
 		os.Remove(path)
 		return err
 	}
+	// on the disk before anything relies on it
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(path)
+		return err
+	}
 	return f.Close()
 }
 
@@ -200,7 +233,7 @@ func makeFile(path string) (Key, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := writePrivate(path, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})); err != nil {
+	if err := publish(path, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})); err != nil {
 		return nil, err
 	}
 	return newFileKey(key)
