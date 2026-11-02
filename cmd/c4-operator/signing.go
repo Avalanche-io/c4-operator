@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -221,7 +222,36 @@ func workloadIssuer(s *signing, kube kubernetes.Interface, projects client.Reade
 			}
 		}
 		return signerIdentity(ctx, projects, id, namespace)
+	}, Syncs: func(ctx context.Context, identity string) ([]string, error) {
+		return trackerSyncs(ctx, projects, identity)
 	}}
+}
+
+// trackerSyncs are the Trackers that name a service account identity as
+// their sync (<namespace>/<tracker>), which its leaf names (SyncURN): the
+// only ones its relayed acts may be for. None for any other identity.
+func trackerSyncs(ctx context.Context, r client.Reader, identity string) ([]string, error) {
+	rest, ok := strings.CutPrefix(identity, provenance.IdentityBase+"sa/")
+	if !ok {
+		return nil, nil
+	}
+	ns, account, _ := strings.Cut(rest, "/")
+	var trackers c4v1.TrackerList
+	err := r.List(ctx, &trackers)
+	switch {
+	case meta.IsNoMatchError(err) || apierrors.IsNotFound(err):
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf("reading the Trackers' syncs: %w", err)
+	}
+	var out []string
+	for i := range trackers.Items {
+		if t := &trackers.Items[i]; t.Spec.SyncedBy(ns, account) {
+			out = append(out, t.Namespace+"/"+t.Name)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
 }
 
 // A unit has a key made and certified for each control it signs (an ask,

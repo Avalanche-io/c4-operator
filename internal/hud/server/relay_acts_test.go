@@ -95,7 +95,7 @@ func TestRelaySignsTheDecisionItCarries(t *testing.T) {
 		}
 		return &c
 	}
-	relay := f.Relay(t, "c4-system", "c4-sync", "flow", "dana")
+	relay := f.RelayFor(t, "c4-system", "c4-sync", "show-a", "flow", "dana")
 	sign := func(k *provtest.Key, c *schema.ActChain) string {
 		return base64.StdEncoding.EncodeToString(f.SignAct(t, k, provtest.Act{Subject: on, Act: "decide", Params: body, Chain: c, SignedAt: time.Now()}))
 	}
@@ -152,7 +152,7 @@ func TestRelaySignsTheDecisionItCarries(t *testing.T) {
 		t.Fatalf("the record cites %+v, custody %q, chain %+v", p.Act, p.Custody, p.Chain)
 	}
 
-	other := f.Relay(t, "c4-system", "another-sync", "flow", "dana")
+	other := f.RelayFor(t, "c4-system", "another-sync", "show-a", "flow", "dana")
 	for name, c := range map[string]struct {
 		act, says string
 	}{

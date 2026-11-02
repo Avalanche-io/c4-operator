@@ -190,7 +190,13 @@ type BindFunc func(ctx context.Context, identity string) (Bound, error)
 // Bound) is certified as Issue does, naming none, so its records are
 // labelled, not refused, until strict accountability (K8).
 func (ca *CA) IssueBound(pub ed25519.PublicKey, identity string, b Bound, ttl time.Duration, now time.Time) (*x509.Certificate, error) {
-	if b.ID == "" {
+	return ca.IssueBoundSync(pub, identity, b, nil, ttl, now)
+}
+
+// IssueBoundSync is IssueBound for a tracker's sync: the leaf also names
+// each Tracker that names it as its sync (SyncURN, <namespace>/<tracker>).
+func (ca *CA) IssueBoundSync(pub ed25519.PublicKey, identity string, b Bound, syncs []string, ttl time.Duration, now time.Time) (*x509.Certificate, error) {
+	if b.ID == "" && len(syncs) == 0 {
 		return ca.Issue(pub, identity, ttl, now)
 	}
 	if len(pub) != ed25519.PublicKeySize {
@@ -209,11 +215,25 @@ func (ca *CA) IssueBound(pub ed25519.PublicKey, identity string, b Bound, ttl ti
 	if !strings.HasPrefix(identity, IdentityBase) {
 		return nil, fmt.Errorf("identity %q is not under %s", identity, IdentityBase)
 	}
-	u, err := url.Parse(BindingURN + b.ID)
-	if err != nil {
-		return nil, err
+	if b.ID != "" {
+		u, err := url.Parse(BindingURN + b.ID)
+		if err != nil {
+			return nil, err
+		}
+		uris = append(uris, u)
 	}
-	return ca.issue(pub, identity, append(uris, u), ttl, now)
+	for _, t := range syncs {
+		ns, name, ok := strings.Cut(t, "/")
+		if !ok || ns == "" || name == "" || strings.Contains(name, "/") {
+			return nil, fmt.Errorf("a sync names a Tracker as <namespace>/<tracker>, not %q", t)
+		}
+		u, err := url.Parse(SyncURN + t)
+		if err != nil {
+			return nil, err
+		}
+		uris = append(uris, u)
+	}
+	return ca.issue(pub, identity, uris, ttl, now)
 }
 
 // IssueHostUnit certifies a host unit's Ed25519 key as identity (a unit's
@@ -344,6 +364,21 @@ func (s *Signer) Farm(ctx context.Context, now time.Time) (string, error) {
 	}
 	return FarmID(chain[len(chain)-1]), nil
 }
+
+// Leaf is the signer's current certificate, nil before its first.
+func (s *Signer) Leaf() *x509.Certificate {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.chain) == 0 {
+		return nil
+	}
+	return s.chain[0]
+}
+
+// Renew obtains a new key and certificate now, as the signer does at half
+// its certificate's life: for a leaf that must name something it was
+// certified without (a Tracker named its sync since).
+func (s *Signer) Renew(ctx context.Context) error { return s.renew(ctx) }
 
 // Identity is the identity this signer signs as.
 func (s *Signer) Identity() string {

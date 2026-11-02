@@ -187,3 +187,29 @@ func TestIssuerLimitsEachPod(t *testing.T) {
 		t.Fatal("refused after waiting")
 	}
 }
+
+// A sync's leaf names each Tracker that names it as its sync, and only
+// those (SyncURN): the only Trackers its relayed acts may be for. Any
+// other identity's names none.
+func TestSyncLeafNamesItsTrackers(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := c4v1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	sync := &c4v1.TrackerSync{Namespace: "c4-system", ServiceAccount: "c4-sync"}
+	r := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+		&c4v1.Tracker{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "flow"}, Spec: c4v1.TrackerSpec{Kind: "flow", Sync: sync}},
+		&c4v1.Tracker{ObjectMeta: metav1.ObjectMeta{Namespace: "show-b", Name: "kitsu"}, Spec: c4v1.TrackerSpec{Kind: "kitsu", Sync: sync}},
+		&c4v1.Tracker{ObjectMeta: metav1.ObjectMeta{Namespace: "show-b", Name: "gh"}, Spec: c4v1.TrackerSpec{Kind: "github"}},
+	).Build()
+	ctx := context.Background()
+	got, err := trackerSyncs(ctx, r, provenance.ServiceAccountIdentity("c4-system", "c4-sync"))
+	if err != nil || strings.Join(got, ",") != "show-a/flow,show-b/kitsu" {
+		t.Fatalf("c4-sync's Trackers: %v %v", got, err)
+	}
+	for _, id := range []string{provenance.ServiceAccountIdentity("show-a", "import-git"), provenance.NodeIdentity("w1")} {
+		if got, err := trackerSyncs(ctx, r, id); err != nil || len(got) != 0 {
+			t.Errorf("%s names %v (%v)", id, got, err)
+		}
+	}
+}

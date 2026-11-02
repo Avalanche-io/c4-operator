@@ -358,7 +358,18 @@ func TestDecideSignsTheRelayedDecision(t *testing.T) {
 		t.Fatal(err)
 	}
 	sync := provenance.ServiceAccountIdentity("c4-system", "c4-sync")
-	signer, err := provenance.NewSigner(ctx, provenance.LocalIssuer(ca, sync, time.Hour))
+	// the issuer names the Trackers that name the sync, as of each
+	// certificate: flow names it only from the second
+	issued := 0
+	signer, err := provenance.NewSigner(ctx, func(_ context.Context, pub ed25519.PublicKey) ([]*x509.Certificate, error) {
+		issued++
+		var syncs []string
+		if issued > 1 {
+			syncs = []string{"show-a/flow"}
+		}
+		leaf, err := ca.IssueBoundSync(pub, sync, provenance.Bound{}, syncs, time.Hour, time.Now())
+		return []*x509.Certificate{leaf, ca.Cert}, err
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,6 +392,10 @@ func TestDecideSignsTheRelayedDecision(t *testing.T) {
 		Confirmation: c4.Identify(strings.NewReader("dana confirms")).String(), SyncIdentity: sync}
 	if err := h.Decide(ctx, j, relay); err != nil {
 		t.Fatal(err)
+	}
+	// its first leaf named no Tracker: renewed once, it names flow
+	if issued != 2 {
+		t.Fatalf("certified %d times, want a renewal for the Tracker", issued)
 	}
 	data, err := base64.StdEncoding.DecodeString(got[0].act)
 	if err != nil || got[0].act == "" {
@@ -408,6 +423,7 @@ func TestDecideSignsTheRelayedDecision(t *testing.T) {
 		"a Tracker that names another sync": func(r *farm.Relay) { r.SyncIdentity = provenance.ServiceAccountIdentity("c4-system", "other") },
 		"a Tracker that names none":         func(r *farm.Relay) { r.SyncIdentity = "" },
 		"a job served without its UID":      func(r *farm.Relay) { r.JobUID = "" },
+		"a Tracker its leaf does not name":  func(r *farm.Relay) { r.Tracker = "kitsu" },
 	} {
 		r := relay
 		edit(&r)

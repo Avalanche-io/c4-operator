@@ -175,7 +175,7 @@ func TestActKindsThatNeedAPersonOrATouch(t *testing.T) {
 	f := provtest.NewFarm(t, time.Now())
 	agent := f.Agent(t, "assistant", "")
 	unit := f.Unit(t, "show-a", "sh040-light-v007", "3", provtest.JobUID, 1)
-	relay := f.Relay(t, "show-a", "flow-sync", "flow", "noor.k")
+	relay := f.RelayFor(t, "show-a", "flow-sync", "show-a", "flow", "noor.k")
 	dana := f.Person(t, "dana", true)
 	past := time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)
 	for _, c := range []struct {
@@ -537,6 +537,15 @@ func signerOf(t *testing.T, f *provtest.Farm, a *schema.Act) *provtest.Key {
 		unit, uid, _ := strings.Cut(parts[2], "@")
 		attempt, _ := strconv.Atoi(parts[3])
 		return f.Unit(t, parts[0], parts[1], unit, uid, attempt)
+	case "sa":
+		// a tracker's sync, certified as the sync of the act's Tracker in
+		// the namespace of what it is on, as the farm's issuer does
+		if by := a.Predicate.Chain.By; by.Tracker != "" && len(a.Subject) > 0 {
+			ns, account, _ := strings.Cut(rest, "/")
+			_, on, _ := strings.Cut(a.Subject[0].Name, ":")
+			subjectNS, _, _ := strings.Cut(on, "/")
+			return f.RelayFor(t, ns, account, subjectNS, by.Tracker, by.User)
+		}
 	}
 	return f.Part(t, signer)
 }

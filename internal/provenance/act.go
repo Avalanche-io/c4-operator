@@ -80,6 +80,12 @@ const (
 	// force for it when it was certified, by the C4 ID of the binding's
 	// record (DESIGN 3.3): a verifier follows it to the binding's owner.
 	BindingURN = "urn:c4:binding:"
+	// SyncURN names, on a tracker sync's leaf, each Tracker that names it
+	// as its sync (<namespace>/<tracker>) when it was certified: it signs
+	// only the decisions it relays for those (PEOPLE-KEYS-2 6.1), never an
+	// import or an ingest, and a deployment binding for sync/<tracker>
+	// matches it.
+	SyncURN = "urn:c4:sync:"
 )
 
 // LeafURIs are the URI SANs of a leaf: its identity, then its device or
@@ -114,6 +120,18 @@ func CertGrant(c *x509.Certificate) string { return certURN(c, GrantURN) }
 
 // CertRunner is the host runner (its Node) a host unit's leaf names, or "".
 func CertRunner(c *x509.Certificate) string { return certURN(c, RunnerURN) }
+
+// CertSyncs are the Trackers a sync's leaf names (<namespace>/<tracker>),
+// none for any other leaf.
+func CertSyncs(c *x509.Certificate) []string {
+	var out []string
+	for _, u := range c.URIs {
+		if t, ok := strings.CutPrefix(u.String(), SyncURN); ok {
+			out = append(out, t)
+		}
+	}
+	return out
+}
 
 // CertBinding is the deployment binding a leaf names, or "": none for a
 // leaf certified while no binding was in force for its identity.

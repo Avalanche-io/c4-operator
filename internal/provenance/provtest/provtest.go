@@ -173,6 +173,26 @@ func (f *Farm) Relay(t testing.TB, namespace, account, tracker, user string) *Ke
 	return k
 }
 
+// RelayFor is Relay certified as the sync of a Tracker (trackerNamespace/
+// tracker): its leaf names it (SyncURN), as the farm's issuer certifies a
+// sync that a Tracker names, so its relayed acts on that namespace's jobs
+// verify.
+func (f *Farm) RelayFor(t testing.TB, namespace, account, trackerNamespace, tracker, user string) *Key {
+	t.Helper()
+	pub, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := provenance.ServiceAccountIdentity(namespace, account)
+	leaf, err := f.CA.IssueBoundSync(pub, identity, provenance.Bound{}, []string{trackerNamespace + "/" + tracker}, time.Hour, f.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := &Key{Identity: identity, Ed25519: key, Chain: []*x509.Certificate{leaf, f.CA.Cert}}
+	k.by = schema.Actor{Tracker: tracker, User: user}
+	return k
+}
+
 // Part makes a farm part's Ed25519 key and leaf for identity, valid an
 // hour.
 func (f *Farm) Part(t testing.TB, identity string) *Key {
