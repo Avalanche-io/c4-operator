@@ -121,6 +121,12 @@ export async function c4id(bytes) {
   return 'c4' + s.padStart(88, '1');
 }
 
+// shortID: a device ID's short form, as the CLI prints it for a person to
+// compare across two screens: twelve characters in three groups of four,
+// skipping c4 and the character after it, which takes only a few values
+// (K4 item 5)
+export const shortID = (id) => `${id.slice(3, 7)} ${id.slice(7, 11)} ${id.slice(11, 15)}`;
+
 // pae: DSSE's pre-authentication encoding of a payload, the bytes signed
 export function pae(payloadType, payload) {
   const head = enc.encode(`DSSEv1 ${enc.encode(payloadType).length} ${payloadType} ${payload.length} `);

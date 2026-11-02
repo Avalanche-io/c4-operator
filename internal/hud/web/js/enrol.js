@@ -30,7 +30,7 @@
 //   - forgets a key the issuer says was removed or has lapsed, and makes a
 //     new one: a removed key never comes back
 
-import { b64url, unb64, canonical, signRaw, deviceKey, saveCertified, forgetKey, useSigner, signAct } from './act.js';
+import { b64url, unb64, canonical, signRaw, deviceKey, saveCertified, forgetKey, useSigner, signAct, shortID } from './act.js';
 
 export const ISSUER = '/issuer/v1/people';
 // renew this long before the leaf ends
@@ -277,7 +277,9 @@ function use(r, fresh) {
 
 // certified: keep what the issuer answered beside the key, and sign with it
 async function certified(c, renews) {
-  rec = await deps.saveCertified(cfg.farm, { ...c, person, renews });
+  // a renewal of a key a code enrolled is still that key: it keeps viaCode
+  const viaCode = c.viaCode || !!(rec.certified && rec.certified.viaCode && rec.certified.device === c.device);
+  rec = await deps.saveCertified(cfg.farm, { ...c, person, renews, viaCode });
   use(rec, true);
 }
 
@@ -375,7 +377,9 @@ async function renewNow() {
 // enrol: certify the key on whatever evidence this load has
 async function enrol(code) {
   try {
-    if (code) return await certified(await call('/browser', await enrolment(rec.key, request(cfg.farm, person, rec.spki), { code })), 'proof');
+    // a code from c4 farm open: the farm's machine countersigns this key
+    // once the person sees the same short ID here as there (viaCode)
+    if (code) return await certified({ ...(await call('/browser', await enrolment(rec.key, request(cfg.farm, person, rec.spki), { code }))), viaCode: true }, 'proof');
     if (!cfg.provider) return set({ state: 'open', device: rec.device });
     // try the silent round trip once a session: a provider that wants the
     // person to sign in leaves the Sign in button, not a loop
@@ -407,7 +411,11 @@ async function notices() {
     if (!raw) deps.local().setItem(seenKey(), JSON.stringify([...seen]));
     const fresh = list.filter((d) => !seen.has(d.device) && d.device !== status.device);
     const twice = list.filter((d) => (d.flags || []).length);
-    set({ notices: fresh.length || twice.length ? { fresh, twice } : null });
+    // a key a c4 farm open code enrolled, not yet countersigned: the page
+    // shows its short ID, computed here from its own key, to compare
+    const mine = list.find((d) => d.device === status.device);
+    const check = rec && rec.certified && rec.certified.viaCode && mine && !mine.countersigned;
+    set({ notices: fresh.length || twice.length ? { fresh, twice } : null, countersign: check ? shortID(rec.device) : null });
   } catch (e) {
     // the list is a courtesy here; the person's page reads it again
   }

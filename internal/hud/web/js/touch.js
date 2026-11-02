@@ -35,7 +35,7 @@
 // machine says of itself. The page then watches the people's index for
 // the approval, and the passkey signs its enrolment citing it.
 
-import { b64, b64url, unb64, canonical, c4id, hex, savePasskey, useToucher } from './act.js';
+import { b64, b64url, unb64, canonical, c4id, hex, savePasskey, useToucher, shortID } from './act.js';
 import * as enrol from './enrol.js';
 
 const enc = new TextEncoder();
@@ -70,11 +70,10 @@ export function where() {
 }
 
 // The command that approves a passkey on a one-person farm, at the farm's
-// machine, and the short form of a device ID both screens show, as the CLI
-// prints it: the ID's first eight characters after c4, in two groups of
-// four (K4 item 5)
+// machine, and the short form of a device ID both screens show (act.js
+// shortID, as the CLI prints it)
 export const APPROVE = 'c4 farm device approve';
-export const shortID = (id) => `${id.slice(2, 6)} ${id.slice(6, 10)}`;
+export { shortID };
 export const approveCommand = (pk) => `${APPROVE} ${pk.device}`;
 
 // begin: make this browser's passkey and send the person to the step-up

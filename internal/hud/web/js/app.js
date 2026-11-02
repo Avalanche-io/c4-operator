@@ -148,6 +148,9 @@ function topBar() {
 // deviceNotice: a device the person hasn't seen signed in as them, or one
 // of theirs seen from two places at once (enrol.js); their page says which
 const deviceNotice = () => {
+  // a key c4 farm open's code enrolled: the person compares its short ID
+  // with what the farm's machine shows before it countersigns
+  if (signing.countersign) return h('a', { class: 'device-notice', href: href('me'), title: 'Countersign it on the farm’s machine only if it shows this' }, `this browser’s key: ${signing.countersign}`);
   const n = signing.notices;
   if (!n) return null;
   const words = n.twice.length ? 'a device of yours was seen from two places' : n.fresh.length === 1 ? 'a new device signed in as you' : `${n.fresh.length} new devices signed in as you`;

@@ -91,6 +91,11 @@ func TestEmbeddedHUDEnrols(t *testing.T) {
 		if out["enrolled"] != "signing" || device == "" {
 			t.Fatalf("the browser did not enrol on its code: %v", out)
 		}
+		// the short ID the page shows is the one the CLI prints for the key the
+		// issuer certified: twelve characters, skipping c4 and the next
+		if want := device[3:7] + " " + device[7:11] + " " + device[11:15]; out["countersign"] != want {
+			t.Errorf("the page shows %v to compare, and the CLI prints %s", out["countersign"], want)
+		}
 		if out["renewed"] != "signing" || out["renewedExpires"] == out["expires"] {
 			t.Errorf("the browser did not renew on its own proof: %v", out)
 		}
@@ -207,6 +212,9 @@ if (went) {
   await enrol.start({ user: i.person });
 }
 Object.assign(out, { enrolled: enrol.status.state, device: enrol.status.device, expires: enrol.status.expires, message: enrol.status.message });
+// a code's browser shows its own key's short ID until the farm's machine
+// countersigns it (read from the device list, a moment after enrolling)
+if (i.code) { await new Promise((ok) => setTimeout(ok, 300)); out.countersign = enrol.status.countersign; }
 if (i.job) {
   act.learnJobs([i.job]);
   out.header = (await act.actHeaders(i.path, i.body))[act.ACT_HEADER] || '';

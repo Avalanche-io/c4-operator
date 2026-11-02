@@ -71,7 +71,7 @@ func TestEmbeddedHUDApprovesPasskey(t *testing.T) {
 	// the page shows the command and the short form to compare
 	var shown struct{ Command, Short, Device, State string }
 	json.Unmarshal([]byte(next()), &shown)
-	if shown.State != "approve" || shown.Command != "c4 farm device approve "+shown.Device || shown.Short != shown.Device[2:6]+" "+shown.Device[6:10] {
+	if shown.State != "approve" || shown.Command != "c4 farm device approve "+shown.Device || shown.Short != shown.Device[3:7]+" "+shown.Device[7:11]+" "+shown.Device[11:15] {
 		t.Fatalf("the page shows %+v", shown)
 	}
 

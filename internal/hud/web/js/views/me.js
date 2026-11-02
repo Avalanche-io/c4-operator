@@ -112,6 +112,9 @@ function thisBrowser() {
   const s = enrol.status;
   switch (s.state) {
     case 'signing': return h('p', null, `This browser signs your acts. Its key is certified until ${f.clock(s.expires)} and renews on its own.`,
+      s.countersign ? h('div', { class: 'touch-approve' },
+        h('p', null, 'The farm’s machine asks you to countersign this browser’s key. Do it only if it shows:'),
+        h('p', { class: 'short-id mono' }, s.countersign)) : null,
       s.seal === 'pending' ? h('span', { class: 'dim' }, ' Its enrolment isn’t sealed in the farm’s book yet: until it is, nothing outside the farm counts its acts.') : null,
       s.seal === 'unknown' ? h('span', { class: 'dim' }, ' The farm’s book hasn’t shown its enrolment sealed yet; look again later.') : null,
       s.seal === 'refused' ? h('span', { class: 't-fail' }, ' The farm’s book refused this enrolment, so its acts don’t count. ') : null,
