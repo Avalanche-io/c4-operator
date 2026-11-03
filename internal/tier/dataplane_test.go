@@ -25,6 +25,7 @@ var dataPlane = []string{
 	"internal/layer",
 	"internal/overlay",
 	"internal/capture",
+	"internal/checkout",
 }
 
 // The other packages of this module the data plane may import. They are
