@@ -49,6 +49,7 @@ func (fe *Fetcher) Fill(ctx context.Context, f *fill.Flight, project string, id 
 	var h hash.Hash
 	if fe.Verify {
 		h = sha512.New()
+		f.HoldLast()
 	}
 	stall := fe.Stall
 	if stall <= 0 {

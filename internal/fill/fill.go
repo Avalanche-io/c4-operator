@@ -127,6 +127,19 @@ type Flight struct {
 	err     error
 	notify  chan struct{} // closed and replaced when state changes
 	waiters int
+	// holdLast keeps an object's last byte from readers until the flight
+	// ends: a leader that verifies what it fetched sets it, so a reader
+	// can't receive a whole object, and a whole response, that then fails
+	// its hash. Such a reader's response ends one byte short instead.
+	holdLast bool
+}
+
+// HoldLast tells readers to wait for the flight to end before the
+// object's last byte. A leader that verifies the object calls it first.
+func (f *Flight) HoldLast() {
+	f.mu.Lock()
+	f.holdLast = true
+	f.mu.Unlock()
 }
 
 // Release ends one waiter's interest.
@@ -320,6 +333,9 @@ func (r *reader) Read(p []byte) (int, error) {
 		r.f.mu.Lock()
 		avail := r.f.written - r.off
 		done, err, ch := r.f.done, r.f.err, r.f.notify
+		if r.f.holdLast && (!done || err != nil) && r.f.size >= 0 && r.off+avail >= r.f.size {
+			avail = r.f.size - 1 - r.off
+		}
 		r.f.mu.Unlock()
 		if avail > 0 {
 			if int64(len(p)) > avail {

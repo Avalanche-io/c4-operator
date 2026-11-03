@@ -527,3 +527,40 @@ func TestStoreRefusalEndsTheFill(t *testing.T) {
 		t.Fatalf("a peer's refusal ended the fill: %d", resp.StatusCode)
 	}
 }
+
+// A waiter on a fill that verifies never receives a whole object that
+// then fails its hash: its response ends short of its length, which its
+// client sees as a failure. An object that verifies arrives whole.
+func TestVerifyingFillHoldsTheLastByte(t *testing.T) {
+	data := randomBytes(64 << 10)
+	id := c4.Identify(bytes.NewReader(data))
+	forged := append([]byte(nil), data...)
+	forged[len(forged)-1] ^= 0xff
+	for name, c := range map[string]struct {
+		served []byte
+		whole  bool
+	}{"forged": {forged, false}, "true": {data, true}} {
+		src := &fakeSource{name: "peer", kind: "peer", auth: true, data: c.served}
+		h := newHarness(t, fill.Limits{}, func(string, c4.ID) []Source { return []Source{src} })
+		h.srv.Fetcher.Verify = true
+		h.srv.Fetcher.MaxRounds = 1
+		req, _ := http.NewRequest(http.MethodGet, h.http.URL+"/"+id.String(), nil)
+		req.Header.Set(HeaderProject, "show")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			if c.whole {
+				t.Fatalf("%s: %v", name, err)
+			}
+			continue
+		}
+		body, rerr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		got := rerr == nil && resp.StatusCode == http.StatusOK && bytes.Equal(body, data)
+		if got != c.whole {
+			t.Fatalf("%s: status %d, %d bytes, read error %v", name, resp.StatusCode, len(body), rerr)
+		}
+		if !c.whole && rerr == nil && resp.StatusCode == http.StatusOK && len(body) == len(data) {
+			t.Fatalf("%s: a whole forged object was served", name)
+		}
+	}
+}
