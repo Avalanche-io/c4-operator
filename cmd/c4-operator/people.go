@@ -135,16 +135,6 @@ func passkeyRP(origin string) (*people.WebAuthnRP, error) {
 	return &people.WebAuthnRP{ID: strings.ToLower(u.Hostname()), Origin: u.Scheme + "://" + strings.ToLower(u.Host)}, nil
 }
 
-// farmAdmin reports whether a person is one of the farm owner's admins:
-// before ORGANIZATION's Parties and their purposes, the farm binding's
-// owner.
-func farmAdmin(reader client.Reader) func(ctx context.Context, person string) bool {
-	return func(ctx context.Context, person string) bool {
-		b := farmBinding(ctx, reader)
-		return b != nil && b.Spec.Owner == person
-	}
-}
-
 func farmOf(s *signing) string { return provenance.FarmID(s.ca.Cert) }
 
 // farmBinding is the farm binding, or nil.

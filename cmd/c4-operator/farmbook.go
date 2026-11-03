@@ -9,6 +9,7 @@ import (
 
 	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
@@ -79,12 +80,24 @@ func newFarmBook(ctx context.Context, s *signing, kube kubernetes.Interface, mgr
 	b.own = &farmbook.SecretSealer{Client: mgr.GetClient(), Namespace: signingNS}
 	b.reader = b.newReader()
 	b.sealer = &farmbook.Sealer{Farm: farm, Roots: s.pool, Store: b.store, Pointer: b.ptr, Own: b.own, Signer: s.queue, Every: every,
-		Log: ctrl.Log.WithName("farm-book"),
-		Checkers: func() []farmbook.Checker {
-			return []farmbook.Checker{&farmbook.ControlChecker{Farm: farm, Roots: s.pool, Store: b.store},
-				people.NewBookChecker(farm, s.pool, b.store).WithAdmin(farmAdmin(mgr.GetAPIReader()))}
-		}}
+		Log:      ctrl.Log.WithName("farm-book"),
+		Checkers: func() []farmbook.Checker { return b.checkers(mgr.GetAPIReader()) }}
 	return b, nil
+}
+
+// checkers are the seal's checkers: the control records', and the people's
+// rules with the farm owner's admins as the people's issuer has them, so an
+// admin's act the issuer takes, a Party admin's revoke included, the seal
+// takes too.
+func (b *farmBook) checkers(reader client.Reader) []farmbook.Checker {
+	return []farmbook.Checker{&farmbook.ControlChecker{Farm: b.farm, Roots: b.roots, Store: b.store},
+		people.NewBookChecker(b.farm, b.roots, b.store).WithAdmin(b.sealAdmin(reader))}
+}
+
+// sealAdmin is who the seal takes for the farm owner's admins: the people's
+// issuer's own (farmAdmins), with Parties the farm owner's Party's admins.
+func (b *farmBook) sealAdmin(reader client.Reader) func(ctx context.Context, person string) bool {
+	return farmAdmins(reader, b)
 }
 
 // newReader is a reader of the book in the manager: it reads the sealed

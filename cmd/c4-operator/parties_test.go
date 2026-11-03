@@ -280,3 +280,25 @@ func TestIssuerOneSubjectOnePerson(t *testing.T) {
 		t.Errorf("a subject in two people's sign-ins: holders %v, person %q", got, ins.Person(sso, "00u-shared"))
 	}
 }
+
+// The seal takes the farm owner's admins as the people's issuer does: with
+// Parties, those holding admin in the farm owner's Party, never the binding's
+// owner by that alone, so a Party admin's revoke the issuer books is sealed.
+func TestTheSealTakesTheIssuersAdmins(t *testing.T) {
+	ctx := context.Background()
+	r := newIssuerFarm(t, "kestrel", organisation("kestrel"), person("dana"))
+	r.bookControl(t, "make-party", farmbook.PartyKey("kestrel"), map[string]any{"name": "kestrel", "kind": "organisation", "firstAdmin": "dana"})
+	r.bookControl(t, "accept-admin", farmbook.MemberKey("kestrel", "dana"), map[string]any{"party": "kestrel", "member": "dana", "purposes": []string{"member", "admin"}})
+	seal, issuer := r.book.sealAdmin(r.reader), farmAdmins(r.reader, r.book)
+	for _, p := range []string{"dana", "kestrel", "lee"} {
+		if seal(ctx, p) != issuer(ctx, p) {
+			t.Errorf("%s: the seal takes them as an admin %v, the issuer %v", p, seal(ctx, p), issuer(ctx, p))
+		}
+	}
+	if !seal(ctx, "dana") || seal(ctx, "kestrel") {
+		t.Errorf("the seal's admins: dana %v (want true), kestrel, the binding's owner, %v", seal(ctx, "dana"), seal(ctx, "kestrel"))
+	}
+	if len(r.book.checkers(r.reader)) != 2 {
+		t.Error("the seal's checkers are the control records' and the people's")
+	}
+}
