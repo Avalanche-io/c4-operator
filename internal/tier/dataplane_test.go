@@ -1,8 +1,10 @@
 package tier
 
 import (
+	"errors"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -25,14 +27,15 @@ var dataPlane = []string{
 	"internal/capture",
 }
 
-// The data plane may reach only itself and these packages of this module.
-// membership is the one piece that knows Kubernetes, and only the node
-// daemon imports it; no data-plane package may.
+// The other packages of this module the data plane may import. They are
+// held to the same rule as the data plane. membership, the one storage
+// piece that knows Kubernetes, is not among them: only the node daemon
+// imports it.
 var dataPlaneMayImport = []string{
 	"internal/metrics",
 }
 
-// Third-party packages the data plane must never reach.
+// Packages the data plane must never reach, directly or through anything.
 var dataPlaneNever = []string{
 	"k8s.io/",
 	"sigs.k8s.io/", // controller-runtime among them
@@ -40,56 +43,130 @@ var dataPlaneNever = []string{
 
 // Every package of the data plane, on Linux and on macOS (overlay and
 // layer are Linux-only), reaches only the data plane and its allowed
-// packages of this module, and nothing of Kubernetes.
+// packages of this module, and nothing of Kubernetes by any path.
 func TestDataPlaneStaysApartFromTheFarm(t *testing.T) {
-	allowed, inDataPlane := map[string]bool{}, map[string]bool{}
-	for _, p := range dataPlane {
-		inDataPlane[module+p] = true
-	}
-	for _, p := range append(dataPlane, dataPlaneMayImport...) {
-		allowed[module+p] = true
-	}
+	checked := append(append([]string{}, dataPlane...), dataPlaneMayImport...)
 	for _, goos := range []string{"linux", "darwin"} {
 		args := []string{"list", "-deps", "-f", "{{.ImportPath}} {{join .Imports \" \"}}"}
-		for _, p := range dataPlane {
+		for _, p := range checked {
 			args = append(args, "../../"+p)
 		}
 		cmd := exec.Command("go", args...)
 		cmd.Env = append(os.Environ(), "GOOS="+goos)
 		out, err := cmd.Output()
 		if err != nil {
-			t.Skipf("go list (GOOS=%s): %v", goos, err)
-		}
-		reached := 0
-		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-			pkg, imports, _ := strings.Cut(line, " ")
-			// Only the edges leaving the data plane: a forbidden package is
-			// named where the data plane first imports it, not again for
-			// every package beneath it.
-			if !inDataPlane[pkg] {
-				continue
+			// The guard must never pass because it could not look.
+			var stderr []byte
+			if ee := (*exec.ExitError)(nil); errors.As(err, &ee) {
+				stderr = ee.Stderr
 			}
-			reached++
-			for _, imp := range strings.Fields(imports) {
-				if forbidden(imp, allowed) {
-					t.Errorf("GOOS=%s: %s imports %s", goos, pkg, imp)
-				}
-			}
+			t.Fatalf("GOOS=%s: go list: %v\n%s", goos, err, stderr)
 		}
-		if reached != len(dataPlane) {
-			t.Fatalf("GOOS=%s: go list listed %d of the data plane's %d packages", goos, reached, len(dataPlane))
+		for _, v := range dataPlaneViolations(string(out), checked) {
+			t.Errorf("GOOS=%s: %s", goos, v)
 		}
 	}
 }
 
-func forbidden(imp string, allowed map[string]bool) bool {
-	if strings.HasPrefix(imp, module) {
-		return !allowed[imp]
-	}
-	for _, p := range dataPlaneNever {
-		if strings.HasPrefix(imp, p) {
-			return true
+// dataPlaneViolations reads a `go list -deps` listing (each line a package
+// then its imports) and names each way the checked packages leave the data
+// plane: an import of this module outside the checked set, or any path to
+// a dataPlaneNever package, named by the checked package's import that
+// leads there.
+func dataPlaneViolations(listing string, checked []string) []string {
+	imports := map[string][]string{}
+	for _, line := range strings.Split(strings.TrimSpace(listing), "\n") {
+		f := strings.Fields(line)
+		if len(f) > 0 {
+			imports[f[0]] = f[1:]
 		}
 	}
-	return false
+	allowed := map[string]bool{}
+	for _, p := range checked {
+		allowed[module+p] = true
+	}
+	var out []string
+	for _, p := range checked {
+		if _, ok := imports[module+p]; !ok {
+			out = append(out, "go list did not list "+module+p)
+		}
+	}
+	// reaches gives a never-package the import reaches, or "".
+	memo := map[string]string{}
+	var reaches func(p string) string
+	reaches = func(p string) string {
+		if r, ok := memo[p]; ok {
+			return r
+		}
+		memo[p] = "" // Go has no import cycles; this only stops a malformed listing
+		for _, n := range dataPlaneNever {
+			if strings.HasPrefix(p, n) {
+				memo[p] = p
+				return p
+			}
+		}
+		for _, imp := range imports[p] {
+			if r := reaches(imp); r != "" {
+				memo[p] = r
+				return r
+			}
+		}
+		return ""
+	}
+	for _, p := range checked {
+		for _, imp := range imports[module+p] {
+			switch {
+			case strings.HasPrefix(imp, module) && !allowed[imp]:
+				out = append(out, module+p+" imports "+imp)
+			case strings.HasPrefix(imp, module):
+				// checked in its own right
+			default:
+				if r := reaches(imp); r == imp {
+					out = append(out, module+p+" imports "+imp)
+				} else if r != "" {
+					out = append(out, module+p+" imports "+imp+", which reaches "+r)
+				}
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// The check itself, on listings made up to break each rule.
+func TestDataPlaneViolations(t *testing.T) {
+	m := module
+	checked := []string{"internal/tier", "internal/metrics"}
+	cases := []struct {
+		name, listing string
+		want          []string
+	}{
+		{"clean",
+			m + "internal/tier " + m + "internal/metrics fmt\n" + m + "internal/metrics github.com/prometheus/client_golang/prometheus\ngithub.com/prometheus/client_golang/prometheus\nfmt",
+			nil},
+		{"the farm, from the data plane",
+			m + "internal/tier " + m + "internal/hud\n" + m + "internal/metrics\n" + m + "internal/hud",
+			[]string{m + "internal/tier imports " + m + "internal/hud"}},
+		{"the farm, from an allowed package",
+			m + "internal/tier " + m + "internal/metrics\n" + m + "internal/metrics " + m + "internal/hud\n" + m + "internal/hud",
+			[]string{m + "internal/metrics imports " + m + "internal/hud"}},
+		{"Kubernetes, directly",
+			m + "internal/tier k8s.io/api/core/v1\n" + m + "internal/metrics\nk8s.io/api/core/v1",
+			[]string{m + "internal/tier imports k8s.io/api/core/v1"}},
+		{"Kubernetes, from an allowed package",
+			m + "internal/tier " + m + "internal/metrics\n" + m + "internal/metrics sigs.k8s.io/controller-runtime\nsigs.k8s.io/controller-runtime",
+			[]string{m + "internal/metrics imports sigs.k8s.io/controller-runtime"}},
+		{"Kubernetes, through a third party",
+			m + "internal/tier example.com/a\n" + m + "internal/metrics\nexample.com/a example.com/b\nexample.com/b k8s.io/client-go/kubernetes\nk8s.io/client-go/kubernetes",
+			[]string{m + "internal/tier imports example.com/a, which reaches k8s.io/client-go/kubernetes"}},
+		{"a checked package go list did not list",
+			m + "internal/tier",
+			[]string{"go list did not list " + m + "internal/metrics"}},
+	}
+	for _, c := range cases {
+		got := dataPlaneViolations(c.listing, checked)
+		if strings.Join(got, "\n") != strings.Join(c.want, "\n") {
+			t.Errorf("%s:\n got %q\nwant %q", c.name, got, c.want)
+		}
+	}
 }
