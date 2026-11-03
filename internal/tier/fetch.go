@@ -85,7 +85,7 @@ func (fe *Fetcher) Fill(ctx context.Context, f *fill.Flight, project string, id 
 			case errors.Is(err, ErrBusy):
 			case errors.Is(err, errCorrupt):
 				return err
-			case Unreachable(err):
+			case Unreachable(err), errors.Is(err, errMisplaced):
 				fe.Breakers.Fail(s.Name())
 			}
 			if missing {
@@ -111,6 +111,8 @@ func (fe *Fetcher) Fill(ctx context.Context, f *fill.Flight, project string, id 
 
 var errCorrupt = errors.New("upstream bytes do not hash to the requested ID")
 
+var errMisplaced = errors.New("upstream answered a range it wasn't asked for")
+
 // try reads from one source. done means the object is complete.
 func (fe *Fetcher) try(ctx context.Context, f *fill.Flight, project string, id c4.ID, s Source, h hash.Hash, stall time.Duration) (done, moved bool, err error) {
 	off := f.Written()
@@ -118,6 +120,14 @@ func (fe *Fetcher) try(ctx context.Context, f *fill.Flight, project string, id c
 	if err != nil {
 		metrics.TierUpstream.WithLabelValues(fe.Tier, s.Kind(), resultOf(err)).Inc()
 		return false, false, err
+	}
+	if start != off && start != 0 {
+		// Bytes from somewhere it wasn't asked: writing them at 0 would
+		// make another object under this one's ID. A failure of this
+		// source, not a restart.
+		body.Close()
+		metrics.TierUpstream.WithLabelValues(fe.Tier, s.Kind(), "misplaced").Inc()
+		return false, false, fmt.Errorf("%w: %s answered from offset %d, asked for %d", errMisplaced, s.Name(), start, off)
 	}
 	if start != off {
 		// The source restarted the object; so do we.

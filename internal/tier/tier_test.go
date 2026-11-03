@@ -439,3 +439,43 @@ func TestIngestComputesTheKey(t *testing.T) {
 		t.Fatal("ingested object not cached")
 	}
 }
+
+// misplacedSource answers every read with a 206 that starts somewhere it
+// wasn't asked to: a broken or hostile upstream.
+type misplacedSource struct{ data []byte }
+
+func (s *misplacedSource) Name() string        { return "misplaced" }
+func (s *misplacedSource) Kind() string        { return "peer" }
+func (s *misplacedSource) Authoritative() bool { return false }
+func (s *misplacedSource) Get(_ context.Context, _ string, _ c4.ID, offset int64) (io.ReadCloser, int64, int64, error) {
+	start := offset + 7
+	return io.NopCloser(bytes.NewReader(s.data[start:])), int64(len(s.data)), start, nil
+}
+
+// A source whose 206 starts neither where it was asked nor at 0 is a
+// failure of that source, never a restart: its bytes are not written at
+// offset 0, so the object the tier serves and caches is the object asked
+// for, even with verification off.
+func TestMisplacedRangeIsNotTheObject(t *testing.T) {
+	data := randomBytes(4096)
+	id := c4.Identify(bytes.NewReader(data))
+	honest := &fakeSource{name: "store", kind: "store", auth: true, data: data}
+	h := newHarness(t, fill.Limits{}, func(string, c4.ID) []Source {
+		return []Source{&misplacedSource{data: data}, honest}
+	})
+	resp, body := h.get(t, id, 0)
+	if resp.StatusCode != http.StatusOK || !bytes.Equal(body, data) {
+		t.Fatalf("served %d: %d bytes, the object's %v", resp.StatusCode, len(body), bytes.Equal(body, data))
+	}
+	cache, _ := h.caches.Partition("p-show")
+	for i := 0; !cache.Has(id); i++ {
+		if i > 200 {
+			t.Fatal("never cached")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	got, _ := cache.ReadAll(id)
+	if c4.Identify(bytes.NewReader(got)) != id {
+		t.Fatal("the cache holds other bytes under the object's ID")
+	}
+}
