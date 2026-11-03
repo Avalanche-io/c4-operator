@@ -157,6 +157,14 @@ func (n *NFS) Start() error {
 	if err != nil {
 		return err
 	}
+	// Any symlink target, because absnfs's alternative refuses every
+	// absolute target and every ".." component, even "../go.mod" inside the
+	// workspace, which repositories and package managers make routinely.
+	// The server stores a target as text and never follows it out (see
+	// Mount). The client does: on this machine's mount, an absolute or
+	// climbing target resolves against this machine's own disk, with the
+	// agent's own permissions. So a workspace confines an agent on this
+	// machine only if the agent's own process is sandboxed.
 	handler, err := absnfs.New(sw, absnfs.ExportOptions{AllowAnySymlinkTarget: true})
 	if err != nil {
 		return err
