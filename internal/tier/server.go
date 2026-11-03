@@ -35,6 +35,11 @@ type Server struct {
 	Caches  *objcache.Set
 	Fills   *fill.Group
 	Fetcher *Fetcher
+	// VerifyFill, if set, says whether fills for a project hash what they
+	// fetch (the project's verifyFill), whoever's request starts them: a
+	// peer's request must not start a fill that skips the check the
+	// project asked for, which the project's own requests may then join.
+	VerifyFill func(project string) bool
 	// Authorize is nil only in tests.
 	Authorize Authorizer
 	// Partition maps a project to its cache partition, and refuses
@@ -198,7 +203,13 @@ func (s *Server) run(f *fill.Flight, project string, id c4.ID, cache *objcache.C
 	defer cancel()
 	metrics.TierFills.WithLabelValues(s.Tier).Inc()
 	defer metrics.TierFills.WithLabelValues(s.Tier).Dec()
-	if err := s.Fetcher.Fill(ctx, f, project, id, route); err != nil {
+	fe := s.Fetcher
+	if !fe.Verify && s.VerifyFill != nil && s.VerifyFill(project) {
+		v := *fe
+		v.Verify = true
+		fe = &v
+	}
+	if err := fe.Fill(ctx, f, project, id, route); err != nil {
 		s.Log.V(1).Info("fill failed", "id", id.String(), "project", project, "err", err.Error())
 		f.Fail(err)
 		return

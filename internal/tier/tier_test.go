@@ -564,3 +564,25 @@ func TestVerifyingFillHoldsTheLastByte(t *testing.T) {
 		}
 	}
 }
+
+// A fill started for a project that verifies its fills hashes what it
+// fetches, whoever asked: a forged object is never served or cached.
+func TestFillsVerifyForProjectsThatAsk(t *testing.T) {
+	data := randomBytes(4096)
+	id := c4.Identify(bytes.NewReader(data))
+	forged := append([]byte(nil), data...)
+	forged[0] ^= 0xff
+	src := &fakeSource{name: "peer", kind: "peer", data: forged}
+	h := newHarness(t, fill.Limits{}, func(string, c4.ID) []Source { return []Source{src} })
+	h.srv.Fetcher.MaxRounds = 1
+	h.srv.VerifyFill = func(project string) bool { return project == "show" }
+	resp, body := h.get(t, id, 0)
+	if resp.StatusCode == http.StatusOK && bytes.Equal(body, forged) {
+		t.Fatal("a forged object was served for a project that verifies")
+	}
+	time.Sleep(50 * time.Millisecond)
+	cache, _ := h.caches.Partition("p-show")
+	if cache.Has(id) {
+		t.Fatal("a forged object was cached")
+	}
+}
