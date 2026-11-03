@@ -233,6 +233,15 @@ func (n *NFS) Mount(_ context.Context, v *view.View, target string) (*Workspace,
 		os.RemoveAll(upperDir)
 		return nil, err
 	}
+	// The union is also what keeps a workspace's paths inside it. basefs
+	// follows a symlink already in its folder out of it, and checks a
+	// symlink's target only where the symlink is made, so a view's own
+	// symlink, or one an agent makes and then moves, can point out.
+	// unionfs resolves a path one component at a time and won't go through
+	// a symlink, so the export never reaches the far side. Don't serve a
+	// basefs directly, or put anything that resolves whole paths above the
+	// layers, until basefs refuses on its own; TestNFSSymlinkStaysInTheWorkspace
+	// guards this.
 	layers := []unionfs.Option{unionfs.WithWritableLayer(upper)}
 	sidecar, err := n.indexSidecar(v, lower)
 	if err != nil {
