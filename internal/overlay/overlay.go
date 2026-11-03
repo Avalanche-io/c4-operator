@@ -9,6 +9,8 @@
 // format that capture understands. Mount and Walk need Linux.
 package overlay
 
+import "github.com/Avalanche-io/c4"
+
 // Entry is one thing a container left in its upper directory.
 type Entry struct {
 	Path    string // relative, slash-separated; directories end in "/"
@@ -19,6 +21,10 @@ type Entry struct {
 	Target  string // symlink target
 	Size    int64
 	Unusual string // a device, socket or fifo: recorded, not captured
+	// ID, on a File with no Full, is the content it already has: a
+	// change of metadata alone (the exec bit), whose bytes stayed in a
+	// lower and are already stored. Capture neither hashes nor uploads it.
+	ID c4.ID
 }
 
 // EntryKind classifies upper entries.

@@ -183,3 +183,51 @@ func TestCaptureWithoutWalkReadsOverlay(t *testing.T) {
 		t.Fatal("captured an overlay upper off Linux")
 	}
 }
+
+// A change of the exec bit alone, whose bytes stayed in a lower, is
+// captured from the parent's own C4 ID: nothing is hashed or uploaded, and
+// it works when this machine's cache never held those bytes.
+func TestMetadataOnlyChangeNeedsNoBytes(t *testing.T) {
+	root := t.TempDir()
+	set, err := objcache.OpenSet(filepath.Join(root, "cache"), objcache.Options{Budget: 1 << 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache, _ := set.Partition("p-show")
+	sink := &storeSink{objs: map[c4.ID][]byte{}}
+	src := filepath.Join(root, "src")
+	writeTree(t, src, map[string]string{"tool.sh": "#!/bin/sh\n", "README.md": "readme"})
+	v, err := view.ScanDir(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The content is in the store only; the records are readable.
+	for _, f := range v.Files {
+		data, _ := os.ReadFile(filepath.Join(src, f.Path))
+		sink.PutBytes(context.Background(), "", f.ID, data)
+	}
+	for _, r := range v.Records() {
+		cache.Put(r.ID, r.Data)
+	}
+	var tool view.File
+	for _, f := range v.Files {
+		if f.Path == "tool.sh" {
+			tool = f
+		}
+	}
+	os.Chmod(filepath.Join(src, "tool.sh"), 0o755)
+	want, _ := view.ScanDir(src)
+	res, err := Run(context.Background(), Input{
+		Project: "show", Parent: v.ID, Upper: t.TempDir(), Cache: cache, Sink: sink, Workers: 1,
+		Walk: func(string) ([]overlay.Entry, error) {
+			return []overlay.Entry{{Path: "tool.sh", Kind: overlay.File, Size: tool.Size, Exec: true, ID: tool.ID}}, nil
+		},
+		Records: view.RecordFunc(func(_ context.Context, id c4.ID) ([]byte, error) { return cache.ReadAll(id) }),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Output != want.ID || res.Modified != 1 || res.Hashed != 0 || res.Uploaded != 0 || res.Reused != 0 {
+		t.Fatalf("output %s (want %s), modified %d, hashed %d, uploaded %d, reused %d", res.Output, want.ID, res.Modified, res.Hashed, res.Uploaded, res.Reused)
+	}
+}

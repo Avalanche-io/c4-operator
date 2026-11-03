@@ -99,6 +99,11 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 		case overlay.Symlink:
 			edits = append(edits, view.Edit{Path: e.Path, Entry: view.SymlinkEntry("", e.Target)})
 		case overlay.File:
+			if e.Full == "" && !e.ID.IsNil() {
+				// Metadata only: the bytes are the parent's, already stored.
+				edits = append(edits, view.Edit{Path: e.Path, Entry: view.FileEntry("", e.Size, e.ID, e.Exec)})
+				continue
+			}
 			files = append(files, e)
 		default:
 			res.Unusual = append(res.Unusual, e.Path+": "+e.Unusual)
@@ -136,10 +141,14 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 	// upper, so later stages on this node read them without a fetch) and
 	// write them to the store.
 	changed := map[c4.ID]bool{}
+	written := 0 // changed files whose bytes are in the upper
 	for _, f := range applied.Files {
-		changed[f.ID] = true
+		if _, ok := paths[f.ID]; ok {
+			changed[f.ID] = true
+			written++
+		}
 	}
-	res.Reused = len(files) - len(applied.Files)
+	res.Reused = len(files) - written
 	if err := upload(ctx, in, changed, paths, res); err != nil {
 		return nil, err
 	}
