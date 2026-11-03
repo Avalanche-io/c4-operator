@@ -489,7 +489,7 @@ func memberWords(server string, d Decider) string {
 		return ""
 	}
 	if rec == "" {
-		return fmt.Sprintf("; a member of %s by the studio's group c4:party:%s", name, name)
+		return fmt.Sprintf("; a member of %s as their own party", name)
 	}
 	return fmt.Sprintf("; a member of %s holding member (record %s)", name, shortID(rec))
 }
