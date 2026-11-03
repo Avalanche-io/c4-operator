@@ -136,10 +136,21 @@ func (r *Reviewer) Review(ctx context.Context, token, audience string) (*Identit
 
 // TierAuthorizer admits requests whose bearer token belongs to one of the
 // allowed service accounts ("namespace/name").
+// An entry may end in ":METHOD,METHOD" to allow that account only those
+// methods ("c4-system/c4-manager:GET,HEAD,POST"); without it, any.
 func (r *Reviewer) TierAuthorizer(allowed ...string) func(*http.Request) (string, int, error) {
-	ok := map[string]bool{}
+	// account -> the methods it may use; nil: any.
+	ok := map[string]map[string]bool{}
 	for _, a := range allowed {
-		ok[a] = true
+		account, methods, limited := strings.Cut(a, ":")
+		var m map[string]bool
+		if limited {
+			m = map[string]bool{}
+			for _, x := range strings.Split(methods, ",") {
+				m[x] = true
+			}
+		}
+		ok[account] = m
 	}
 	return func(req *http.Request) (string, int, error) {
 		token, found := strings.CutPrefix(req.Header.Get("Authorization"), "Bearer ")
@@ -151,9 +162,14 @@ func (r *Reviewer) TierAuthorizer(allowed ...string) func(*http.Request) (string
 		if err != nil {
 			return "", http.StatusUnauthorized, err
 		}
-		if !ok[id.Namespace+"/"+id.Account] {
+		methods, found := ok[id.Namespace+"/"+id.Account]
+		if !found {
 			metrics.TierAuth.WithLabelValues(r.Tier, "denied").Inc()
 			return id.User, http.StatusForbidden, fmt.Errorf("%s may not use the tier API", id.User)
+		}
+		if methods != nil && !methods[req.Method] {
+			metrics.TierAuth.WithLabelValues(r.Tier, "denied").Inc()
+			return id.User, http.StatusForbidden, fmt.Errorf("%s may not %s on the tier API", id.User, req.Method)
 		}
 		return id.User, 0, nil
 	}

@@ -122,11 +122,12 @@ func runRegional(args []string) error {
 		}
 		ns := *namespace
 		rev := &auth.Reviewer{Client: cs, Tier: "regional"}
-		// The node daemons, and the manager (which also serves the HUD).
-		// No pod runs as c4-hud: the HUD's ClusterRole is bound to
-		// c4-manager, so admitting that account only left a way in for
-		// whoever could create it.
-		srv.Authorize = rev.TierAuthorizer(ns+"/c4-node", ns+"/c4-manager")
+		// The node daemons read and write (a unit's capture uploads
+		// through them); the manager, which also serves the HUD, reads,
+		// checks what is held and warms (POST /warm), and never adds an
+		// object to a store. No pod runs as c4-hud: the HUD's ClusterRole
+		// is bound to c4-manager.
+		srv.Authorize = rev.TierAuthorizer(ns+"/c4-node:GET,HEAD,PUT", ns+"/c4-manager:GET,HEAD,POST")
 		// Only a scraper the API server lets get /metrics reads them.
 		metricsHandler = (&auth.MetricsGuard{Reviewer: rev}).Wrap(metricsHandler)
 		// Warming spends egress: only the operator (the queue) may ask,
