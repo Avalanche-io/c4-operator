@@ -26,8 +26,9 @@ func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 
 // runIngest hashes a directory (the verify-once point), uploads every
 // object the project's store lacks to its shard, publishes the view's
-// records, and prints the view ID. Credentials come from the environment
-// (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY), as with the c4 CLI.
+// records, and prints the view ID. S3 credentials come from the standard
+// AWS chain, as this process runs: the environment (with AWS_SESSION_TOKEN
+// for temporary keys), a pod's web identity, or the instance's role.
 func runIngest(args []string) error {
 	fs := flag.NewFlagSet("ingest", flag.ExitOnError)
 	var shards multiFlag
@@ -43,12 +44,11 @@ func runIngest(args []string) error {
 		return errors.New("usage: c4-operator ingest --shard NAME=URL [--shard NAME=URL...] [--c4m FILE] DIR")
 	}
 	dir := fs.Arg(0)
-	creds := storeurl.Credentials{AccessKeyID: os.Getenv("AWS_ACCESS_KEY_ID"), SecretAccessKey: os.Getenv("AWS_SECRET_ACCESS_KEY")}
 	var specs []storeurl.Spec
 	for _, sh := range shards {
 		specs = append(specs, storeurl.ParseSpec(sh))
 	}
-	st, err := storeurl.OpenSharded(specs, creds)
+	st, err := storeurl.OpenShardedWith(specs, storeurl.Ambient())
 	if err != nil {
 		return err
 	}

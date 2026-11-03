@@ -2,7 +2,7 @@
 // the c4 CLI and the c4 container images accept in C4_STORE, and composes
 // several of them into one sharded store.
 //
-//	s3://bucket/prefix?region=us-west-2&endpoint=http://minio:9000
+//	s3://bucket/prefix/?region=us-west-2&endpoint=http://minio:9000  (a prefix ends in "/")
 //	c4d://host:7433, http://host:7433, https://host:7433   (c4d content API)
 //	/path/to/store, file:///path/to/store                   (a c4 TreeStore)
 //
@@ -47,20 +47,26 @@ type Shard interface {
 	Put(ctx context.Context, id c4.ID, r io.Reader, size int64) error
 }
 
-// Credentials carries S3 keys. Empty for stores that need none.
-type Credentials struct {
-	AccessKeyID     string
-	SecretAccessKey string
+// Open returns the shard for one URL, with fixed keys (none for stores
+// that need none).
+func Open(raw string, creds Credentials) (Shard, error) {
+	var src CredentialSource
+	if creds.ok() {
+		src = Static(creds)
+	}
+	return OpenWith(raw, src)
 }
 
-// Open returns the shard for one URL.
-func Open(raw string, creds Credentials) (Shard, error) {
+// OpenWith returns the shard for one URL, signing S3 requests with keys
+// from src (Static, or Ambient for a process running as itself). A nil
+// src is a store with no credentials.
+func OpenWith(raw string, src CredentialSource) (Shard, error) {
 	raw = strings.TrimSpace(raw)
 	switch {
 	case raw == "":
 		return nil, errors.New("empty store URL")
 	case strings.HasPrefix(raw, "s3://"):
-		return openS3(raw, creds)
+		return openS3(raw, src)
 	case strings.HasPrefix(raw, "c4d://"):
 		return newC4d("http://" + strings.TrimPrefix(raw, "c4d://")), nil
 	case strings.HasPrefix(raw, "http://"), strings.HasPrefix(raw, "https://"):
@@ -97,8 +103,17 @@ type Sharded struct {
 	byName map[string]Shard
 }
 
-// OpenSharded opens every shard.
+// OpenSharded opens every shard, with fixed keys.
 func OpenSharded(specs []Spec, creds Credentials) (*Sharded, error) {
+	var src CredentialSource
+	if creds.ok() {
+		src = Static(creds)
+	}
+	return OpenShardedWith(specs, src)
+}
+
+// OpenShardedWith opens every shard, with keys from src.
+func OpenShardedWith(specs []Spec, src CredentialSource) (*Sharded, error) {
 	if len(specs) == 0 {
 		return nil, errors.New("no store shards")
 	}
@@ -110,7 +125,7 @@ func OpenSharded(specs []Spec, creds Credentials) (*Sharded, error) {
 		if _, dup := s.byName[sp.Name]; dup {
 			return nil, fmt.Errorf("shard %s is listed twice", sp.Name)
 		}
-		sh, err := Open(sp.URL, creds)
+		sh, err := OpenWith(sp.URL, src)
 		if err != nil {
 			return nil, fmt.Errorf("shard %s: %w", sp.Name, err)
 		}
@@ -189,15 +204,17 @@ type s3Shard struct {
 	prefix   string
 	region   string
 	endpoint string
-	creds    Credentials
+	creds    CredentialSource
 	client   *http.Client
-	writer   *store.S3Store // multipart uploads
 }
 
 // openS3 mirrors store.openS3Configured in the c4 module so object keys
 // match what `c4 id -s` wrote: the key is the URL path with its leading
-// slash trimmed, concatenated with the ID.
-func openS3(raw string, creds Credentials) (Shard, error) {
+// slash trimmed, concatenated with the ID. A prefix must therefore end in
+// "/": s3://bucket/runs would write runs<id>, beside the folder rather
+// than in it, so it is refused. Adding the "/" here instead would name
+// other keys than the c4 CLI does for the same URL.
+func openS3(raw string, creds CredentialSource) (Shard, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return nil, fmt.Errorf("parse S3 URL: %w", err)
@@ -209,11 +226,14 @@ func openS3(raw string, creds Credentials) (Shard, error) {
 	if region == "" {
 		region = "us-east-1"
 	}
-	if creds.AccessKeyID == "" || creds.SecretAccessKey == "" {
+	if creds == nil {
 		return nil, fmt.Errorf("S3 store %s needs credentials", Redact(raw))
 	}
 	endpoint := u.Query().Get("endpoint")
 	prefix := strings.TrimPrefix(u.Path, "/")
+	if prefix != "" && !strings.HasSuffix(prefix, "/") {
+		return nil, fmt.Errorf("S3 store %s: the prefix %q must end in \"/\": objects would be stored as %s<id>, outside it", Redact(raw), prefix, prefix)
+	}
 	return &s3Shard{
 		name:     Redact(raw),
 		bucket:   u.Host,
@@ -226,14 +246,14 @@ func openS3(raw string, creds Credentials) (Shard, error) {
 			ResponseHeaderTimeout: 60 * time.Second,
 			IdleConnTimeout:       90 * time.Second,
 		}},
-		writer: store.NewS3Store(u.Host, prefix, region, endpoint, creds.AccessKeyID, creds.SecretAccessKey),
 	}, nil
 }
 
 func (s *s3Shard) Name() string { return s.name }
 
-func (s *s3Shard) objectURL(id c4.ID) string {
-	key := s.prefix + id.String()
+func (s *s3Shard) objectURL(id c4.ID) string { return s.keyURL(s.prefix + id.String()) }
+
+func (s *s3Shard) keyURL(key string) string {
 	if s.endpoint != "" {
 		scheme, ep := "https", s.endpoint
 		if strings.HasPrefix(ep, "http://") {
@@ -254,7 +274,11 @@ func (s *s3Shard) do(ctx context.Context, method string, id c4.ID, hdr http.Head
 	for k, v := range hdr {
 		req.Header[k] = v
 	}
-	signV4(req, s.creds, s.region, time.Now().UTC())
+	creds, err := s.creds.Retrieve(ctx)
+	if err != nil {
+		return nil, err
+	}
+	signV4(req, creds, s.region, time.Now().UTC())
 	return s.client.Do(req)
 }
 
@@ -294,19 +318,6 @@ func (s *s3Shard) Head(ctx context.Context, id c4.ID) (int64, error) {
 		return resp.ContentLength, nil
 	}
 	return 0, s3Error(resp, "head", id)
-}
-
-func (s *s3Shard) Put(ctx context.Context, id c4.ID, r io.Reader, size int64) error {
-	// c4's S3Store does multipart uploads for large objects.
-	w, err := s.writer.Create(id)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(w, r); err != nil {
-		w.Close()
-		return err
-	}
-	return w.Close()
 }
 
 func s3Error(resp *http.Response, op string, id c4.ID) error {

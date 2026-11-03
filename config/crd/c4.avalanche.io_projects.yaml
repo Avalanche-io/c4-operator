@@ -191,7 +191,7 @@ spec:
                           type: string
                         url:
                           description: |-
-                            URL in C4_STORE form: s3://bucket/prefix?region=..&endpoint=..,
+                            URL in C4_STORE form: s3://bucket/prefix/?region=..&endpoint=..,
                             c4d://host:port, or http(s)://host:port.
                           minLength: 1
                           type: string

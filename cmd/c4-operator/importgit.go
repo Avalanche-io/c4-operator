@@ -55,8 +55,11 @@ Push-driven modes (these need --out, which holds the last commit per ref):
   --listen ADDR          serve push webhooks (POST /import with ref and
                          after), GET /refs and GET /commits/SHA
 
-S3 shards take credentials from AWS_ACCESS_KEY_ID and
-AWS_SECRET_ACCESS_KEY.
+S3 shards take credentials from the standard AWS chain: the
+environment (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and, for
+temporary keys, AWS_SESSION_TOKEN), then a pod's web identity
+(AWS_WEB_IDENTITY_TOKEN_FILE, AWS_ROLE_ARN), then the instance's
+role (IMDSv2).
 
 flags:
 `
@@ -116,12 +119,11 @@ func runImportGit(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	creds := storeurl.Credentials{AccessKeyID: os.Getenv("AWS_ACCESS_KEY_ID"), SecretAccessKey: os.Getenv("AWS_SECRET_ACCESS_KEY")}
 	var specs []storeurl.Spec
 	for _, sh := range shards {
 		specs = append(specs, storeurl.ParseSpec(sh))
 	}
-	st, err := storeurl.OpenSharded(specs, creds)
+	st, err := storeurl.OpenShardedWith(specs, storeurl.Ambient())
 	if err != nil {
 		return err
 	}

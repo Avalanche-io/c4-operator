@@ -70,7 +70,7 @@ type StoreShard struct {
 	// the URL.
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
-	// URL in C4_STORE form: s3://bucket/prefix?region=..&endpoint=..,
+	// URL in C4_STORE form: s3://bucket/prefix/?region=..&endpoint=..,
 	// c4d://host:port, or http(s)://host:port.
 	// +kubebuilder:validation:MinLength=1
 	URL string `json:"url"`

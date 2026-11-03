@@ -17,16 +17,31 @@ func signV4(req *http.Request, creds Credentials, region string, now time.Time) 
 }
 
 func signV4Payload(req *http.Request, creds Credentials, region string, now time.Time, payloadHash string) {
+	req.Header.Set("X-Amz-Content-Sha256", payloadHash)
+	sign(req, creds, region, "s3", now, payloadHash)
+}
+
+// sign signs req for service with AWS Signature Version 4. Temporary
+// credentials (an instance role, a pod's web identity, an assumed role)
+// carry a session token, which travels as X-Amz-Security-Token and is
+// signed with the other headers.
+func sign(req *http.Request, creds Credentials, region, service string, now time.Time, payloadHash string) {
 	amzDate := now.Format("20060102T150405Z")
 	date := now.Format("20060102")
 	req.Header.Set("X-Amz-Date", amzDate)
-	req.Header.Set("X-Amz-Content-Sha256", payloadHash)
+	if creds.SessionToken != "" {
+		req.Header.Set("X-Amz-Security-Token", creds.SessionToken)
+	} else {
+		req.Header.Del("X-Amz-Security-Token")
+	}
 	host := req.URL.Host
 	req.Host = host
 
-	signed := []string{"host", "x-amz-content-sha256", "x-amz-date"}
-	if req.Header.Get("Range") != "" {
-		signed = append(signed, "range")
+	signed := []string{"host", "x-amz-date"}
+	for _, h := range []string{"x-amz-content-sha256", "x-amz-security-token", "range"} {
+		if req.Header.Get(h) != "" {
+			signed = append(signed, h)
+		}
 	}
 	sort.Strings(signed)
 	var canonHeaders strings.Builder
@@ -50,13 +65,13 @@ func signV4Payload(req *http.Request, creds Credentials, region string, now time
 		payloadHash,
 	}, "\n")
 
-	scope := date + "/" + region + "/s3/aws4_request"
+	scope := date + "/" + region + "/" + service + "/aws4_request"
 	sum := sha256.Sum256([]byte(canonical))
 	toSign := "AWS4-HMAC-SHA256\n" + amzDate + "\n" + scope + "\n" + hex.EncodeToString(sum[:])
 
 	key := hmacSHA256([]byte("AWS4"+creds.SecretAccessKey), date)
 	key = hmacSHA256(key, region)
-	key = hmacSHA256(key, "s3")
+	key = hmacSHA256(key, service)
 	key = hmacSHA256(key, "aws4_request")
 	sig := hex.EncodeToString(hmacSHA256(key, toSign))
 
