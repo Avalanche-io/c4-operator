@@ -266,7 +266,7 @@ a URL such as `s3://show-a-bucket/c4` stored them beside the folder
 (`c4c4...`) rather than in it. Earlier builds accepted such URLs. To keep a
 store filled that way, move its objects once:
 
-```sh
+```bash
 # BUCKET and PREFIX as in the old URL s3://BUCKET/PREFIX (no "/"). For a
 # store that isn't AWS, export AWS_ENDPOINT_URL=URL first. A key moves only
 # if it is exactly PREFIX followed by a C4 ID (c4 and 88 base58 digits);
