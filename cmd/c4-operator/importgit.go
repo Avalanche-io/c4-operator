@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Avalanche-io/c4"
+	"github.com/Avalanche-io/c4/store"
 
 	"github.com/Avalanche-io/c4-operator/internal/gitimport"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
@@ -124,7 +125,7 @@ func runImportGit(args []string) error {
 	for _, sh := range shards {
 		specs = append(specs, storeurl.ParseSpec(sh))
 	}
-	st, err := storeurl.OpenShardedWith(specs, storeurl.Ambient(*instanceRole))
+	st, err := storeurl.OpenShardedWith(specs, store.Ambient(*instanceRole))
 	if err != nil {
 		return err
 	}

@@ -447,6 +447,7 @@ func TestShardURLPrefixAdmission(t *testing.T) {
 		{"c4d://store.studio.example:7433", true},
 		{"s3://bucket/runs", false},
 		{"s3://bucket/a/b?region=us-west-2", false},
+		{"s3://bucket/runs/?instance-role=true", false},
 	} {
 		p := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("prefix-%d", i)}}
 		p.Spec.Namespaces = []string{fmt.Sprintf("prefix-%d", i)}
@@ -455,7 +456,11 @@ func TestShardURLPrefixAdmission(t *testing.T) {
 		if c.ok != (err == nil) {
 			t.Errorf("%s: %v", c.url, err)
 		}
-		if err != nil && !strings.Contains(err.Error(), `must end in "/"`) {
+		reason := `must end in "/"`
+		if strings.Contains(c.url, "instance-role") {
+			reason = "instance-role is not allowed"
+		}
+		if err != nil && !strings.Contains(err.Error(), reason) {
 			t.Errorf("%s: refused without the reason: %v", c.url, err)
 		}
 		if err == nil {

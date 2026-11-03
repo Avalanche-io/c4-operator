@@ -74,10 +74,13 @@ type StoreShard struct {
 	// URL in C4_STORE form: s3://bucket/prefix/?region=..&endpoint=..,
 	// c4d://host:port, or http(s)://host:port. An S3 prefix ends in "/":
 	// objects are stored as prefix+ID, as the c4 CLI stores them, so
-	// s3://bucket/runs would store them beside the folder (runs<id>).
+	// s3://bucket/runs would store them beside the folder (runs<id>). The
+	// c4 CLI's instance-role parameter is refused: a Project never borrows
+	// a component's machine role.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:XValidation:rule="!self.startsWith('s3://') || self.matches('^s3://[^/?]+(/([^?]*/)?)?([?].*)?$')",message="an S3 prefix must end in \"/\" (s3://bucket/prefix/): objects are stored as prefix+ID, so without it they would land beside the folder"
+	// +kubebuilder:validation:XValidation:rule="!self.contains('instance-role')",message="instance-role is not allowed in a Project's store URL: a Project's store uses its Secret's keys, never a component's machine role"
 	URL string `json:"url"`
 }
 

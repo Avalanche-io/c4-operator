@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/Avalanche-io/c4"
+	"github.com/Avalanche-io/c4/store"
 )
 
 // AWS's Signature Version 4 test suite (botocore's copy of aws4_testsuite,
@@ -68,19 +69,6 @@ func TestNoTokenNoHeader(t *testing.T) {
 
 func env(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
 
-// The environment comes first, with its session token.
-func TestAmbientFromTheEnvironment(t *testing.T) {
-	c := &Chain{Getenv: env(map[string]string{"AWS_ACCESS_KEY_ID": "AK", "AWS_SECRET_ACCESS_KEY": "SK", "AWS_SESSION_TOKEN": "TOK"})}
-	got, err := c.Retrieve(context.Background())
-	if err != nil || got.AccessKeyID != "AK" || got.SessionToken != "TOK" || !got.Expires.IsZero() {
-		t.Fatalf("%+v %v", got, err)
-	}
-	c = &Chain{Getenv: env(map[string]string{"AWS_ACCESS_KEY_ID": "AK"})}
-	if _, err := c.Retrieve(context.Background()); err == nil {
-		t.Fatal("a key ID with no secret was accepted")
-	}
-}
-
 // clock is a time the test moves.
 type clock struct {
 	mu sync.Mutex
@@ -120,140 +108,6 @@ func (f *fakeSTS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `<AssumeRoleWithWebIdentityResponse><AssumeRoleWithWebIdentityResult><Credentials>
 <AccessKeyId>ASIA%d</AccessKeyId><SecretAccessKey>secret%d</SecretAccessKey><SessionToken>token%d</SessionToken><Expiration>%s</Expiration>
 </Credentials></AssumeRoleWithWebIdentityResult></AssumeRoleWithWebIdentityResponse>`, n, n, n, exp)
-}
-
-func webIdentityChain(t *testing.T, f *fakeSTS) (*Chain, string) {
-	srv := httptest.NewServer(f)
-	t.Cleanup(srv.Close)
-	tokFile := filepath.Join(t.TempDir(), "token")
-	os.WriteFile(tokFile, []byte("jwt-1\n"), 0o600)
-	return &Chain{
-		Getenv:      env(map[string]string{"AWS_WEB_IDENTITY_TOKEN_FILE": tokFile, "AWS_ROLE_ARN": "arn:aws:iam::123456789012:role/c4"}),
-		STSEndpoint: srv.URL,
-		Now:         f.clk.Now,
-	}, tokFile
-}
-
-// A pod's web identity: exchanged with STS, kept until close to expiry,
-// renewed with the token file as it is then (the kubelet rotates it), and
-// kept through a failed renewal while it still holds.
-func TestAmbientWebIdentityRenews(t *testing.T) {
-	clk := &clock{t: time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)}
-	f := &fakeSTS{clk: clk}
-	c, tokFile := webIdentityChain(t, f)
-	ctx := context.Background()
-
-	got, err := c.Retrieve(ctx)
-	if err != nil || got.AccessKeyID != "ASIA1" || got.SessionToken != "token1" {
-		t.Fatalf("%+v %v", got, err)
-	}
-	clk.Add(50 * time.Minute) // 10 minutes left: still fresh
-	if got, _ := c.Retrieve(ctx); got.AccessKeyID != "ASIA1" || f.calls.Load() != 1 {
-		t.Fatalf("renewed early: %s, %d calls", got.AccessKeyID, f.calls.Load())
-	}
-	os.WriteFile(tokFile, []byte("jwt-2\n"), 0o600)
-	clk.Add(6 * time.Minute) // 4 minutes left: renewal starts, the old keys serve meanwhile
-	if got, _ := c.Retrieve(ctx); got.AccessKeyID != "ASIA1" {
-		t.Fatalf("waited for the renewal: %s", got.AccessKeyID)
-	}
-	eventually(t, func() bool { got, _ := c.Retrieve(ctx); return got.AccessKeyID == "ASIA2" })
-	if f.tokens[1] != "jwt-2" {
-		t.Fatalf("renewed with the old token file: %q", f.tokens)
-	}
-
-	// STS goes down near expiry: the keys that still hold are used.
-	f.fail.Store(true)
-	clk.Add(57 * time.Minute) // 3 minutes left
-	if got, err := c.Retrieve(ctx); err != nil || got.AccessKeyID != "ASIA2" {
-		t.Fatalf("lost keys that still hold: %+v %v", got, err)
-	}
-	eventually(t, func() bool { c.mu.Lock(); defer c.mu.Unlock(); return c.lastErr != nil })
-	if got, err := c.Retrieve(ctx); err != nil || got.AccessKeyID != "ASIA2" {
-		t.Fatalf("lost keys that still hold after a failed renewal: %+v %v", got, err)
-	}
-	clk.Add(4 * time.Minute) // expired, STS still down
-	if _, err := c.Retrieve(ctx); err == nil || !strings.Contains(err.Error(), "ServiceUnavailable") {
-		t.Fatalf("expired keys were used, or the error was lost: %v", err)
-	}
-	f.fail.Store(false)
-	if _, err := c.Retrieve(ctx); err == nil {
-		t.Fatal("asked STS again within 10 s of a failure")
-	}
-	clk.Add(11 * time.Second)
-	if got, err := c.Retrieve(ctx); err != nil || got.AccessKeyID != "ASIA3" {
-		t.Fatalf("no recovery: %+v %v", got, err)
-	}
-}
-
-func eventually(t *testing.T, cond func() bool) {
-	t.Helper()
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
-		if cond() {
-			return
-		}
-	}
-	t.Fatal("never happened")
-}
-
-// Many requests at once start one exchange: those holding no keys wait
-// for it, and none start their own.
-func TestAmbientRenewsOnceUnderLoad(t *testing.T) {
-	clk := &clock{t: time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)}
-	f := &fakeSTS{clk: clk, delay: 50 * time.Millisecond}
-	c, _ := webIdentityChain(t, f)
-	var wg sync.WaitGroup
-	errs := make(chan error, 64)
-	for range 64 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			got, err := c.Retrieve(context.Background())
-			if err == nil && got.AccessKeyID != "ASIA1" {
-				err = fmt.Errorf("got %s", got.AccessKeyID)
-			}
-			errs <- err
-		}()
-	}
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	if n := f.calls.Load(); n != 1 {
-		t.Fatalf("%d exchanges for 64 requests", n)
-	}
-}
-
-// An EC2 instance's role, through IMDSv2: a session token first, then the
-// role's keys, each asked with it.
-func TestAmbientInstanceRole(t *testing.T) {
-	exp := time.Now().Add(6 * time.Hour).UTC().Format(time.RFC3339)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPut && r.URL.Path == "/latest/api/token" && r.Header.Get("X-Aws-Ec2-Metadata-Token-Ttl-Seconds") != "":
-			io.WriteString(w, "imds-token")
-		case r.Header.Get("X-Aws-Ec2-Metadata-Token") != "imds-token":
-			w.WriteHeader(http.StatusUnauthorized)
-		case r.URL.Path == "/latest/meta-data/iam/security-credentials/":
-			io.WriteString(w, "c4d-relay\n")
-		case r.URL.Path == "/latest/meta-data/iam/security-credentials/c4d-relay":
-			fmt.Fprintf(w, `{"Code":"Success","Type":"AWS-HMAC","AccessKeyId":"ASIAROLE","SecretAccessKey":"rs","Token":"rt","Expiration":%q}`, exp)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer srv.Close()
-	c := &Chain{InstanceRole: true, Getenv: env(nil), IMDSEndpoint: srv.URL}
-	got, err := c.Retrieve(context.Background())
-	if err != nil || got.AccessKeyID != "ASIAROLE" || got.SessionToken != "rt" || got.Expires.IsZero() {
-		t.Fatalf("%+v %v", got, err)
-	}
-	c = &Chain{InstanceRole: true, Getenv: env(map[string]string{"AWS_EC2_METADATA_DISABLED": "true"}), IMDSEndpoint: srv.URL}
-	if _, err := c.Retrieve(context.Background()); err == nil {
-		t.Fatal("used the metadata service it was told not to")
-	}
 }
 
 // fakeS3 is a bucket that accepts only the keys STS gave most recently,
@@ -363,7 +217,7 @@ func TestS3StoreSurvivesExpiryMidRun(t *testing.T) {
 	defer s3Srv.Close()
 	tokFile := filepath.Join(t.TempDir(), "token")
 	os.WriteFile(tokFile, []byte("jwt"), 0o600)
-	chain := &Chain{
+	chain := &store.Chain{
 		Getenv:      env(map[string]string{"AWS_WEB_IDENTITY_TOKEN_FILE": tokFile, "AWS_ROLE_ARN": "arn:aws:iam::123456789012:role/c4"}),
 		STSEndpoint: stsSrv.URL,
 		Now:         clk.Now,
@@ -465,14 +319,30 @@ func TestAdmissionAgreesWithOpen(t *testing.T) {
 		t.Fatal("no shard URL rule in project_types.go")
 	}
 	rule := regexp.MustCompile(string(m[1]))
+	var forbidden []string
+	for _, f := range regexp.MustCompile(`!self\.contains\('([^']+)'\)`).FindAllSubmatch(src, -1) {
+		forbidden = append(forbidden, string(f[1]))
+	}
+	if len(forbidden) == 0 {
+		t.Fatal("no instance-role rule in project_types.go")
+	}
+	admit := func(raw string) bool {
+		for _, f := range forbidden {
+			if strings.Contains(raw, f) {
+				return false
+			}
+		}
+		return rule.MatchString(raw)
+	}
 	creds := Credentials{AccessKeyID: "AK", SecretAccessKey: "SK"}
 	for _, raw := range []string{
 		"s3://bucket", "s3://bucket/", "s3://bucket/runs/", "s3://bucket/a/b/",
 		"s3://bucket/runs", "s3://bucket/c4-bench-x", "s3://bucket/a/b?region=us-west-2",
 		"s3://bucket/a/b/?region=us-west-2&endpoint=http://minio:9000", "s3://bucket?region=us-west-2",
+		"s3://bucket/runs/?instance-role=true", "s3://bucket/runs/?region=us-west-2&instance-role=false",
 	} {
 		_, err := Open(raw, creds)
-		if admitted := rule.MatchString(raw); admitted != (err == nil) {
+		if admitted := admit(raw); admitted != (err == nil) {
 			t.Errorf("%s: admission %v, open %v", raw, admitted, err)
 		}
 	}

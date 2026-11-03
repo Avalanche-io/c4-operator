@@ -51,8 +51,8 @@ type Shard interface {
 // that need none).
 func Open(raw string, creds Credentials) (Shard, error) {
 	var src CredentialSource
-	if creds.ok() {
-		src = Static(creds)
+	if keyed(creds) {
+		src = store.Static(creds)
 	}
 	return OpenWith(raw, src)
 }
@@ -106,8 +106,8 @@ type Sharded struct {
 // OpenSharded opens every shard, with fixed keys.
 func OpenSharded(specs []Spec, creds Credentials) (*Sharded, error) {
 	var src CredentialSource
-	if creds.ok() {
-		src = Static(creds)
+	if keyed(creds) {
+		src = store.Static(creds)
 	}
 	return OpenShardedWith(specs, src)
 }
@@ -226,11 +226,17 @@ func openS3(raw string, creds CredentialSource) (Shard, error) {
 	if region == "" {
 		region = "us-east-1"
 	}
-	if !validRegion(region) {
+	if !store.ValidRegion(region) {
 		return nil, fmt.Errorf("S3 store %s: region %q is not a region name", Redact(raw), region)
 	}
 	if creds == nil {
 		return nil, fmt.Errorf("S3 store %s needs credentials", Redact(raw))
+	}
+	// The c4 CLI's instance-role=true lends the machine's role to a store.
+	// A farm component reads store URLs from Projects, so a URL must never
+	// choose its identity: refused, not ignored.
+	if u.Query().Has("instance-role") {
+		return nil, fmt.Errorf("S3 store %s: instance-role is not allowed in a store URL here; credentials come from the Project's Secret, or the command's --aws-instance-role", Redact(raw))
 	}
 	endpoint := u.Query().Get("endpoint")
 	prefix := strings.TrimPrefix(u.Path, "/")
@@ -244,7 +250,7 @@ func openS3(raw string, creds CredentialSource) (Shard, error) {
 		region:   region,
 		endpoint: endpoint,
 		creds:    creds,
-		client: noRedirects(&http.Client{Transport: &http.Transport{
+		client: store.NoRedirects(&http.Client{Transport: &http.Transport{
 			MaxIdleConnsPerHost:   64,
 			ResponseHeaderTimeout: 60 * time.Second,
 			IdleConnTimeout:       90 * time.Second,
