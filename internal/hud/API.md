@@ -2238,9 +2238,10 @@ the person (or the party) `people` names, `chain.under` the person's
 confirmation of the login (`people-map`, its record) when there is one,
 and `signer` the sync's own `sa/<ns>/<account>` identity, which the
 farm's issuer certifies only while a Tracker names that account, its leaf
-naming each such Tracker (`urn:c4:sync:<namespace>/<tracker>`): a relayed
+naming each such Tracker (`urn:c4:relay:<namespace>/<tracker>`): a relayed
 act is refused unless its leaf names the act's Tracker, and such a leaf
-signs no import or ingest. Only the manager or someone allowed the verb
+signs no import or ingest; an account named both as a project's importer
+and as a Tracker's sync is certified as neither. Only the manager or someone allowed the verb
 `sync` on Trackers (a cluster admin) sets a Tracker's `sync` (an admission
 policy). The HUD
 takes it only with the relayed decision (`via`), only signed by the

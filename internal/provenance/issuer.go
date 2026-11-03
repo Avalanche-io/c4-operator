@@ -31,10 +31,10 @@ type Issuer struct {
 	// Bind, when set, finds the deployment binding in force for the
 	// identity: its leaf names it and ends by its end (IssueBound).
 	Bind BindFunc
-	// Syncs, when set, lists the Trackers that name the identity as their
-	// sync (<namespace>/<tracker>): its leaf names each (SyncURN).
-	Syncs func(ctx context.Context, identity string) ([]string, error)
-	Now   func() time.Time
+	// Relays, when set, lists the Trackers that name the identity as their
+	// sync (<namespace>/<tracker>): its leaf names each (RelayURN).
+	Relays func(ctx context.Context, identity string) ([]string, error)
+	Now    func() time.Time
 }
 
 // TooMany is an Identify refusal for asking too often, answered 429 with
@@ -98,13 +98,13 @@ func (i *Issuer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var syncs []string
-	if i.Syncs != nil {
-		if syncs, err = i.Syncs(r.Context(), identity); err != nil {
+	if i.Relays != nil {
+		if syncs, err = i.Relays(r.Context(), identity); err != nil {
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
 	}
-	cert, err := i.CA.IssueBoundSync(ed25519.PublicKey(req.PublicKey), identity, bound, syncs, ttl, now)
+	cert, err := i.CA.IssueBoundRelay(ed25519.PublicKey(req.PublicKey), identity, bound, syncs, ttl, now)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

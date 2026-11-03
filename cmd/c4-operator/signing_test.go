@@ -189,7 +189,7 @@ func TestIssuerLimitsEachPod(t *testing.T) {
 }
 
 // A sync's leaf names each Tracker that names it as its sync, and only
-// those (SyncURN): the only Trackers its relayed acts may be for. Any
+// those (RelayURN): the only Trackers its relayed acts may be for. Any
 // other identity's names none.
 func TestSyncLeafNamesItsTrackers(t *testing.T) {
 	scheme := runtime.NewScheme()
@@ -203,13 +203,33 @@ func TestSyncLeafNamesItsTrackers(t *testing.T) {
 		&c4v1.Tracker{ObjectMeta: metav1.ObjectMeta{Namespace: "show-b", Name: "gh"}, Spec: c4v1.TrackerSpec{Kind: "github"}},
 	).Build()
 	ctx := context.Background()
-	got, err := trackerSyncs(ctx, r, provenance.ServiceAccountIdentity("c4-system", "c4-sync"))
+	got, err := trackerRelays(ctx, r, provenance.ServiceAccountIdentity("c4-system", "c4-sync"))
 	if err != nil || strings.Join(got, ",") != "show-a/flow,show-b/kitsu" {
 		t.Fatalf("c4-sync's Trackers: %v %v", got, err)
 	}
 	for _, id := range []string{provenance.ServiceAccountIdentity("show-a", "import-git"), provenance.NodeIdentity("w1")} {
-		if got, err := trackerSyncs(ctx, r, id); err != nil || len(got) != 0 {
+		if got, err := trackerRelays(ctx, r, id); err != nil || len(got) != 0 {
 			t.Errorf("%s names %v (%v)", id, got, err)
 		}
+	}
+}
+
+// One account, one role: an account a project names as an importer and a
+// Tracker names as its sync is certified as neither, so one certificate
+// never signs both sources and relayed decisions.
+func TestIssuerRefusesAnImporterThatIsASync(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := c4v1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	r := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+		&c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: "show-a"}, Spec: c4v1.ProjectSpec{Namespaces: []string{"show-a"},
+			Importers: []c4v1.Importer{{Namespace: "show-a", ServiceAccount: "import-git"}}}},
+		&c4v1.Tracker{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "flow"}, Spec: c4v1.TrackerSpec{Kind: "flow",
+			Sync: &c4v1.TrackerSync{Namespace: "show-a", ServiceAccount: "import-git"}}},
+	).Build()
+	id := &auth.Identity{User: "system:serviceaccount:show-a:import-git", Namespace: "show-a", Account: "import-git"}
+	if got, _, err := signerIdentity(context.Background(), r, id, "c4-system"); err == nil || !strings.Contains(err.Error(), "one account takes one role") {
+		t.Fatalf("an importer that is a sync: certified as %q (%v)", got, err)
 	}
 }

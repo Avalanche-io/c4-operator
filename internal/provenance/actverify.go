@@ -205,12 +205,12 @@ func checkAct(v *Verified) (*schema.Act, error) {
 	case by.User != "":
 		// A relayed decision: the relay signs, a sync whose leaf names the
 		// Tracker it relays for, in the namespace of what the act is on
-		// (SyncURN); the people-map confirmation is the HUD's to check.
+		// (RelayURN); the people-map confirmation is the HUD's to check.
 		if !strings.HasPrefix(p.Signer, IdentityBase+"sa/") {
 			return nil, fmt.Errorf("a relayed act is signed by its relay, not %s", p.Signer)
 		}
-		if t := subjectNamespace(a.Subject) + "/" + by.Tracker; !slices.Contains(v.Syncs, t) {
-			return nil, fmt.Errorf("a relayed act for tracker %s is signed by its sync, and %s's leaf names %v", t, p.Signer, v.Syncs)
+		if t := subjectNamespace(a.Subject) + "/" + by.Tracker; !slices.Contains(v.Relays, t) {
+			return nil, fmt.Errorf("a relayed act for tracker %s is signed by its sync, and %s's leaf names %v", t, p.Signer, v.Relays)
 		}
 	case by.Unit != "":
 		if !unitSigns(p.Signer, by.Unit) {

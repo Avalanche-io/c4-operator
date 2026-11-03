@@ -190,12 +190,12 @@ type BindFunc func(ctx context.Context, identity string) (Bound, error)
 // Bound) is certified as Issue does, naming none, so its records are
 // labelled, not refused, until strict accountability (K8).
 func (ca *CA) IssueBound(pub ed25519.PublicKey, identity string, b Bound, ttl time.Duration, now time.Time) (*x509.Certificate, error) {
-	return ca.IssueBoundSync(pub, identity, b, nil, ttl, now)
+	return ca.IssueBoundRelay(pub, identity, b, nil, ttl, now)
 }
 
-// IssueBoundSync is IssueBound for a tracker's sync: the leaf also names
-// each Tracker that names it as its sync (SyncURN, <namespace>/<tracker>).
-func (ca *CA) IssueBoundSync(pub ed25519.PublicKey, identity string, b Bound, syncs []string, ttl time.Duration, now time.Time) (*x509.Certificate, error) {
+// IssueBoundRelay is IssueBound for a tracker's sync: the leaf also names
+// each Tracker that names it as its sync (RelayURN, <namespace>/<tracker>).
+func (ca *CA) IssueBoundRelay(pub ed25519.PublicKey, identity string, b Bound, syncs []string, ttl time.Duration, now time.Time) (*x509.Certificate, error) {
 	if b.ID == "" && len(syncs) == 0 {
 		return ca.Issue(pub, identity, ttl, now)
 	}
@@ -227,7 +227,7 @@ func (ca *CA) IssueBoundSync(pub ed25519.PublicKey, identity string, b Bound, sy
 		if !ok || ns == "" || name == "" || strings.Contains(name, "/") {
 			return nil, fmt.Errorf("a sync names a Tracker as <namespace>/<tracker>, not %q", t)
 		}
-		u, err := url.Parse(SyncURN + t)
+		u, err := url.Parse(RelayURN + t)
 		if err != nil {
 			return nil, err
 		}

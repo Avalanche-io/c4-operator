@@ -398,14 +398,14 @@ func (h *HUD) relayAct(ctx context.Context, j JobRef, r Relay, body []byte) (htt
 	on := provenance.ActSubject("workjob", j.Namespace, j.Name, r.JobUID, r.SpecDigest)
 	// SignAct obtains or renews the certificate: the issuer certifies
 	// c4-sync only while a Tracker names it, so with none it signs nothing.
-	// Its leaf names the Trackers it relays for (SyncURN), as they were
+	// Its leaf names the Trackers it relays for (RelayURN), as they were
 	// when it was certified; one that named it since is in the next, so a
 	// leaf without this Tracker is renewed once before giving up.
 	pred := schema.ActPredicate{Act: "decide", Params: body, Chain: ch}
 	tracker := j.Namespace + "/" + r.Tracker
 	bound := func() bool {
 		leaf := h.Signer.Leaf()
-		return leaf != nil && h.Signer.Identity() == r.SyncIdentity && slices.Contains(provenance.CertSyncs(leaf), tracker)
+		return leaf != nil && h.Signer.Identity() == r.SyncIdentity && slices.Contains(provenance.CertRelays(leaf), tracker)
 	}
 	act, err := provenance.SignAct(ctx, h.Signer, on, pred, time.Now())
 	if err == nil && !bound() && h.Signer.Renew(ctx) == nil {

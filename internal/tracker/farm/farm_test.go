@@ -367,7 +367,7 @@ func TestDecideSignsTheRelayedDecision(t *testing.T) {
 		if issued > 1 {
 			syncs = []string{"show-a/flow"}
 		}
-		leaf, err := ca.IssueBoundSync(pub, sync, provenance.Bound{}, syncs, time.Hour, time.Now())
+		leaf, err := ca.IssueBoundRelay(pub, sync, provenance.Bound{}, syncs, time.Hour, time.Now())
 		return []*x509.Certificate{leaf, ca.Cert}, err
 	})
 	if err != nil {

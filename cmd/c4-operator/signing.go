@@ -222,15 +222,15 @@ func workloadIssuer(s *signing, kube kubernetes.Interface, projects client.Reade
 			}
 		}
 		return signerIdentity(ctx, projects, id, namespace)
-	}, Syncs: func(ctx context.Context, identity string) ([]string, error) {
-		return trackerSyncs(ctx, projects, identity)
+	}, Relays: func(ctx context.Context, identity string) ([]string, error) {
+		return trackerRelays(ctx, projects, identity)
 	}}
 }
 
-// trackerSyncs are the Trackers that name a service account identity as
-// their sync (<namespace>/<tracker>), which its leaf names (SyncURN): the
+// trackerRelays are the Trackers that name a service account identity as
+// their sync (<namespace>/<tracker>), which its leaf names (RelayURN): the
 // only ones its relayed acts may be for. None for any other identity.
-func trackerSyncs(ctx context.Context, r client.Reader, identity string) ([]string, error) {
+func trackerRelays(ctx context.Context, r client.Reader, identity string) ([]string, error) {
 	rest, ok := strings.CutPrefix(identity, provenance.IdentityBase+"sa/")
 	if !ok {
 		return nil, nil
@@ -362,10 +362,9 @@ func signerIdentity(ctx context.Context, projects client.Reader, id *auth.Identi
 	if err := projects.List(ctx, &list); err != nil {
 		return "", 0, fmt.Errorf("reading the projects' importers: %w", err)
 	}
+	importer := false
 	for i := range list.Items {
-		if list.Items[i].Spec.Imports(id.Namespace, id.Account) {
-			return provenance.ServiceAccountIdentity(id.Namespace, id.Account), time.Hour, nil
-		}
+		importer = importer || list.Items[i].Spec.Imports(id.Namespace, id.Account)
 	}
 	var trackers c4v1.TrackerList
 	err := projects.List(ctx, &trackers)
@@ -375,10 +374,17 @@ func signerIdentity(ctx context.Context, projects client.Reader, id *auth.Identi
 	case err != nil:
 		return "", 0, fmt.Errorf("reading the Trackers' syncs: %w", err)
 	}
+	relay := false
 	for i := range trackers.Items {
-		if trackers.Items[i].Spec.SyncedBy(id.Namespace, id.Account) {
-			return provenance.ServiceAccountIdentity(id.Namespace, id.Account), time.Hour, nil
-		}
+		relay = relay || trackers.Items[i].Spec.SyncedBy(id.Namespace, id.Account)
+	}
+	switch {
+	case importer && relay:
+		// one certificate never carries both roles: an importer's records
+		// are sources, and a relay's leaf is refused for them
+		return "", 0, fmt.Errorf("%s is named both as a project's importer and as a Tracker's sync: one account takes one role", id.User)
+	case importer || relay:
+		return provenance.ServiceAccountIdentity(id.Namespace, id.Account), time.Hour, nil
 	}
 	return "", 0, fmt.Errorf("%s is not an importer of a project or a Tracker's sync: a project names the accounts that sign its imports and ingests (spec.importers), a Tracker the account that relays its decisions (spec.sync)", id.User)
 }

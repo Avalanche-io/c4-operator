@@ -210,7 +210,9 @@ Each Tracker says:
   decisions (`{namespace: c4-system, serviceAccount: c4-sync}`). While a
   Tracker names it, the farm's certificate issuer certifies that account,
   its certificate naming each such Tracker, and c4-sync signs each decision
-  it relays for them as itself (see People, below); it signs nothing else.
+  it relays for them as itself (see People, below); it signs nothing else,
+  and an account a project also names as an importer is certified as
+  neither.
   Because it hands an account a signing identity, only the farm's manager or
   someone allowed the verb `sync` on Trackers may set or change it (a
   cluster admin at install, as `c4 farm up --tracker` does; a project role

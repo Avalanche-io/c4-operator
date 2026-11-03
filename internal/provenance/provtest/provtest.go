@@ -174,7 +174,7 @@ func (f *Farm) Relay(t testing.TB, namespace, account, tracker, user string) *Ke
 }
 
 // RelayFor is Relay certified as the sync of a Tracker (trackerNamespace/
-// tracker): its leaf names it (SyncURN), as the farm's issuer certifies a
+// tracker): its leaf names it (RelayURN), as the farm's issuer certifies a
 // sync that a Tracker names, so its relayed acts on that namespace's jobs
 // verify.
 func (f *Farm) RelayFor(t testing.TB, namespace, account, trackerNamespace, tracker, user string) *Key {
@@ -184,7 +184,7 @@ func (f *Farm) RelayFor(t testing.TB, namespace, account, trackerNamespace, trac
 		t.Fatal(err)
 	}
 	identity := provenance.ServiceAccountIdentity(namespace, account)
-	leaf, err := f.CA.IssueBoundSync(pub, identity, provenance.Bound{}, []string{trackerNamespace + "/" + tracker}, time.Hour, f.Now)
+	leaf, err := f.CA.IssueBoundRelay(pub, identity, provenance.Bound{}, []string{trackerNamespace + "/" + tracker}, time.Hour, f.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

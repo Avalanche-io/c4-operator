@@ -85,7 +85,7 @@ func TestRelaySignsAnAct(t *testing.T) {
 	}
 	sync := func(trackers ...string) *Signer {
 		s, err := NewSigner(ctx, func(_ context.Context, pub ed25519.PublicKey) ([]*x509.Certificate, error) {
-			leaf, err := ca.IssueBoundSync(pub, ServiceAccountIdentity("c4-system", "c4-sync"), Bound{}, trackers, time.Hour, now)
+			leaf, err := ca.IssueBoundRelay(pub, ServiceAccountIdentity("c4-system", "c4-sync"), Bound{}, trackers, time.Hour, now)
 			return []*x509.Certificate{leaf, ca.Cert}, err
 		})
 		if err != nil {
@@ -145,13 +145,15 @@ func TestSyncSignsNoImports(t *testing.T) {
 		ok    bool
 	}{"an importer": {nil, true}, "a tracker's sync": {[]string{"show-a/flow"}, false}} {
 		pub, _, _ := ed25519.GenerateKey(nil)
-		leaf, err := ca.IssueBoundSync(pub, ServiceAccountIdentity("show-a", "import-git"), Bound{}, c.syncs, time.Hour, now)
+		leaf, err := ca.IssueBoundRelay(pub, ServiceAccountIdentity("show-a", "import-git"), Bound{}, c.syncs, time.Hour, now)
 		if err != nil {
 			t.Fatal(err)
 		}
-		v := &Verified{Identity: CertIdentity(leaf), PredicateType: PredicateImport, Syncs: CertSyncs(leaf)}
-		if err := CheckSigner(v); (err == nil) != c.ok {
-			t.Errorf("%s: %v", name, err)
+		for _, kind := range []string{PredicateImport, PredicateIngest} {
+			v := &Verified{Identity: CertIdentity(leaf), PredicateType: kind, Relays: CertRelays(leaf)}
+			if err := CheckSigner(v); (err == nil) != c.ok {
+				t.Errorf("%s, %s: %v", name, kind, err)
+			}
 		}
 	}
 }

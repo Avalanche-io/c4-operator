@@ -155,9 +155,9 @@ type Verified struct {
 	// Binding is the deployment binding the signer's leaf names, by its
 	// record's C4 ID (CertBinding): "" for a signer certified unbound.
 	Binding string
-	// Syncs are the Trackers a tracker sync's leaf names (CertSyncs,
+	// Relays are the Trackers a tracker sync's leaf names (CertRelays,
 	// <namespace>/<tracker>): the only ones it relays for.
-	Syncs []string
+	Relays []string
 	// TouchDevice is a confirmed act's touch key, by its device ID: the
 	// second of its two signatures.
 	TouchDevice string
@@ -327,7 +327,7 @@ func VerifyBundle(data []byte, roots *x509.CertPool) (*Verified, error) {
 	}
 	v := &Verified{Identity: CertIdentity(leaf), PredicateType: st.PredicateType, Subjects: st.Subject,
 		Predicate: st.Predicate, SignedAt: when.SignedAt, Payload: payload, Farm: farm,
-		Device: CertDevice(leaf), Grant: CertGrant(leaf), Runner: CertRunner(leaf), Binding: CertBinding(leaf), Syncs: CertSyncs(leaf), Expires: leaf.NotAfter}
+		Device: CertDevice(leaf), Grant: CertGrant(leaf), Runner: CertRunner(leaf), Binding: CertBinding(leaf), Relays: CertRelays(leaf), Expires: leaf.NotAfter}
 	if v.Device != "" && v.Device != CertDeviceID(leaf) {
 		return nil, fmt.Errorf("%w: the leaf names device %s, but its key is device %s", ErrUntrusted, v.Device, CertDeviceID(leaf))
 	}
@@ -463,9 +463,9 @@ func CheckSigner(v *Verified) error {
 	case PredicateDevice, PredicateBookEntry:
 		want = ComponentIdentity("issuer")
 	case PredicateImport, PredicateIngest:
-		if len(v.Syncs) > 0 {
+		if len(v.Relays) > 0 {
 			// a tracker's sync signs the decisions it relays, nothing else
-			return fmt.Errorf("%s records are an importer's, and %s is the sync of tracker %s", v.PredicateType, v.Identity, strings.Join(v.Syncs, ", "))
+			return fmt.Errorf("%s records are an importer's, and %s is the sync of tracker %s", v.PredicateType, v.Identity, strings.Join(v.Relays, ", "))
 		}
 		if strings.HasPrefix(v.Identity, IdentityBase+"sa/") {
 			return nil
