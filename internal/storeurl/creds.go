@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -27,6 +28,33 @@ type Credentials struct {
 
 func (c Credentials) ok() bool { return c.AccessKeyID != "" && c.SecretAccessKey != "" }
 
+func (c Credentials) validAt(t time.Time) bool {
+	return c.ok() && (c.Expires.IsZero() || t.Before(c.Expires))
+}
+
+// String, GoString and LogValue name the key and never print the secret
+// or the token, however Credentials is formatted or logged.
+func (c Credentials) String() string {
+	s := "Credentials{AccessKeyID: " + c.AccessKeyID + ", SecretAccessKey: " + redacted(c.SecretAccessKey)
+	if c.SessionToken != "" {
+		s += ", SessionToken: " + redacted(c.SessionToken)
+	}
+	if !c.Expires.IsZero() {
+		s += ", Expires: " + c.Expires.UTC().Format(time.RFC3339)
+	}
+	return s + "}"
+}
+
+func (c Credentials) GoString() string     { return c.String() }
+func (c Credentials) LogValue() slog.Value { return slog.StringValue(c.String()) }
+
+func redacted(v string) string {
+	if v == "" {
+		return `""`
+	}
+	return "<redacted>"
+}
+
 // CredentialSource gives the credentials to sign the next request with.
 type CredentialSource interface {
 	Retrieve(ctx context.Context) (Credentials, error)
@@ -41,25 +69,28 @@ func (s staticSource) Retrieve(context.Context) (Credentials, error) { return Cr
 func Static(c Credentials) CredentialSource { return staticSource(c) }
 
 // Ambient is the standard AWS credential chain, as the AWS CLI and SDKs
-// read it, for a process running as itself (a CLI, a job on an instance):
+// read it, for a process running as itself (a CLI, a job):
 //
 //  1. the environment: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and, for
 //     temporary keys, AWS_SESSION_TOKEN;
 //  2. a web identity (EKS pod roles, IRSA): AWS_WEB_IDENTITY_TOKEN_FILE and
 //     AWS_ROLE_ARN, exchanged with STS for temporary keys;
-//  3. the instance's role, from the EC2 metadata service (IMDSv2), unless
-//     AWS_EC2_METADATA_DISABLED=true.
+//  3. only with instanceRole, the machine's role, from the EC2 metadata
+//     service (IMDSv2), unless AWS_EC2_METADATA_DISABLED=true.
 //
-// Temporary keys are renewed before they expire. Ambient never applies by
-// default: a component that serves many projects must not lend its own
-// identity to a project that named no credentials, so callers choose it.
-func Ambient() CredentialSource { return &Chain{} }
+// The machine's role is never reached by default: an importer whose
+// project Secret is missing must fail, not write quietly as the node.
+// Temporary keys are renewed before they expire. Ambient never applies
+// to a Project's store: a component that serves many projects must not
+// lend its own identity to a project that named no credentials.
+func Ambient(instanceRole bool) CredentialSource { return &Chain{InstanceRole: instanceRole} }
 
 // Chain is Ambient's implementation; its fields are for tests.
 type Chain struct {
+	InstanceRole bool                // try the EC2 instance role last
 	Getenv       func(string) string // default os.Getenv
-	Client       *http.Client        // for STS; default a 30 s timeout
-	IMDSClient   *http.Client        // default a 2 s timeout: off EC2 it fails fast
+	Client       *http.Client        // for STS; default a 30 s timeout. Redirects are never followed
+	IMDSClient   *http.Client        // default a 2 s timeout: off EC2 it fails fast. Redirects are never followed
 	STSEndpoint  string              // default from AWS_ENDPOINT_URL_STS or the region
 	IMDSEndpoint string              // default AWS_EC2_METADATA_SERVICE_ENDPOINT or 169.254.169.254
 	Now          func() time.Time
@@ -67,7 +98,8 @@ type Chain struct {
 	mu        sync.Mutex
 	cur       Credentials
 	inflight  chan struct{}
-	lastTry   time.Time
+	lastErr   error     // the last renewal's failure, until one succeeds
+	lastFail  time.Time // when it failed
 	sessionNo int
 }
 
@@ -76,9 +108,13 @@ type Chain struct {
 // last 5 to 15 minutes.
 const renewBefore = 5 * time.Minute
 
-// After a failed renewal, keys that still hold are used without asking
-// again for this long, so a metadata outage doesn't stall every request.
+// After a failed renewal, nothing asks again for this long: callers with
+// keys that still hold use them, and callers with none get the failure,
+// so an outage costs one exchange every 10 s, not one per request.
 const retryRenewal = 10 * time.Second
+
+// A renewal gives up after this long.
+const renewTimeout = time.Minute
 
 func (c *Chain) now() time.Time {
 	if c.Now != nil {
@@ -94,54 +130,70 @@ func (c *Chain) getenv(k string) string {
 	return os.Getenv(k)
 }
 
-// Retrieve gives the current keys, renewing them first when they are
-// close to expiry. One renewal runs at a time; meanwhile other callers
-// keep the keys that still hold, and wait only when none do.
+// Retrieve gives the current keys, starting a renewal when they are close
+// to expiry. One renewal runs at a time, on its own: a caller holding keys
+// that still hold never waits for it, and a caller holding none waits only
+// as long as its own context allows.
 func (c *Chain) Retrieve(ctx context.Context) (Credentials, error) {
 	for {
 		c.mu.Lock()
 		now := c.now()
-		valid := c.cur.ok() && (c.cur.Expires.IsZero() || now.Before(c.cur.Expires))
-		fresh := valid && (c.cur.Expires.IsZero() || now.Before(c.cur.Expires.Add(-renewBefore)))
-		if fresh || (valid && (c.inflight != nil || now.Sub(c.lastTry) < retryRenewal)) {
+		valid := c.cur.validAt(now)
+		if valid && (c.cur.Expires.IsZero() || now.Before(c.cur.Expires.Add(-renewBefore))) {
 			cur := c.cur
 			c.mu.Unlock()
 			return cur, nil
 		}
-		if ch := c.inflight; ch != nil {
+		backingOff := c.lastErr != nil && now.Sub(c.lastFail) < retryRenewal
+		if c.inflight == nil && !backingOff {
+			c.inflight = make(chan struct{})
+			go c.renew(c.inflight)
+		}
+		switch {
+		case valid:
+			cur := c.cur
 			c.mu.Unlock()
-			select {
-			case <-ch:
-				continue
-			case <-ctx.Done():
-				return Credentials{}, ctx.Err()
-			}
-		}
-		ch := make(chan struct{})
-		c.inflight = ch
-		c.lastTry = now
-		c.mu.Unlock()
-
-		// The renewal serves every waiter, so it doesn't end with the
-		// context of whichever request started it.
-		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
-		got, err := c.resolve(rctx)
-		cancel()
-
-		c.mu.Lock()
-		c.inflight = nil
-		close(ch)
-		if err == nil {
-			c.cur = got
-		}
-		cur := c.cur
-		valid = cur.ok() && (cur.Expires.IsZero() || c.now().Before(cur.Expires))
-		c.mu.Unlock()
-		if err != nil && !valid {
+			return cur, nil
+		case c.inflight == nil:
+			err := c.lastErr
+			c.mu.Unlock()
 			return Credentials{}, err
 		}
-		return cur, nil
+		ch := c.inflight
+		c.mu.Unlock()
+		select {
+		case <-ch:
+			c.mu.Lock()
+			if !c.cur.validAt(c.now()) && c.lastErr != nil {
+				err := c.lastErr
+				c.mu.Unlock()
+				return Credentials{}, err
+			}
+			c.mu.Unlock()
+		case <-ctx.Done():
+			return Credentials{}, ctx.Err()
+		}
 	}
+}
+
+// renew runs one renewal, detached from any caller's context.
+func (c *Chain) renew(done chan struct{}) {
+	ctx, cancel := context.WithTimeout(context.Background(), renewTimeout)
+	got, err := c.resolve(ctx)
+	cancel()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := c.now()
+	if err == nil && !got.validAt(now) {
+		err = fmt.Errorf("renewed keys %s expired at %s, before they arrived (clock skew?)", got.AccessKeyID, got.Expires.UTC().Format(time.RFC3339))
+	}
+	if err == nil {
+		c.cur, c.lastErr = got, nil
+	} else {
+		c.lastErr, c.lastFail = err, now
+	}
+	c.inflight = nil
+	close(done)
 }
 
 func (c *Chain) resolve(ctx context.Context) (Credentials, error) {
@@ -158,6 +210,9 @@ func (c *Chain) resolve(ctx context.Context) (Credentials, error) {
 		}
 		return c.webIdentity(ctx, file, role)
 	}
+	if !c.InstanceRole {
+		return Credentials{}, errors.New("no AWS credentials: none in the environment and no web identity (the machine's instance role is used only when asked for)")
+	}
 	if strings.EqualFold(c.getenv("AWS_EC2_METADATA_DISABLED"), "true") {
 		return Credentials{}, errors.New("no AWS credentials: none in the environment, no web identity, and the instance metadata service is disabled")
 	}
@@ -170,12 +225,12 @@ func (c *Chain) resolve(ctx context.Context) (Credentials, error) {
 
 // ---- web identity (STS AssumeRoleWithWebIdentity) ----
 
-func (c *Chain) stsEndpoint() string {
+func (c *Chain) stsEndpoint() (string, error) {
 	if c.STSEndpoint != "" {
-		return c.STSEndpoint
+		return c.STSEndpoint, nil
 	}
 	if ep := c.getenv("AWS_ENDPOINT_URL_STS"); ep != "" {
-		return ep
+		return ep, nil
 	}
 	region := c.getenv("AWS_REGION")
 	if region == "" {
@@ -183,11 +238,42 @@ func (c *Chain) stsEndpoint() string {
 	}
 	switch {
 	case region == "":
-		return "https://sts.amazonaws.com"
+		return "https://sts.amazonaws.com", nil
+	case !validRegion(region):
+		return "", fmt.Errorf("AWS region %q is not a region name", region)
 	case strings.HasPrefix(region, "cn-"):
-		return "https://sts." + region + ".amazonaws.com.cn"
+		return "https://sts." + region + ".amazonaws.com.cn", nil
 	}
-	return "https://sts." + region + ".amazonaws.com"
+	return "https://sts." + region + ".amazonaws.com", nil
+}
+
+// validRegion keeps a region name to what can safely become part of a
+// host name.
+func validRegion(r string) bool {
+	if r == "" {
+		return false
+	}
+	for _, ch := range r {
+		if !(ch >= 'a' && ch <= 'z' || ch >= '0' && ch <= '9' || ch == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+// noRedirects is cl (or a client with timeout) that never follows a
+// redirect: a 3xx is the answer. Following one would resend the web
+// identity token, a session token or a request body to wherever the
+// Location points, and would turn a PUT into a body-less GET.
+func noRedirects(cl *http.Client, timeout time.Duration) *http.Client {
+	var c http.Client
+	if cl != nil {
+		c = *cl
+	} else {
+		c.Timeout = timeout
+	}
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &c
 }
 
 func (c *Chain) webIdentity(ctx context.Context, file, role string) (Credentials, error) {
@@ -210,16 +296,16 @@ func (c *Chain) webIdentity(ctx context.Context, file, role string) (Credentials
 		"RoleSessionName":  {session},
 		"WebIdentityToken": {strings.TrimSpace(string(tok))},
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.stsEndpoint(), strings.NewReader(form.Encode()))
+	endpoint, err := c.stsEndpoint()
+	if err != nil {
+		return Credentials{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return Credentials{}, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	client := c.Client
-	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
-	}
-	resp, err := client.Do(req)
+	resp, err := noRedirects(c.Client, 30*time.Second).Do(req)
 	if err != nil {
 		return Credentials{}, fmt.Errorf("sts: %w", err)
 	}
@@ -258,10 +344,7 @@ func (c *Chain) instanceRole(ctx context.Context) (Credentials, error) {
 		base = "http://169.254.169.254"
 	}
 	base = strings.TrimSuffix(base, "/")
-	client := c.IMDSClient
-	if client == nil {
-		client = &http.Client{Timeout: 2 * time.Second}
-	}
+	client := noRedirects(c.IMDSClient, 2*time.Second)
 	call := func(method, path, token string) (string, error) {
 		req, err := http.NewRequestWithContext(ctx, method, base+path, nil)
 		if err != nil {

@@ -58,8 +58,8 @@ Push-driven modes (these need --out, which holds the last commit per ref):
 S3 shards take credentials from the standard AWS chain: the
 environment (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and, for
 temporary keys, AWS_SESSION_TOKEN), then a pod's web identity
-(AWS_WEB_IDENTITY_TOKEN_FILE, AWS_ROLE_ARN), then the instance's
-role (IMDSv2).
+(AWS_WEB_IDENTITY_TOKEN_FILE, AWS_ROLE_ARN), then, only with
+--aws-instance-role, the machine's instance role (IMDSv2).
 
 flags:
 `
@@ -92,6 +92,7 @@ func runImportGit(args []string) error {
 	exportChain := fs.String("export-chain", "", "write this ref's chain to standard output with its base view in full (for c4 log and c4 split), and exit")
 	signerURL := fs.String("signer", "", "the farm's certificate issuer (for example http://c4-signer.c4-system.svc): sign an import record per commit as this importer's workload identity")
 	signToken := fs.String("sign-token-file", "", "service account token (audience c4-signer) that proves the importer's identity to the issuer")
+	instanceRole := fs.Bool("aws-instance-role", false, "let S3 shards use this machine's instance role (EC2 metadata) when the environment and a web identity give no credentials; off by default, so a missing Secret fails instead of writing as the node")
 	fs.Parse(args)
 	if fs.NArg() != 0 {
 		fs.Usage()
@@ -123,7 +124,7 @@ func runImportGit(args []string) error {
 	for _, sh := range shards {
 		specs = append(specs, storeurl.ParseSpec(sh))
 	}
-	st, err := storeurl.OpenShardedWith(specs, storeurl.Ambient())
+	st, err := storeurl.OpenShardedWith(specs, storeurl.Ambient(*instanceRole))
 	if err != nil {
 		return err
 	}

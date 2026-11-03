@@ -433,6 +433,36 @@ func TestProjectValidation(t *testing.T) {
 	}
 }
 
+// A shard URL whose S3 prefix doesn't end in "/" is refused when the
+// Project is applied, with the reason, not later when its store opens.
+func TestShardURLPrefixAdmission(t *testing.T) {
+	for i, c := range []struct {
+		url string
+		ok  bool
+	}{
+		{"s3://bucket", true},
+		{"s3://bucket/", true},
+		{"s3://bucket/runs/", true},
+		{"s3://bucket/a/b/?region=us-west-2&endpoint=http://minio.studio.example:9000", true},
+		{"c4d://store.studio.example:7433", true},
+		{"s3://bucket/runs", false},
+		{"s3://bucket/a/b?region=us-west-2", false},
+	} {
+		p := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("prefix-%d", i)}}
+		p.Spec.Store.Shards = []c4v1.StoreShard{{Name: "s0", URL: c.url}}
+		err := k8s.Create(context.Background(), p)
+		if c.ok != (err == nil) {
+			t.Errorf("%s: %v", c.url, err)
+		}
+		if err != nil && !strings.Contains(err.Error(), `must end in "/"`) {
+			t.Errorf("%s: refused without the reason: %v", c.url, err)
+		}
+		if err == nil {
+			k8s.Delete(context.Background(), p)
+		}
+	}
+}
+
 // signedAs signs a record as identity and stores it.
 func signedAs(t *testing.T, st *tree, identity, predicateType string, subjects []provenance.Subject, pred any) string {
 	t.Helper()

@@ -28,7 +28,8 @@ func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 // object the project's store lacks to its shard, publishes the view's
 // records, and prints the view ID. S3 credentials come from the standard
 // AWS chain, as this process runs: the environment (with AWS_SESSION_TOKEN
-// for temporary keys), a pod's web identity, or the instance's role.
+// for temporary keys), a pod's web identity, or, only with
+// --aws-instance-role, the machine's instance role.
 func runIngest(args []string) error {
 	fs := flag.NewFlagSet("ingest", flag.ExitOnError)
 	var shards multiFlag
@@ -39,6 +40,7 @@ func runIngest(args []string) error {
 	signerURL := fs.String("signer", "", "the farm's certificate issuer: sign an ingest record of the view as this workload's identity")
 	signToken := fs.String("sign-token-file", "", "service account token (audience c4-signer) that proves the ingesting workload's identity to the issuer")
 	recordOut := fs.String("record-out", "", "write the ingest record's ID to this file")
+	instanceRole := fs.Bool("aws-instance-role", false, "let S3 shards use this machine's instance role (EC2 metadata) when the environment and a web identity give no credentials; off by default, so a missing Secret fails instead of writing as the node")
 	fs.Parse(args)
 	if fs.NArg() != 1 || len(shards) == 0 {
 		return errors.New("usage: c4-operator ingest --shard NAME=URL [--shard NAME=URL...] [--c4m FILE] DIR")
@@ -48,7 +50,7 @@ func runIngest(args []string) error {
 	for _, sh := range shards {
 		specs = append(specs, storeurl.ParseSpec(sh))
 	}
-	st, err := storeurl.OpenShardedWith(specs, storeurl.Ambient())
+	st, err := storeurl.OpenShardedWith(specs, storeurl.Ambient(*instanceRole))
 	if err != nil {
 		return err
 	}

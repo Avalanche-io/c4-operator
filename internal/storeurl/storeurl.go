@@ -226,6 +226,9 @@ func openS3(raw string, creds CredentialSource) (Shard, error) {
 	if region == "" {
 		region = "us-east-1"
 	}
+	if !validRegion(region) {
+		return nil, fmt.Errorf("S3 store %s: region %q is not a region name", Redact(raw), region)
+	}
 	if creds == nil {
 		return nil, fmt.Errorf("S3 store %s needs credentials", Redact(raw))
 	}
@@ -241,11 +244,11 @@ func openS3(raw string, creds CredentialSource) (Shard, error) {
 		region:   region,
 		endpoint: endpoint,
 		creds:    creds,
-		client: &http.Client{Transport: &http.Transport{
+		client: noRedirects(&http.Client{Transport: &http.Transport{
 			MaxIdleConnsPerHost:   64,
 			ResponseHeaderTimeout: 60 * time.Second,
 			IdleConnTimeout:       90 * time.Second,
-		}},
+		}}, 0),
 	}, nil
 }
 
@@ -326,13 +329,9 @@ func s3Error(resp *http.Response, op string, id c4.ID) error {
 	if resp.StatusCode == http.StatusNotFound {
 		return fmt.Errorf("s3 %s %s: %w", op, id, ErrNotFound)
 	}
-	msg := strings.TrimSpace(string(body))
-	if i := strings.Index(msg, "<Message>"); i >= 0 {
-		if j := strings.Index(msg[i:], "</Message>"); j > 0 {
-			msg = msg[i+9 : i+j]
-		}
-	}
-	return fmt.Errorf("s3 %s %s: status %d: %s", op, id, resp.StatusCode, msg)
+	// S3's code and message only: an error body can quote the signed
+	// request, session token included.
+	return fmt.Errorf("s3 %s %s: status %d%s", op, id, resp.StatusCode, s3Message(body))
 }
 
 func parseContentRange(v string) (start, total int64, err error) {

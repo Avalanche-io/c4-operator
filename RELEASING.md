@@ -38,6 +38,22 @@ What a farm running an earlier build must do, or will notice, on upgrade.
 - **Tool jobs made before the upgrade** that claim a network name no
   version, so their units not yet released are held ("names no version of
   it"). Submit them again through the tool (`c4 farm submit`).
+- **An S3 store URL's prefix must end in "/".** Objects are stored as
+  prefix + ID, as the c4 CLI stores them, so `s3://bucket/c4` put them
+  beside the folder (`c4c4...`), not in it. Such a URL is now refused when a
+  Project is applied (the CRD says why) and when a store opens. Apply the
+  CRDs. A store already filled under a prefix without "/" is not opened by
+  this build: keep it on the previous build until its objects are moved
+  under `prefix/`. How existing stores move is still to be decided; this
+  note will say.
+- **`ingest` and `import-git` accept temporary AWS credentials:**
+  `AWS_SESSION_TOKEN` beside the keys, or a pod's web identity
+  (`AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_ARN`). A machine's instance role
+  is used only with `--aws-instance-role`. Projects' stores still use only
+  their Secret's keys.
+- **Add a lifecycle rule to S3 buckets** that aborts incomplete multipart
+  uploads (`AbortIncompleteMultipartUpload`, a day is plenty). Uploads are
+  aborted when they fail, but one whose start was lost in transit can't be.
 
 ## v0.1.0 checklist
 

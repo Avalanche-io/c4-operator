@@ -152,10 +152,11 @@ func TestAmbientWebIdentityRenews(t *testing.T) {
 		t.Fatalf("renewed early: %s, %d calls", got.AccessKeyID, f.calls.Load())
 	}
 	os.WriteFile(tokFile, []byte("jwt-2\n"), 0o600)
-	clk.Add(6 * time.Minute) // 4 minutes left: renew
-	if got, _ := c.Retrieve(ctx); got.AccessKeyID != "ASIA2" {
-		t.Fatalf("not renewed: %s", got.AccessKeyID)
+	clk.Add(6 * time.Minute) // 4 minutes left: renewal starts, the old keys serve meanwhile
+	if got, _ := c.Retrieve(ctx); got.AccessKeyID != "ASIA1" {
+		t.Fatalf("waited for the renewal: %s", got.AccessKeyID)
 	}
+	eventually(t, func() bool { got, _ := c.Retrieve(ctx); return got.AccessKeyID == "ASIA2" })
 	if f.tokens[1] != "jwt-2" {
 		t.Fatalf("renewed with the old token file: %q", f.tokens)
 	}
@@ -166,14 +167,32 @@ func TestAmbientWebIdentityRenews(t *testing.T) {
 	if got, err := c.Retrieve(ctx); err != nil || got.AccessKeyID != "ASIA2" {
 		t.Fatalf("lost keys that still hold: %+v %v", got, err)
 	}
+	eventually(t, func() bool { c.mu.Lock(); defer c.mu.Unlock(); return c.lastErr != nil })
+	if got, err := c.Retrieve(ctx); err != nil || got.AccessKeyID != "ASIA2" {
+		t.Fatalf("lost keys that still hold after a failed renewal: %+v %v", got, err)
+	}
 	clk.Add(4 * time.Minute) // expired, STS still down
 	if _, err := c.Retrieve(ctx); err == nil || !strings.Contains(err.Error(), "ServiceUnavailable") {
 		t.Fatalf("expired keys were used, or the error was lost: %v", err)
 	}
 	f.fail.Store(false)
+	if _, err := c.Retrieve(ctx); err == nil {
+		t.Fatal("asked STS again within 10 s of a failure")
+	}
+	clk.Add(11 * time.Second)
 	if got, err := c.Retrieve(ctx); err != nil || got.AccessKeyID != "ASIA3" {
 		t.Fatalf("no recovery: %+v %v", got, err)
 	}
+}
+
+func eventually(t *testing.T, cond func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		if cond() {
+			return
+		}
+	}
+	t.Fatal("never happened")
 }
 
 // Many requests at once start one exchange: those holding no keys wait
@@ -226,12 +245,12 @@ func TestAmbientInstanceRole(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	c := &Chain{Getenv: env(nil), IMDSEndpoint: srv.URL}
+	c := &Chain{InstanceRole: true, Getenv: env(nil), IMDSEndpoint: srv.URL}
 	got, err := c.Retrieve(context.Background())
 	if err != nil || got.AccessKeyID != "ASIAROLE" || got.SessionToken != "rt" || got.Expires.IsZero() {
 		t.Fatalf("%+v %v", got, err)
 	}
-	c = &Chain{Getenv: env(map[string]string{"AWS_EC2_METADATA_DISABLED": "true"}), IMDSEndpoint: srv.URL}
+	c = &Chain{InstanceRole: true, Getenv: env(map[string]string{"AWS_EC2_METADATA_DISABLED": "true"}), IMDSEndpoint: srv.URL}
 	if _, err := c.Retrieve(context.Background()); err == nil {
 		t.Fatal("used the metadata service it was told not to")
 	}
@@ -430,6 +449,32 @@ func TestS3PutRetriesSlowDown(t *testing.T) {
 	}
 	if bucket.fail503 != 0 || !bytes.Equal(bucket.objects["p/"+id.String()], data) {
 		t.Fatal("not retried")
+	}
+}
+
+// The Project CRD refuses the same URLs on apply (a CEL rule on the
+// shard URL) that Open refuses: its regular expression, read from the API
+// source, agrees with Open on every case.
+func TestAdmissionAgreesWithOpen(t *testing.T) {
+	src, err := os.ReadFile("../../api/v1alpha1/project_types.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`self\.matches\('([^']+)'\)`).FindSubmatch(src)
+	if m == nil {
+		t.Fatal("no shard URL rule in project_types.go")
+	}
+	rule := regexp.MustCompile(string(m[1]))
+	creds := Credentials{AccessKeyID: "AK", SecretAccessKey: "SK"}
+	for _, raw := range []string{
+		"s3://bucket", "s3://bucket/", "s3://bucket/runs/", "s3://bucket/a/b/",
+		"s3://bucket/runs", "s3://bucket/c4-bench-x", "s3://bucket/a/b?region=us-west-2",
+		"s3://bucket/a/b/?region=us-west-2&endpoint=http://minio:9000", "s3://bucket?region=us-west-2",
+	} {
+		_, err := Open(raw, creds)
+		if admitted := rule.MatchString(raw); admitted != (err == nil) {
+			t.Errorf("%s: admission %v, open %v", raw, admitted, err)
+		}
 	}
 }
 

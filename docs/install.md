@@ -78,6 +78,11 @@ spec:
     - {name: s1, url: "s3://show-a-bucket-2/c4/?endpoint=https://s3.example.com"}
 ```
 
+A shard's prefix ends in "/" (objects are stored as prefix + ID). Give each
+bucket a lifecycle rule that aborts incomplete multipart uploads
+(`AbortIncompleteMultipartUpload`, after a day): uploads that fail are
+aborted, but one whose start was lost in transit can't be.
+
 Put trees in the store with `c4-operator ingest` (or `import-git` for a git
 history), then mount them with a `Materialization` and a csi volume;
 [a trial cluster on kind](#a-trial-cluster-on-kind-by-hand) shows each step. [DESIGN.md](../DESIGN.md)

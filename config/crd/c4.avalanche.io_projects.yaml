@@ -192,9 +192,16 @@ spec:
                         url:
                           description: |-
                             URL in C4_STORE form: s3://bucket/prefix/?region=..&endpoint=..,
-                            c4d://host:port, or http(s)://host:port.
+                            c4d://host:port, or http(s)://host:port. An S3 prefix ends in "/":
+                            objects are stored as prefix+ID, as the c4 CLI stores them, so
+                            s3://bucket/runs would store them beside the folder (runs<id>).
                           minLength: 1
                           type: string
+                          x-kubernetes-validations:
+                          - message: 'an S3 prefix must end in "/" (s3://bucket/prefix/):
+                              objects are stored as prefix+ID, so without it they
+                              would land beside the folder'
+                            rule: '!self.startsWith(''s3://'') || self.matches(''^s3://[^/?]+(/([^?]*/)?)?([?].*)?$'')'
                       required:
                       - name
                       - url
