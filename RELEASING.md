@@ -43,9 +43,8 @@ What a farm running an earlier build must do, or will notice, on upgrade.
   beside the folder (`c4c4...`), not in it. Such a URL is now refused when a
   Project is applied (the CRD says why) and when a store opens. Apply the
   CRDs. A store already filled under a prefix without "/" is not opened by
-  this build: keep it on the previous build until its objects are moved
-  under `prefix/`. How existing stores move is still to be decided; this
-  note will say.
+  this build until its objects are moved under `prefix/`, once, with
+  docs/install.md's recipe (Moving a store to a prefix ending in "/").
 - **`ingest` and `import-git` accept temporary AWS credentials:**
   `AWS_SESSION_TOKEN` beside the keys, or a pod's web identity
   (`AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_ARN`). A machine's instance role

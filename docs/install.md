@@ -78,7 +78,8 @@ spec:
     - {name: s1, url: "s3://show-a-bucket-2/c4/?endpoint=https://s3.example.com"}
 ```
 
-A shard's prefix ends in "/" (objects are stored as prefix + ID). Give each
+A shard's prefix ends in "/" (objects are stored as prefix + ID; see
+[Moving a store to a prefix ending in "/"](#moving-a-store-to-a-prefix-ending-in-) for a store filled before this was checked). Give each
 bucket a lifecycle rule that aborts incomplete multipart uploads
 (`AbortIncompleteMultipartUpload`, after a day): uploads that fail are
 aborted, but one whose start was lost in transit can't be.
@@ -257,3 +258,30 @@ multi-arch image with buildx; without `PUSH=1` it writes an OCI archive to
 
 To keep GitHub, Flow Production Tracking or MLflow in step with the farm,
 install c4-sync from the release's `c4-sync.yaml`: see [c4-sync](c4-sync.md).
+
+## Moving a store to a prefix ending in "/"
+
+A shard URL's prefix must end in "/": objects are stored as prefix + ID, so
+a URL such as `s3://show-a-bucket/c4` stored them beside the folder
+(`c4c4...`) rather than in it. Earlier builds accepted such URLs. To keep a
+store filled that way, move its objects once:
+
+```sh
+# BUCKET and PREFIX as in the old URL s3://BUCKET/PREFIX (no "/"). For a
+# store that isn't AWS, export AWS_ENDPOINT_URL=URL first. A key moves only
+# if it is exactly PREFIX followed by a C4 ID (c4 and 88 base58 digits);
+# every other key under PREFIXc4 is left and printed. Safe to run again.
+B=BUCKET P=PREFIX
+aws s3api list-objects-v2 --bucket "$B" --prefix "${P}c4" --query 'Contents[].Key' --output text |
+  tr '\t' '\n' | while read -r k; do
+    id=${k#"$P"}
+    if [ "$k" = None ]; then continue
+    elif [[ ${#k} -eq $((${#P} + 90)) && $id =~ ^c4[1-9A-HJ-NP-Za-km-z]{88}$ ]]; then
+      aws s3 mv "s3://$B/$k" "s3://$B/$P/$id" --only-show-errors
+    else
+      echo "skipped: $k" >&2
+    fi
+  done
+```
+
+Then change the URL to `s3://BUCKET/PREFIX/`.
