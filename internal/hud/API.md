@@ -2611,8 +2611,6 @@ actOn }`.
   lapsed? }`: who granted it, its record, and when its book entry counts
   from. `lapsed` says why one holds nothing: it names no Party, or its
   record does not verify (an entry pending the seal can cite anything).
-  An organisation's `groups` always end with `c4:party:<name>` holding
-  `member`, which has no record: the studio's sign-in says who is in it.
 - `booked` says the make-party record is in the book; make it again the
   same way to book it.
 - `yours` are the purposes the viewer holds for it, in effect. `actOn` is
@@ -2630,8 +2628,11 @@ purpose.
 **Membership by the studio's groups.** An admin says the members of an
 IdP group (`lighting-sups`) hold some purposes: `{ group: "lighting-sups",
 purposes: [member, approve-spend] }`. The group is matched against the
-groups the viewer signed in with. `c4:party:<name>` and `c4-party-<name>`
-hold `member` and nothing more, so a rule for either is `400`.
+groups the viewer signed in with. Membership is issuance (ORGANIZATION
+9.1): the signed rule issues it, and the group is only the evidence that
+a sign-in falls under it. So in a Party the farm keeps, the provider's
+`c4:party:<name>` group alone holds nothing; a rule an admin signs for it
+holds what the rule says, as for any group.
 
 **Who may:**
 - Make an organisation: a farm admin (one who may create `parties`, or a
@@ -2674,8 +2675,9 @@ book is the state: the HUD books its record before it answers, and a
 record the book does not take is `503`, with nothing changed.
 
 **Waits.** A `party:<name>` wait for a party the farm keeps is decided only
-by a person holding `member` for it, in effect: by their Party, by a
-group, or by `c4:party:<name>`. The decision's `authorization` ends with
+by a person holding `member` for it, in effect: by their Party, or by a
+group under a signed rule, never by the provider's `c4:party:<name>`
+group alone. The decision's `authorization` ends with
 the membership it was made under (`; a member of kestrel holding member
 (record ...)`). A wait for a party the farm doesn't keep takes the
 `c4:party:<name>` group, as before. A tracker login the people map names as

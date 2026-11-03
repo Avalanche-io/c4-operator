@@ -79,9 +79,13 @@ var Purposes = []string{PurposeMember, PurposeAdmin, PurposeApproveSpend, Purpos
 // one switch.
 var (
 	// MembersByGroup (9.1): a member may hold purposes by a group of the
-	// studio's own sign-in, and c4:party:<name> holds member. Off, every
-	// member is named in C4: group rules are refused and read as nothing,
-	// and the c4:party: group no longer speaks for a Party.
+	// studio's own sign-in, through a group rule an admin signed. Membership
+	// is issuance (Joshua, 11-03): the signed rule issues it, and the group
+	// is only the evidence that a sign-in falls under it. Off, every member
+	// is named in C4: group rules are refused and read as nothing. Either
+	// way, the provider's c4:party:<name> group alone holds nothing in a
+	// Party the farm keeps; it speaks only for a party the farm keeps none
+	// of, as before the farm book.
 	MembersByGroup = true
 	// ViewPeopleNeedsPolicy (9.3): view-people is its own purpose, which
 	// view-spend does not imply, and it is in effect only where the
@@ -372,8 +376,9 @@ func (s *Server) standingOf(ctx context.Context, v *api.Viewer) *standing {
 
 // standingAt is what ps and view say of v: for each Party, the purposes v
 // holds in effect. An organisation's are its memberships in force naming
-// v's person Party, those of v's groups, and the c4:party: group's member;
-// a person's own Party gives them every purpose (ORGANIZATION 5).
+// v's person Party and those of v's groups by a signed group rule, never
+// the provider's c4:party: group alone (membership is issuance, 9.1); a
+// person's own Party gives them every purpose (ORGANIZATION 5).
 func (s *Server) standingAt(ctx context.Context, v *api.Viewer, ps []c4v1.Party, view *farmbook.View, verr error) *standing {
 	st := &standing{parties: ps, held: map[string]map[string]string{}, named: map[string][]string{}, err: verr}
 	if len(ps) == 0 || v == nil || v.Unit != nil || v.User == "" {
@@ -426,10 +431,6 @@ func (s *Server) standingAt(ctx context.Context, v *api.Viewer, ps []c4v1.Party,
 				st.named[p.Name] = purposes
 			}
 			grant(p, purposes, on.Entry.Record)
-		}
-		if MembersByGroup && slices.Contains(v.Parties, p.Name) {
-			// The studio's c4:party:<name> group: member, and nothing more.
-			grant(p, []string{PurposeMember}, "")
 		}
 	}
 	if st.err != nil {
@@ -551,9 +552,6 @@ func (s *Server) partyView(ctx context.Context, p *c4v1.Party, view *farmbook.Vi
 		} else {
 			out.Members = append(out.Members, e)
 		}
-	}
-	if MembersByGroup {
-		out.Groups = append(out.Groups, api.Member{Group: partyGroups(p.Name)[0], Purposes: []string{PurposeMember}, InEffect: []string{PurposeMember}})
 	}
 	return out, nil
 }
@@ -1561,9 +1559,6 @@ func (s *Server) handleMember(action string) http.HandlerFunc {
 			return
 		case body.Group != "" && !subjectName.MatchString(body.Group):
 			fail(w, http.StatusBadRequest, "group: a group of the studio's sign-in, without spaces or commas")
-			return
-		case body.Group != "" && slices.Contains(partyGroups(p.Name), body.Group):
-			fail(w, http.StatusBadRequest, "group: the studio's %s group holds member and nothing more, as its sign-in says who is in it", body.Group)
 			return
 		case body.Person != "":
 			key, who = farmbook.MemberKey(p.Name, body.Person), body.Person

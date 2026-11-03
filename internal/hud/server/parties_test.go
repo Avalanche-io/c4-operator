@@ -372,10 +372,8 @@ func TestPartiesAndMembers(t *testing.T) {
 	if code, out := members(http.MethodPost, "/end", "dana", map[string]any{"person": "dana"}); code != http.StatusNotFound {
 		t.Errorf("dana leaves twice: %d %v", code, out)
 	}
-	// by the studio's own groups
-	if code, out := members(http.MethodPost, "", "noor", map[string]any{"group": "c4:party:kestrel", "purposes": []string{"member", "admin"}}); code != http.StatusBadRequest || !says(out, "member and nothing more") {
-		t.Errorf("more for the c4:party: group: %d %v", code, out)
-	}
+	// by the studio's own groups, each under a rule an admin signs (the
+	// c4:party: group too: TestKeptPartyMembershipIsIssued)
 	if code, out := members(http.MethodPost, "", "noor", map[string]any{"group": "lighting-sups", "purposes": []string{"member", "approve-spend"}}); code != http.StatusOK {
 		t.Fatalf("lighting-sups: %d %v", code, out)
 	}
@@ -394,7 +392,7 @@ func TestPartiesAndMembers(t *testing.T) {
 		got["group:"+m.Group] = m.Purposes
 	}
 	want := map[string][]string{"noor": {"member", "admin", "approve-spend"}, "lee": {"member", "admin"},
-		"group:lighting-sups": {"member", "approve-spend"}, "group:c4:party:kestrel": {"member"}}
+		"group:lighting-sups": {"member", "approve-spend"}}
 	if len(got) != len(want) || !pv.FirstAdmin.Accepted {
 		t.Errorf("kestrel's members: %v, want %v; first admin %+v", got, want, pv.FirstAdmin)
 	}
@@ -483,8 +481,11 @@ func TestPartyRecommendationsFlip(t *testing.T) {
 	_, sam := p.viewer("sam")
 	_, kim := p.viewer("kim")
 	_, maya := p.viewer("maya")
-	if !p.s.holdsFor(ctx, sam, "kestrel", PurposeMember) || !p.s.holdsFor(ctx, kim, "kestrel", PurposeMember) {
-		t.Fatal("groups hold nothing with MembersByGroup on")
+	if !p.s.holdsFor(ctx, sam, "kestrel", PurposeMember) {
+		t.Fatal("a group rule holds nothing with MembersByGroup on")
+	}
+	if p.s.holdsFor(ctx, kim, "kestrel", PurposeMember) {
+		t.Fatal("the provider's c4:party:kestrel group holds member in a kept Party, with no signed rule")
 	}
 	defer func(was bool) { MembersByGroup = was }(MembersByGroup)
 	MembersByGroup = false
@@ -600,8 +601,14 @@ func TestPartyWaitsTakeMembers(t *testing.T) {
 	}
 	add(http.MethodPut, map[string]any{"person": "dana", "purposes": []string{"member", "approve-spend"}})
 	add(http.MethodPost, map[string]any{"group": "lighting-sups", "purposes": []string{"member"}})
-	if may("dana") != nil || may("sam") != nil || may("kim") != nil {
-		t.Errorf("members do not decide: dana %v, sam %v, kim %v", may("dana"), may("sam"), may("kim"))
+	if may("dana") != nil || may("sam") != nil {
+		t.Errorf("members do not decide: dana %v, sam %v", may("dana"), may("sam"))
+	}
+	// kim is only in the provider's c4:party:kestrel group: once the farm
+	// keeps Kestrel, that group alone decides nothing (membership is
+	// issuance, ORGANIZATION 9.1)
+	if may("kim") == nil {
+		t.Error("the provider's c4:party: group decides for a kept Party, with no signed rule")
 	}
 	// the decision's record names the membership it was made under
 	code, out := p.call(t, http.MethodPost, "/api/v1/jobs/show-a/sh040-light-v007/decide", "dana", map[string]any{"unit": "registry", "do": "approve"}, nil)
@@ -634,6 +641,55 @@ func TestPartyWaitsTakeMembers(t *testing.T) {
 	d.Agent = "ra"
 	if MayControl("decide", "party:kestrel", d) == nil {
 		t.Error("an agent decides for its person's party")
+	}
+}
+
+// Membership is issuance (ORGANIZATION 9.1, Joshua 11-03): in a Party the
+// farm keeps, the provider's c4:party:<name> group alone holds nothing and
+// decides none of the Party's waits, and the listing shows no row for it;
+// the same group, under a group rule a Party admin signed, holds what the
+// rule says, and no more.
+func TestKeptPartyMembershipIsIssued(t *testing.T) {
+	p := newPartyRig(t)
+	ctx := context.Background()
+	rec := p.s.m.byKey["show-a/sh040-light-v007"]
+	since := metav1.NewTime(time.Date(2026, 10, 23, 11, 0, 0, 0, time.UTC))
+	rec.job.Status.Waits = []c4v1.WorkWait{{Unit: 9, Name: "registry", Server: "party:kestrel", Since: &since, Blocking: true}}
+	if err := p.s.Client.Create(ctx, rec.job.DeepCopy()); err != nil {
+		t.Fatal(err)
+	}
+	p.people(t)
+	p.org(t, "kestrel", "noor", "noor")
+	_, kim := p.viewer("kim")
+	may := func() error {
+		r, v := p.viewer("kim")
+		return MayControl("decide", "party:kestrel", p.s.decider(r, v))
+	}
+	for _, purpose := range Purposes {
+		if p.s.holdsFor(ctx, kim, "kestrel", purpose) {
+			t.Errorf("kim holds %s in Kestrel by the provider's group alone", purpose)
+		}
+	}
+	if may() == nil {
+		t.Error("kim decides Kestrel's wait by the provider's group alone")
+	}
+	for _, g := range p.party(t, "kestrel", "noor").Groups {
+		if g.Group == "c4:party:kestrel" {
+			t.Errorf("the listing shows the provider's group as a member: %+v", g)
+		}
+	}
+	// an admin's signed group rule for that group issues what it says
+	if code, out := p.call(t, http.MethodPost, "/api/v1/parties/kestrel/members", "noor",
+		map[string]any{"group": "c4:party:kestrel", "purposes": []string{"member", "approve-spend"}}, nil); code != http.StatusOK {
+		t.Fatalf("the group rule: %d %v", code, out)
+	}
+	_, kim = p.viewer("kim")
+	if !p.s.holdsFor(ctx, kim, "kestrel", PurposeMember) || !p.s.holdsFor(ctx, kim, "kestrel", PurposeApproveSpend) ||
+		p.s.holdsFor(ctx, kim, "kestrel", PurposeAdmin) {
+		t.Error("kim doesn't hold exactly what the signed rule says")
+	}
+	if err := may(); err != nil {
+		t.Errorf("kim, under the signed rule, doesn't decide Kestrel's wait: %v", err)
 	}
 }
 
