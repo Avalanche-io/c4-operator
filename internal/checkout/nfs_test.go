@@ -7,7 +7,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/Avalanche-io/c4"
 
@@ -40,8 +42,29 @@ func TestNFSConformance(t *testing.T) {
 				t.Errorf("close: %v", err)
 			}
 		})
+		// Off the network: an address of this machine other than the
+		// loopback is refused.
+		if addrs, err := net.InterfaceAddrs(); err == nil {
+			for _, a := range addrs {
+				ip, ok := a.(*net.IPNet)
+				if !ok || ip.IP.IsLoopback() || ip.IP.To4() == nil {
+					continue
+				}
+				if c, err := net.DialTimeout("tcp", net.JoinHostPort(ip.IP.String(), strconv.Itoa(port)), time.Second); err == nil {
+					c.Close()
+					t.Fatalf("the server answers on %s, off the loopback", ip.IP)
+				}
+			}
+		}
 		return n
 	})
+}
+
+// The server binds the loopback by name, never a library default.
+func TestNFSServesLoopbackOnly(t *testing.T) {
+	if got := serverOptions(2049).Hostname; got != "127.0.0.1" {
+		t.Fatalf("the server binds %q, not the IPv4 loopback", got)
+	}
 }
 
 // A view of a git repository: the workspace's index is the sidecar,

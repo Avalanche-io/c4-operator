@@ -126,6 +126,16 @@ func (n *NFS) indexSidecar(v *view.View, lower absfs.FileSystem) (absfs.FileSyst
 // no Finder or Spotlight on the mount.
 const MountOptions = "vers=3,tcp,locallocks,noresvport,noatime,nobrowse"
 
+// The server listens on the IPv4 loopback only, named here rather than
+// left to the library's default. That keeps it off the network; it doesn't
+// keep out other processes or users on this machine, which can speak NFS
+// to it and reach every workspace it serves.
+const loopback = "127.0.0.1"
+
+func serverOptions(port int) absnfs.ServerOptions {
+	return absnfs.ServerOptions{Hostname: loopback, Port: port, MountPort: port, UseRecordMarking: true}
+}
+
 func (n *NFS) Name() string { return "nfs" }
 
 // Start serves the export and mounts it. Close undoes both.
@@ -151,7 +161,7 @@ func (n *NFS) Start() error {
 	if err != nil {
 		return err
 	}
-	srv, err := absnfs.NewServer(absnfs.ServerOptions{Port: n.Port, MountPort: n.Port, UseRecordMarking: true})
+	srv, err := absnfs.NewServer(serverOptions(n.Port))
 	if err != nil {
 		return err
 	}
@@ -165,7 +175,7 @@ func (n *NFS) Start() error {
 	}
 	port := strconv.Itoa(n.Port)
 	opts := MountOptions + ",port=" + port + ",mountport=" + port
-	if out, err := exec.Command("mount_nfs", "-o", opts, "localhost:/", n.MountPoint).CombinedOutput(); err != nil {
+	if out, err := exec.Command("mount_nfs", "-o", opts, loopback+":/", n.MountPoint).CombinedOutput(); err != nil {
 		srv.Stop()
 		return fmt.Errorf("nfs: mount_nfs: %v: %s", err, out)
 	}
