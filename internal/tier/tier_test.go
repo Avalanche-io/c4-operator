@@ -479,3 +479,30 @@ func TestMisplacedRangeIsNotTheObject(t *testing.T) {
 		t.Fatal("the cache holds other bytes under the object's ID")
 	}
 }
+
+// wrongSizeSource answers where it is asked, but with another object, of
+// another size.
+type wrongSizeSource struct{ data []byte }
+
+func (s *wrongSizeSource) Name() string        { return "wrong-size" }
+func (s *wrongSizeSource) Kind() string        { return "peer" }
+func (s *wrongSizeSource) Authoritative() bool { return false }
+func (s *wrongSizeSource) Get(_ context.Context, _ string, _ c4.ID, offset int64) (io.ReadCloser, int64, int64, error) {
+	other := bytes.Repeat([]byte{'x'}, len(s.data)+5)
+	return io.NopCloser(bytes.NewReader(other[offset:])), int64(len(other)), offset, nil
+}
+
+// Once a fill knows the object's size, a source that gives another size
+// for the same ID is not giving this object.
+func TestOtherSizeIsNotTheObject(t *testing.T) {
+	data := randomBytes(4096)
+	id := c4.Identify(bytes.NewReader(data))
+	cut := &fakeSource{name: "store", kind: "store", auth: true, data: data, cutAfter: 1000}
+	h := newHarness(t, fill.Limits{}, func(string, c4.ID) []Source {
+		return []Source{cut, &wrongSizeSource{data: data}}
+	})
+	resp, body := h.get(t, id, 0)
+	if resp.StatusCode != http.StatusOK || !bytes.Equal(body, data) {
+		t.Fatalf("served %d: %d bytes, the object's %v", resp.StatusCode, len(body), bytes.Equal(body, data))
+	}
+}

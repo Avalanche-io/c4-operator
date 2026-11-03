@@ -150,6 +150,14 @@ func (f *Flight) SetSize(n int64) {
 	f.mu.Unlock()
 }
 
+// KnownSize is the object's total size if the leader has learned it, or
+// -1. It never waits.
+func (f *Flight) KnownSize() int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.size
+}
+
 // Written is how many bytes the leader has written so far, the offset to
 // resume from after an upstream failure.
 func (f *Flight) Written() int64 {

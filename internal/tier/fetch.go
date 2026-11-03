@@ -121,6 +121,12 @@ func (fe *Fetcher) try(ctx context.Context, f *fill.Flight, project string, id c
 		metrics.TierUpstream.WithLabelValues(fe.Tier, s.Kind(), resultOf(err)).Inc()
 		return false, false, err
 	}
+	if known := f.KnownSize(); known >= 0 && total >= 0 && total != known {
+		// Another size for the same ID: not this object.
+		body.Close()
+		metrics.TierUpstream.WithLabelValues(fe.Tier, s.Kind(), "misplaced").Inc()
+		return false, false, fmt.Errorf("%w: %s gave a size of %d, the object is %d", errMisplaced, s.Name(), total, known)
+	}
 	if start != off && start != 0 {
 		// Bytes from somewhere it wasn't asked: writing them at 0 would
 		// make another object under this one's ID. A failure of this
