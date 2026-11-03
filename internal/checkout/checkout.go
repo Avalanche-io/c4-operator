@@ -4,8 +4,6 @@
 // the same c4m changeset over its view, made by one capture engine; a
 // backend decides only where the workspace's writes are kept and how
 // they are read back (capture.Input.Walk).
-//
-// The contract is proposals/storage/CHECKOUT.md.
 package checkout
 
 import (
