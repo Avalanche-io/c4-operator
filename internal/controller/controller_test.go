@@ -388,6 +388,9 @@ func mustFilter(t *testing.T, patterns ...string) view.Filter {
 func TestProjectValidation(t *testing.T) {
 	st := newStore(t)
 	v := st.ingest(t, show("v"))
+	// The project whose namespace the second case claims again: made here,
+	// so the case doesn't depend on another test having run first.
+	putProject(t, "ns-owner", []string{"owned"}, st, "", nil)
 	cases := []struct {
 		name    string
 		spec    func(p *c4v1.Project)
@@ -398,8 +401,8 @@ func TestProjectValidation(t *testing.T) {
 			p.Spec.Grants = []c4v1.Grant{{Tree: v.ID.String()}}
 		}, "scope is not Grants"},
 		{"a namespace belongs to one project", func(p *c4v1.Project) {
-			p.Spec.Namespaces = []string{"a"}
-		}, "already belongs to project a"},
+			p.Spec.Namespaces = []string{"owned"}
+		}, "already belongs to project ns-owner"},
 		{"shared needs a group", func(p *c4v1.Project) {
 			p.Spec.Namespaces = []string{"dup-1"}
 			p.Spec.Isolation = c4v1.IsolationShared
