@@ -17,7 +17,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/schema"
 )
 
-// The K5 review's probes (c4-accountability, 2026-11-01 19:06), each kept
+// The K5 review's probes, each kept
 // as a test that must refuse.
 
 // studioBook is a studio farm with a farm book: dana (an admin) and noor
