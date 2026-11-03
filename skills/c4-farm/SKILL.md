@@ -84,9 +84,9 @@ For failures:
   `c4_disable_node` (running units finish) and tell the person who owns the node.
 
 For capacity: `c4_capacity_and_cost` shows burst requests and what each needs.
-Approving it is paid spend, the person's own act with their touch:
-`c4_plan_approve_capacity` says where they approve it; state its cost and the
-jobs it is for.
+Approving it is paid spend, the person's own act with their touch, and no
+tool does it: each waiting request says where in the HUD they approve it;
+state its cost and the jobs it is for.
 
 ## Data questions
 

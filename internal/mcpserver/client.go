@@ -68,6 +68,19 @@ type APIError struct {
 
 func (e *APIError) Error() string { return e.Msg }
 
+// web is the HUD's own address, where a person acts: what a read tool
+// points them at for what only they may do.
+func (c *Client) web() string {
+	if c == nil || c.Base == "" {
+		return "the HUD"
+	}
+	u := strings.TrimSuffix(c.Base, "/") + "/"
+	if c.As != "" {
+		u += "?as=" + url.QueryEscape(c.As)
+	}
+	return u
+}
+
 func (c *Client) url(path string) string {
 	u := strings.TrimSuffix(c.Base, "/") + "/api/v1" + path
 	if c.As != "" {

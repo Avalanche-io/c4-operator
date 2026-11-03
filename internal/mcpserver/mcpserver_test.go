@@ -57,8 +57,9 @@ func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == "GET" && r.URL.Path == "/api/v1/snapshot":
 		s := api.Snapshot{Now: due.Add(-time.Hour), Viewer: &api.Viewer{User: "maya", Projects: []string{"show-a"}},
-			Farm: api.Farm{SlotsUsed: 12, SlotsTotal: 16, QueuedUnits: 40},
-			Jobs: []api.Job{job("sh010", 1, true, 1200), job("sh020", 2, false, -300), job("sh030", 3, true, 60)}}
+			Farm:     api.Farm{SlotsUsed: 12, SlotsTotal: 16, QueuedUnits: 40},
+			Jobs:     []api.Job{job("sh010", 1, true, 1200), job("sh020", 2, false, -300), job("sh030", 3, true, 60)},
+			Capacity: []api.Capacity{{Pool: "burst-gpu", Slots: 4, State: "PendingApproval"}, {Pool: "spot", Slots: 2, State: "Provisioned"}}}
 		json.NewEncoder(w).Encode(s)
 	case r.Method == "GET" && r.URL.Path == "/api/v1/jobs/show-a/sh010":
 		b, _ := json.Marshal(job("sh010", 1, true, 1200))
@@ -294,7 +295,7 @@ func TestToolsAreNamedAndAnnotated(t *testing.T) {
 		}
 		readOnly := strings.HasPrefix(tl.Name, "c4_list") || strings.HasPrefix(tl.Name, "c4_get") || tl.Name == "c4_farm_status" ||
 			tl.Name == "c4_cache_tiers" || tl.Name == "c4_capacity_and_cost" || tl.Name == "c4_dependency_graph" || tl.Name == "c4_diff_views" || tl.Name == "c4_trace_file" || tl.Name == "c4_verify_custody" || tl.Name == "c4_read_book" ||
-			tl.Name == "c4_suggest_deadline" || tl.Name == "c4_deadline_options" || tl.Name == "c4_describe_tool" || tl.Name == "c4_needs_me" || tl.Name == "c4_grant" || strings.HasPrefix(tl.Name, "c4_plan_")
+			tl.Name == "c4_suggest_deadline" || tl.Name == "c4_deadline_options" || tl.Name == "c4_describe_tool" || tl.Name == "c4_needs_me" || tl.Name == "c4_grant"
 		if tl.Annotations.ReadOnlyHint != readOnly {
 			t.Errorf("tool %s: readOnlyHint %v", tl.Name, tl.Annotations.ReadOnlyHint)
 		}
@@ -605,7 +606,8 @@ func TestNoETAIsNotATime(t *testing.T) {
 
 // An agent plans a grant and never performs one: c4_grant says what the
 // grant would allow and the command the person runs, and sends no grant.
-// Grants are listed and revoked through the HUD.
+// Grants are listed through the HUD, each saying how the person revokes
+// it.
 func TestGrantTools(t *testing.T) {
 	hud := &fakeHUD{}
 	cs := session(t, hud, "tok-maya")
@@ -630,12 +632,10 @@ func TestGrantTools(t *testing.T) {
 	if gs, _ := out["grants"].([]any); res.IsError || len(gs) != 1 {
 		t.Fatalf("list: %v %q", out, text(res))
 	}
-	// An agent plans a revoke and never performs one either: the person
-	// revokes (DESIGN 6), and the HUD refuses an agent's.
-	res, out = call(t, cs, "c4_plan_revoke", map[string]any{"namespace": "show-a", "name": "github-ab12"})
-	if res.IsError || out["performed"] != false || out["command"] != "c4 farm revoke show-a/github-ab12" ||
-		!strings.Contains(fmt.Sprint(out["message"]), "an agent cannot revoke for you") {
-		t.Fatalf("revoke plan: %v %q", out, text(res))
+	// No tool revokes, or plans a revoke: the grant says how the person
+	// takes it back (DESIGN 6), and the HUD refuses an agent's.
+	if g := out["grants"].([]any)[0].(map[string]any); g["howAPersonActs"] != "your person runs: c4 farm revoke show-a/github-ab12, or revokes it in the HUD" {
+		t.Fatalf("the grant says %v", g["howAPersonActs"])
 	}
 	hud.mu.Lock()
 	defer hud.mu.Unlock()
@@ -681,8 +681,9 @@ func TestCapacityForecastTool(t *testing.T) {
 	}
 }
 
-// A held tracker write is found through the HUD, and its answer planned
-// for the person, never sent: what happened in the tracker is their word.
+// A held tracker write is found through the HUD, saying how the person
+// answers it, and no answer is sent: what happened in the tracker is
+// their word.
 func TestHeldWriteTools(t *testing.T) {
 	hud := &fakeHUD{}
 	cs := session(t, hud, "tok-maya")
@@ -690,9 +691,8 @@ func TestHeldWriteTools(t *testing.T) {
 	if hs, _ := out["held"].([]any); res.IsError || len(hs) != 1 {
 		t.Fatalf("held: %v %q", out, text(res))
 	}
-	res, out = call(t, cs, "c4_plan_confirm_write", map[string]any{"namespace": "show-a", "link": "gh-issue-7", "field": "comment", "happened": false, "note": "not on the issue"})
-	if res.IsError || out["performed"] != false || !strings.Contains(fmt.Sprint(out["message"]), "the person answers it") {
-		t.Fatalf("confirm plan: %v %q", out, text(res))
+	if h := out["held"].([]any)[0].(map[string]any); !strings.Contains(fmt.Sprint(h["howAPersonActs"]), "answer it in the HUD") {
+		t.Fatalf("the held write says %v", h["howAPersonActs"])
 	}
 	hud.mu.Lock()
 	defer hud.mu.Unlock()

@@ -51,8 +51,9 @@ three things, as the adapter allows for that write:
   link then shows `Unconfirmed`. The HUD lists the write on the job, on
   the Tracker and on its owner's own page, and MCP lists it with
   `c4_list_held_writes`. A person looks in the tracker and says whether
-  it happened, in the HUD; MCP's `c4_plan_confirm_write` only plans the
-  answer, which is the person's own word. It is never sent twice
+  it happened, in the HUD; MCP has no tool that answers it, and
+  `c4_list_held_writes` says where the person does, since the answer is
+  their own word. It is never sent twice
   on a guess.
 
 A write the tracker refused (a 4xx) is known not to have happened and is
