@@ -144,7 +144,11 @@ report on the node's word, not an act.
   deployment's leaf names the deployment binding in force for it when it was
   certified, `urn:c4:binding:<the binding record's C4 ID>`, which a verifier
   follows to the binding's owner, and the leaf never outlives the binding's
-  end. A leaf certified while no binding was in force names none.
+  end. A leaf certified while no binding was in force names none, and a host
+  unit's leaf names none of its own: it is bound through its runner's. A
+  tracker sync's leaf names each Tracker that names it as its sync,
+  `urn:c4:relay:<namespace>/<tracker>`: it signs only the decisions it relays
+  for those, never an import or an ingest.
 - **A device key is ECDSA P-256.** Its signature is raw `r||s`, 64 bytes,
   with a low S, so a signature has exactly one form. Farm parts stay Ed25519.
 - **A confirmed act has two signatures over its one payload,** the device
