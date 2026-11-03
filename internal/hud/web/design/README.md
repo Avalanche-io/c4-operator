@@ -1,9 +1,10 @@
 # GRATICULE: the HUD's design system
 
 The HUD shows a farm that names every file by its content (SMPTE ST 2114),
-never overwrites a version, has every step signed by whoever did it, orders
-work by deadline instead of priority, and lets agents and people use the same
-controls. The design follows from that.
+so every tool and organisation can file the same data its own way, side by
+side, and they all stay connected through the ID. It never overwrites a version, has every step signed by
+whoever did it, and lets agents and people use the same controls. The design
+follows from that.
 
 ## The thesis
 

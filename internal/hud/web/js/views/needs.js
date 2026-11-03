@@ -83,7 +83,7 @@ export default {
       h('h1', null, 'Needs you'),
       h('p', { class: 'd1-sub' }, n
         ? `${n} ${n === 1 ? 'thing waits' : 'things wait'} for you · ${f.num(working)} of ${f.num(open.length)} jobs working meanwhile`
-        : `${f.num(working)} of ${f.num(open.length)} jobs working · the farm runs them by their deadlines`),
+        : `${f.num(working)} of ${f.num(open.length)} jobs working`),
       n ? null : h('div', { class: 'd1-quiet' }, 'Nothing needs you. Your agents and jobs are on their way.'),
       questions.length ? [h('h2', null, questions.length === 1 ? 'A question only you can answer' : `${questions.length} questions only you can answer`),
         questions.map((x) => rootCard(ctx, x))] : null,

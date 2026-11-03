@@ -182,7 +182,7 @@ export const mine1 = {
     const fin = jobs.filter(ended).sort((a, b) => at(b) - at(a)).slice(0, 5);
     return h('section', { class: 'd1', 'data-key': 'd1-mine' },
       h('h1', null, own ? 'My jobs' : 'Jobs in your projects'),
-      h('p', { class: 'd1-sub' }, open.length ? `${open.length} working or waiting · the farm runs them by their deadlines` : jobs.length ? 'Nothing working or waiting' : 'No jobs yet'),
+      h('p', { class: 'd1-sub' }, open.length ? `${open.length} working or waiting` : jobs.length ? 'Nothing working or waiting' : 'No jobs yet'),
       roots(ctx, items, { empty: !open.length }),
       h('h2', null, 'Working and waiting'),
       open.length ? open.map((j) => jobRow(ctx, j, items))
