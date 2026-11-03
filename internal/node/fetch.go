@@ -190,7 +190,7 @@ func (d *Daemon) runFill(f *fill.Flight, pc *projectCtx, id c4.ID) {
 	ctx, cancel := context.WithTimeout(context.Background(), d.Cfg.PublishTimeout)
 	defer cancel()
 	fe := d.fetcher
-	if pc.p.Spec.Store.VerifyFill {
+	if d.Projects.VerifiesFills(ctx, pc.p) {
 		v := *d.fetcher
 		v.Verify = true
 		fe = &v

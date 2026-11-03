@@ -215,11 +215,12 @@ func (d *Daemon) ServePeers(ctx context.Context) error {
 		Partition: d.partitionFor,
 		Route:     d.peerRoute,
 		// A peer's request may start a fill this node's own pods then
-		// join: it verifies when the project asks, as runFill does, and
-		// when the project can't be looked up.
+		// join: it verifies when the project (or a project sharing its
+		// partition) asks, as runFill does, and when the project can't be
+		// looked up.
 		VerifyFill: func(project string) bool {
 			p, err := d.Projects.Get(context.Background(), project)
-			return err != nil || p.Spec.Store.VerifyFill
+			return err != nil || d.Projects.VerifiesFills(context.Background(), p)
 		},
 		MaxServing: d.Cfg.MaxServing,
 		Log:        d.Log.WithName("peers"),
