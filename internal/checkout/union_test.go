@@ -1,0 +1,149 @@
+package checkout
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/Avalanche-io/c4"
+
+	"github.com/Avalanche-io/c4-operator/internal/capture"
+	"github.com/Avalanche-io/c4-operator/internal/objcache"
+	"github.com/Avalanche-io/c4-operator/internal/view"
+)
+
+// Each case is one change, written twice: into a union's writable layer
+// in its marker form, and on a plain copy of the base. Capturing the
+// layer with WalkUnion must give exactly the plain copy's view.
+func TestWalkUnionCapturesWhatTheMergedTreeShows(t *testing.T) {
+	put := func(dir, p, content string, mode os.FileMode) {
+		full := filepath.Join(dir, p)
+		os.MkdirAll(filepath.Dir(full), 0o755)
+		if err := os.WriteFile(full, []byte(content), mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := []struct {
+		name  string
+		upper func(u string)
+		plain func(r string)
+	}{
+		{"modify a file (copied up)", func(u string) {
+			put(u, "internal/a/a.go", "package a\n\nvar X = 1\n", 0o644)
+		}, func(r string) {
+			put(r, "internal/a/a.go", "package a\n\nvar X = 1\n", 0o644)
+		}},
+		{"add a file in a new directory", func(u string) {
+			put(u, "internal/n/n.go", "package n\n", 0o644)
+		}, func(r string) {
+			put(r, "internal/n/n.go", "package n\n", 0o644)
+		}},
+		{"delete a file", func(u string) {
+			put(u, "internal/a/.wh.b.go", "", 0o644)
+		}, func(r string) {
+			os.Remove(filepath.Join(r, "internal/a/b.go"))
+		}},
+		{"delete a directory", func(u string) {
+			put(u, "internal/.wh.old", "", 0o644)
+		}, func(r string) {
+			os.RemoveAll(filepath.Join(r, "internal/old"))
+		}},
+		{"replace a directory with a new one (opaque)", func(u string) {
+			put(u, "internal/old/.wh.__dir_opaque", "", 0o644)
+			put(u, "internal/old/z.go", "package old // z\n", 0o644)
+		}, func(r string) {
+			os.RemoveAll(filepath.Join(r, "internal/old"))
+			put(r, "internal/old/z.go", "package old // z\n", 0o644)
+		}},
+		{"add a symlink", func(u string) {
+			os.MkdirAll(filepath.Join(u, "docs"), 0o755)
+			os.Symlink("../go.mod", filepath.Join(u, "docs/mod"))
+		}, func(r string) {
+			os.Symlink("../go.mod", filepath.Join(r, "docs/mod"))
+		}},
+		{"make a file executable (copied up)", func(u string) {
+			put(u, "go.mod", "module example.com/w\n", 0o755)
+		}, func(r string) {
+			os.Chmod(filepath.Join(r, "go.mod"), 0o755)
+		}},
+		{"add an empty directory", func(u string) {
+			os.MkdirAll(filepath.Join(u, "tmp/cache"), 0o755)
+		}, func(r string) {
+			os.MkdirAll(filepath.Join(r, "tmp/cache"), 0o755)
+		}},
+		{"rewrite a file unchanged (copied up)", func(u string) {
+			put(u, "README.md", "readme\n", 0o644)
+		}, func(string) {}},
+	}
+
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	writeBase(t, src)
+	v, err := view.ScanDir(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := objcache.OpenSet(filepath.Join(root, "cache"), objcache.Options{Budget: 1 << 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache, _ := set.Partition("p-show")
+	store := &memStore{objs: map[c4.ID][]byte{}}
+	for _, f := range v.Files {
+		data, _ := os.ReadFile(filepath.Join(src, f.Path))
+		cache.Put(f.ID, data)
+	}
+	for _, r := range v.Records() {
+		cache.Put(r.ID, r.Data)
+		store.PutBytes(context.Background(), "", r.ID, r.Data)
+	}
+	for i, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			upper := filepath.Join(root, "upper", string(rune('a'+i)))
+			os.MkdirAll(upper, 0o755)
+			c.upper(upper)
+			ref := filepath.Join(root, "ref", string(rune('a'+i)))
+			copyTree(t, src, ref)
+			c.plain(ref)
+			want, err := view.ScanDir(ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			res, err := capture.Run(context.Background(), capture.Input{
+				Project: "show", Parent: v.ID, Upper: upper, Walk: WalkUnion,
+				Cache: cache, Sink: store, Workers: 2,
+				Records: view.RecordFunc(func(_ context.Context, id c4.ID) ([]byte, error) { return cache.ReadAll(id) }),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Output != want.ID {
+				t.Fatalf("captured %s, the merged tree is %s", res.Output, want.ID)
+			}
+		})
+	}
+}
+
+// A view with a name a union reads as a marker is named, so a union
+// backend can refuse it rather than lose the file.
+func TestUnionReserved(t *testing.T) {
+	root := t.TempDir()
+	writeBase(t, root)
+	os.WriteFile(filepath.Join(root, "docs/.wh.fixture"), []byte("a real file\n"), 0o644)
+	os.MkdirAll(filepath.Join(root, ".wh.dir"), 0o755)
+	v, err := view.ScanDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := UnionReserved(v)
+	if len(got) != 2 || got[0] != ".wh.dir/" || got[1] != "docs/.wh.fixture" {
+		t.Fatalf("reserved %q", got)
+	}
+	clean := filepath.Join(t.TempDir(), "clean")
+	writeBase(t, clean)
+	cv, _ := view.ScanDir(clean)
+	if r := UnionReserved(cv); len(r) != 0 {
+		t.Fatalf("a clean view reserved %q", r)
+	}
+}
