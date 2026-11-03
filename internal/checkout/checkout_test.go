@@ -229,10 +229,15 @@ func conformance(t *testing.T, backend func(*layer.Store) Backend) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got, err := view.ScanID(ws.Target); err != nil || got != v.ID {
+			// A target may be a symlink into a mount (the NFS backend).
+			dir, err := filepath.EvalSymlinks(ws.Target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, err := view.ScanID(dir); err != nil || got != v.ID {
 				t.Fatalf("a new workspace is %s, the view %s (%v)", got, v.ID, err)
 			}
-			if i == 0 {
+			if _, isClone := b.(*Clone); i == 0 && isClone {
 				// Nothing changed: nothing is reported, so nothing is hashed.
 				if entries, err := WalkClone(ws.Target, v); err != nil || len(entries) != 0 {
 					t.Fatalf("an untouched clone reports %d entries (%v)", len(entries), err)

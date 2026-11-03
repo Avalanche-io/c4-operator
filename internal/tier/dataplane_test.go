@@ -37,6 +37,9 @@ var dataPlaneMayImport = []string{
 }
 
 // Packages the data plane must never reach, directly or through anything.
+// Other third-party modules are allowed; the absfs filesystems (absnfs,
+// switchfs, unionfs, basefs, osfs, memfs) are, deliberately: they are the
+// NFS workspace (checkout.NFS), and absfs is the C4 author's own org.
 var dataPlaneNever = []string{
 	"k8s.io/",
 	"sigs.k8s.io/", // controller-runtime among them
