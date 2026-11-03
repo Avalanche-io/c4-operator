@@ -20,13 +20,43 @@ const (
 	// The union's own names (".wh..wh." and after): they delete nothing
 	// and are never part of the merged tree.
 	internalPrefix = ".wh..wh."
+	// metaPrefix + name in a directory of the writable layer: name's new
+	// metadata (mode, times, owner) on a file whose bytes stayed in a
+	// lower. The marker's own attributes are that metadata.
+	metaPrefix = ".wh..wh.meta."
 )
+
+// WalkUnionOver is WalkUnion for a workspace of v, which also reads the
+// union's metadata markers: a file whose mode changed while its bytes
+// stayed in the lower. A view records only the exec bit, so a marker whose
+// exec bit differs from v's file is that file with its content (its C4 ID)
+// unchanged; any other marker (times, owner, other mode bits) is no change.
+func WalkUnionOver(v *view.View) func(upper string) ([]overlay.Entry, error) {
+	files := make(map[string]view.File, len(v.Files))
+	for _, f := range v.Files {
+		files[f.Path] = f
+	}
+	return func(upper string) ([]overlay.Entry, error) {
+		out, err := walkUnion(upper, func(rel string, info fs.FileInfo) *overlay.Entry {
+			f, ok := files[rel]
+			exec := info.Mode()&0o111 != 0
+			if !ok || f.Exec == exec {
+				return nil
+			}
+			return &overlay.Entry{Path: rel, Kind: overlay.File, Size: f.Size, Exec: exec, ID: f.ID}
+		})
+		return out, err
+	}
+}
 
 // WalkUnion reads a union's writable layer into its changes, as capture's
 // entries: an empty file .wh.<name> deletes name from its directory, a
 // .wh.__dir_opaque file makes its directory replace the lower one
-// entirely, and everything else is what was written there.
-func WalkUnion(upper string) ([]overlay.Entry, error) {
+// entirely, and everything else is what was written there. Metadata
+// markers are skipped: WalkUnionOver reads them against the view.
+func WalkUnion(upper string) ([]overlay.Entry, error) { return walkUnion(upper, nil) }
+
+func walkUnion(upper string, meta func(rel string, info fs.FileInfo) *overlay.Entry) ([]overlay.Entry, error) {
 	var out []overlay.Entry
 	opaque := map[string]bool{} // directories (relative, ending in "/") with the marker
 	err := filepath.WalkDir(upper, func(p string, d fs.DirEntry, err error) error {
@@ -43,6 +73,19 @@ func WalkUnion(upper string) ([]overlay.Entry, error) {
 			dir, name = rel[:i+1], rel[i+1:]
 		}
 		switch {
+		case strings.HasPrefix(name, metaPrefix) && meta != nil:
+			target := strings.TrimPrefix(name, metaPrefix)
+			if target == "" {
+				return nil
+			}
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			if e := meta(dir+target, info); e != nil {
+				out = append(out, *e)
+			}
+			return nil
 		case strings.HasPrefix(name, internalPrefix):
 			return nil
 		case name == opaqueMarker:

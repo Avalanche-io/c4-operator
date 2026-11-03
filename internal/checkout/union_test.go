@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Avalanche-io/c4"
 
@@ -24,6 +25,7 @@ func TestWalkUnionCapturesWhatTheMergedTreeShows(t *testing.T) {
 		if err := os.WriteFile(full, []byte(content), mode); err != nil {
 			t.Fatal(err)
 		}
+		os.Chmod(full, mode)
 	}
 	cases := []struct {
 		name  string
@@ -77,6 +79,21 @@ func TestWalkUnionCapturesWhatTheMergedTreeShows(t *testing.T) {
 			put(u, ".wh..wh.meta.go.mod", "", 0o644)
 			put(u, "internal/.wh..wh.tmp.x", "", 0o644)
 		}, func(string) {}},
+		{"chmod +x, bytes left in the lower (metadata marker)", func(u string) {
+			put(u, ".wh..wh.meta.go.mod", "", 0o755)
+		}, func(r string) {
+			os.Chmod(filepath.Join(r, "go.mod"), 0o755)
+		}},
+		{"chmod -x, bytes left in the lower (metadata marker)", func(u string) {
+			put(u, "bin/.wh..wh.meta.build.sh", "", 0o644)
+		}, func(r string) {
+			os.Chmod(filepath.Join(r, "bin/build.sh"), 0o644)
+		}},
+		{"a new time only (metadata marker)", func(u string) {
+			put(u, "docs/.wh..wh.meta.same.txt", "", 0o644)
+			now := time.Now()
+			os.Chtimes(filepath.Join(u, "docs/.wh..wh.meta.same.txt"), now, now)
+		}, func(string) {}},
 		{"rewrite a file unchanged (copied up)", func(u string) {
 			put(u, "README.md", "readme\n", 0o644)
 		}, func(string) {}},
@@ -116,7 +133,7 @@ func TestWalkUnionCapturesWhatTheMergedTreeShows(t *testing.T) {
 				t.Fatal(err)
 			}
 			res, err := capture.Run(context.Background(), capture.Input{
-				Project: "show", Parent: v.ID, Upper: upper, Walk: WalkUnion,
+				Project: "show", Parent: v.ID, Upper: upper, Walk: WalkUnionOver(v),
 				Cache: cache, Sink: store, Workers: 2,
 				Records: view.RecordFunc(func(_ context.Context, id c4.ID) ([]byte, error) { return cache.ReadAll(id) }),
 			})
