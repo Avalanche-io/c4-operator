@@ -19,7 +19,7 @@ JOB_IMAGES ?= oiio media usd ci train infer sim hydra
 # The runtimes a tool runs on (images/runtime-<name>/Dockerfile), named
 # c4-runtime-<name>: TOOL.md section 2.3.
 RUNTIME_IMAGES ?= base python oiio torch
-LINUX_TEST_PKGS ?= ./internal/capture ./internal/layer ./internal/overlay ./internal/node
+LINUX_TEST_PKGS ?= ./internal/capture ./internal/checkout ./internal/layer ./internal/overlay ./internal/node
 
 .PHONY: all generate manifests test test-linux envtest build image images image-sync image-block sync-yaml demo-dailies demo-github demo-kitsu job-images job-images-dev runtime-images runtime-images-dev job-image-names runtime-image-names tool-locks tool-tests tested-tools job-image-hydra-blender install-yaml release-snapshot verify cross e2e e2e-down tools tutorials stress stress-quick
 

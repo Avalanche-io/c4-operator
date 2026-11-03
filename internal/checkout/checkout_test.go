@@ -183,6 +183,12 @@ func TestCloneConformance(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("clone workspaces need APFS")
 	}
+	conformance(t, func(l *layer.Store) Backend { return &Clone{Layers: l} })
+}
+
+// conformance runs every script on workspaces from one backend and checks
+// each against the same script on a plain copy.
+func conformance(t *testing.T, backend func(*layer.Store) Backend) {
 	root := t.TempDir()
 	src := filepath.Join(root, "src")
 	writeBase(t, src)
@@ -208,7 +214,7 @@ func TestCloneConformance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := &Clone{Layers: layers}
+	b := backend(layers)
 	in := capture.Input{
 		Project: "show", Cache: cache, Sink: store, Workers: 2,
 		Records: view.RecordFunc(func(_ context.Context, id c4.ID) ([]byte, error) { return cache.ReadAll(id) }),
