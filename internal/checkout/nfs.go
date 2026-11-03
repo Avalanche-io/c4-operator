@@ -165,6 +165,12 @@ func (n *NFS) Start() error {
 	// climbing target resolves against this machine's own disk, with the
 	// agent's own permissions. So a workspace confines an agent on this
 	// machine only if the agent's own process is sandboxed.
+	//
+	// No HandleStateDir: a handle names a workspace path (/wN/...), and
+	// workspace names restart at w1 with each Start, so a handle kept across
+	// a restart would resolve into a different workspace. Without it, a
+	// restart makes every old handle stale, which is safe. Keep handles
+	// only once workspace names are never reused.
 	handler, err := absnfs.New(sw, absnfs.ExportOptions{AllowAnySymlinkTarget: true})
 	if err != nil {
 		return err
