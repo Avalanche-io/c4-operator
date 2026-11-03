@@ -45,6 +45,7 @@ type ProjectStore struct {
 	// endpoint carries every read, adding a shard moves about 1/(n+1) of
 	// the objects, and moving a shard to a new URL moves none.
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=64
 	Shards []StoreShard `json:"shards"`
 
 	// CredentialsSecretRef names a Secret in the operator's namespace with
@@ -75,6 +76,7 @@ type StoreShard struct {
 	// objects are stored as prefix+ID, as the c4 CLI stores them, so
 	// s3://bucket/runs would store them beside the folder (runs<id>).
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:XValidation:rule="!self.startsWith('s3://') || self.matches('^s3://[^/?]+(/([^?]*/)?)?([?].*)?$')",message="an S3 prefix must end in \"/\" (s3://bucket/prefix/): objects are stored as prefix+ID, so without it they would land beside the folder"
 	URL string `json:"url"`
 }

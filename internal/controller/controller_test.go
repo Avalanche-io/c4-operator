@@ -449,6 +449,7 @@ func TestShardURLPrefixAdmission(t *testing.T) {
 		{"s3://bucket/a/b?region=us-west-2", false},
 	} {
 		p := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("prefix-%d", i)}}
+		p.Spec.Namespaces = []string{fmt.Sprintf("prefix-%d", i)}
 		p.Spec.Store.Shards = []c4v1.StoreShard{{Name: "s0", URL: c.url}}
 		err := k8s.Create(context.Background(), p)
 		if c.ok != (err == nil) {

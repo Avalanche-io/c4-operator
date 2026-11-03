@@ -41,7 +41,9 @@ What a farm running an earlier build must do, or will notice, on upgrade.
 - **An S3 store URL's prefix must end in "/".** Objects are stored as
   prefix + ID, as the c4 CLI stores them, so `s3://bucket/c4` put them
   beside the folder (`c4c4...`), not in it. Such a URL is now refused when a
-  Project is applied (the CRD says why) and when a store opens. Apply the
+  Project is applied (the CRD says why) and when a store opens. A Project
+  also has at most 64 shards, and a shard URL at most 2,048 characters:
+  bounds the API server needs to accept the rule. Apply the
   CRDs. A store already filled under a prefix without "/" is not opened by
   this build until its objects are moved under `prefix/`, once, with
   docs/install.md's recipe (Moving a store to a prefix ending in "/").

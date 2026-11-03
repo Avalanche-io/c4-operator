@@ -195,6 +195,7 @@ spec:
                             c4d://host:port, or http(s)://host:port. An S3 prefix ends in "/":
                             objects are stored as prefix+ID, as the c4 CLI stores them, so
                             s3://bucket/runs would store them beside the folder (runs<id>).
+                          maxLength: 2048
                           minLength: 1
                           type: string
                           x-kubernetes-validations:
@@ -206,6 +207,7 @@ spec:
                       - name
                       - url
                       type: object
+                    maxItems: 64
                     minItems: 1
                     type: array
                   verifyFill:
