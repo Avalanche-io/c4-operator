@@ -45,6 +45,11 @@ type Input struct {
 	// Progress, if set, is told how many of the new objects' bytes have
 	// reached the store, as they do.
 	Progress func(done, of int64)
+	// Walk reads Upper into its changes. Each kind of workspace keeps its
+	// writes in its own form (overlayfs, a union's .wh. markers, a clone
+	// compared with its base); all of them come back as the same entries,
+	// so the changeset never depends on the form. Nil means overlay.Walk.
+	Walk func(upper string) ([]overlay.Entry, error)
 }
 
 // Result describes a capture.
@@ -70,7 +75,11 @@ type Result struct {
 func Run(ctx context.Context, in Input) (*Result, error) {
 	start := time.Now()
 	res := &Result{Output: in.Parent}
-	entries, err := overlay.Walk(in.Upper)
+	walk := in.Walk
+	if walk == nil {
+		walk = overlay.Walk
+	}
+	entries, err := walk(in.Upper)
 	if err != nil {
 		return nil, fmt.Errorf("walk upper: %w", err)
 	}
