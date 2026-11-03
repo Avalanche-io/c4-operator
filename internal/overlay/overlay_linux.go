@@ -26,9 +26,9 @@ func Mount(target string, lowers []string, upper, work string) error {
 	if len(lowers) == 0 {
 		return errors.New("no layers to mount")
 	}
-	for _, l := range lowers {
+	for _, l := range append(append([]string(nil), lowers...), upper, work) {
 		if strings.ContainsAny(l, ",:\\") {
-			return fmt.Errorf("layer path %q has characters overlay options cannot carry", l)
+			return fmt.Errorf("path %q has characters overlay options cannot carry", l)
 		}
 	}
 	if err := os.MkdirAll(target, 0o755); err != nil {

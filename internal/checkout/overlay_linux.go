@@ -15,11 +15,14 @@ import (
 )
 
 // Overlay makes each workspace an overlayfs mount of its view's full
-// layer, with an upper and a work directory of its own beside the
-// target: the farm's form, without the CSI driver. Its writes are read
-// with overlay.Walk, after the mount is gone.
+// layer, with an upper and a work directory of its own: the farm's form,
+// without the CSI driver. Its writes are read with overlay.Walk, after the
+// mount is gone. Uppers live under State, in folders the backend names,
+// never beside the target: their paths go into the mount's options, which
+// a comma or colon in a workspace's name would break.
 type Overlay struct {
 	Layers *layer.Store
+	State  string
 }
 
 func (o *Overlay) Name() string { return "overlay" }
@@ -29,7 +32,13 @@ func (o *Overlay) Mount(_ context.Context, v *view.View, target string) (*Worksp
 	if err != nil {
 		return nil, fmt.Errorf("overlay workspace of %s: %w", v.ID, err)
 	}
-	state := target + ".c4"
+	if err := os.MkdirAll(o.State, 0o755); err != nil {
+		return nil, err
+	}
+	state, err := os.MkdirTemp(o.State, "ws-")
+	if err != nil {
+		return nil, err
+	}
 	upper, work := filepath.Join(state, "upper"), filepath.Join(state, "work")
 	for _, d := range []string{upper, work} {
 		if err := os.MkdirAll(d, 0o755); err != nil {

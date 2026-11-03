@@ -16,5 +16,6 @@ func TestOverlayConformance(t *testing.T) {
 	if os.Geteuid() != 0 || os.Getenv("C4_PRIVILEGED_TESTS") == "" {
 		t.Skip("needs root on Linux and C4_PRIVILEGED_TESTS=1")
 	}
-	conformance(t, func(l *layer.Store) Backend { return &Overlay{Layers: l} })
+	state := t.TempDir()
+	conformance(t, func(l *layer.Store) Backend { return &Overlay{Layers: l, State: state} })
 }
