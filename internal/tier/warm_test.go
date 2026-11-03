@@ -123,3 +123,39 @@ func TestWarm(t *testing.T) {
 		t.Fatalf("records %+v", recs)
 	}
 }
+
+// A full queue sheds the warm like any request at capacity: 503 with
+// Retry-After, nothing charged to the day's budget, and the record says
+// it was refused, not accepted.
+func TestWarmQueueFullIsShedNotSpent(t *testing.T) {
+	a := randomBytes(50)
+	ida := c4.Identify(bytes.NewReader(a))
+	h := newHarness(t, fill.Limits{}, func(string, c4.ID) []Source { return nil })
+	var mu sync.Mutex
+	var recs []WarmRecord
+	p := &WarmPolicy{Callers: []string{"system:serviceaccount:c4-system:c4-manager"}, BytesPerDay: 100,
+		Record: func(r WarmRecord) { mu.Lock(); recs = append(recs, r); mu.Unlock() }}
+	p.once.Do(func() { p.queue = make(chan warmJob) }) // a queue with no room and no worker
+	h.srv.Warm = p
+	h.srv.Authorize = func(r *http.Request) (string, int, error) { return r.Header.Get("X-Test-Caller"), 0, nil }
+	body, _ := json.Marshal(WarmRequest{Objects: []WarmObject{{ID: ida.String(), Size: 50}}})
+	req, _ := http.NewRequest(http.MethodPost, h.http.URL+"/warm", bytes.NewReader(body))
+	req.Header.Set(HeaderProject, "show")
+	req.Header.Set("X-Test-Caller", "system:serviceaccount:c4-system:c4-manager")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable || resp.Header.Get("Retry-After") == "" {
+		t.Fatalf("full queue: %d, Retry-After %q", resp.StatusCode, resp.Header.Get("Retry-After"))
+	}
+	if p.spent != 0 {
+		t.Fatalf("%d bytes charged for a warm that never queued", p.spent)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(recs) != 1 || recs[0].Refused == "" {
+		t.Fatalf("records %+v", recs)
+	}
+}

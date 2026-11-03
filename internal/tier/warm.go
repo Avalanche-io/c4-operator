@@ -114,6 +114,15 @@ func (p *WarmPolicy) charge(bytes int64) string {
 	return ""
 }
 
+// refund returns bytes charged for a warm that was then not queued.
+func (p *WarmPolicy) refund(bytes int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.clock().UTC().Format("2006-01-02") == p.day {
+		p.spent = max(p.spent-bytes, 0)
+	}
+}
+
 // warm serves POST /warm.
 func (s *Server) warm(w http.ResponseWriter, r *http.Request, caller, project, partition string, cache *objcache.Cache) {
 	p := s.Warm
@@ -161,7 +170,6 @@ func (s *Server) warm(w http.ResponseWriter, r *http.Request, caller, project, p
 		refuse(http.StatusTooManyRequests, why)
 		return
 	}
-	s.recordWarm(rec)
 	p.once.Do(func() {
 		p.queue = make(chan warmJob, 256)
 		go s.warmWorker()
@@ -169,9 +177,14 @@ func (s *Server) warm(w http.ResponseWriter, r *http.Request, caller, project, p
 	select {
 	case p.queue <- warmJob{project: project, partition: partition, cache: cache, ids: ids}:
 	default:
-		http.Error(w, "warm queue full", http.StatusServiceUnavailable)
+		// Not queued, so not spent, and not a warm that was accepted: the
+		// caller is told when to ask again, as for any shed request.
+		p.refund(bytes)
+		w.Header().Set("Retry-After", RetryAfter())
+		refuse(http.StatusServiceUnavailable, "warm queue full")
 		return
 	}
+	s.recordWarm(rec)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(WarmResponse{Fetching: len(ids), Bytes: bytes, Held: held})
