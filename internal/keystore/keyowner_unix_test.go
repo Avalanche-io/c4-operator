@@ -32,10 +32,10 @@ func TestKeyOwnedByAnotherUserRefused(t *testing.T) {
 }
 
 // A FIFO planted where the key file belongs is refused at once, never
-// opened: opening it would block the server until someone writes a key
+// opened: opening it would block the MCP server until someone writes a key
 // into it.
 func TestKeyFileFIFORefused(t *testing.T) {
-	dir := keyDir(t)
+	dir := filepath.Join(t.TempDir(), "keys")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestKeyFileFIFORefused(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := KeyFiles{Dir: dir}.Key(Workload("claude-code"))
+		_, err := Store{Dir: dir, FileOnly: true}.Key(Workload("claude-code"))
 		done <- err
 	}()
 	select {
