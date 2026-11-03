@@ -97,10 +97,10 @@ func (r *Registry) VerifiesFills(ctx context.Context, p *c4v1.Project) bool {
 	if p.Spec.Store.VerifyFill {
 		return true
 	}
-	part := p.Partition()
-	if part == "p-"+p.Name {
-		return false
+	if p.Spec.Isolation != c4v1.IsolationShared || p.Spec.SharingGroup == "" {
+		return false // a partition of its own
 	}
+	part := p.Partition()
 	all, err := r.List(ctx)
 	if err != nil {
 		return true
