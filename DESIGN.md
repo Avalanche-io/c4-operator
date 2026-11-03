@@ -610,11 +610,13 @@ credentials.
   and the token check makes that a verified fact rather than an assumption.
 - **Tiers.** Tier requests carry the caller's own projected token (audience
   `c4-tier`). The server validates it with TokenReview, caches the result
-  until the token expires, and accepts only the node daemon and regional
-  service accounts in `c4-system`, plus the HUD's for reads (it fetches
-  preview proxies, section 11.4, after checking the viewer's access to that
-  project). A pod that calls a node daemon or a regional replica directly is
-  refused, with or without a token.
+  until the token expires, and accepts only the service accounts in
+  `c4-system` that call it: a node daemon accepts the other node daemons
+  and the regional replicas; a regional replica accepts the node daemons
+  and the manager, whose token the HUD also uses (it fetches preview
+  proxies, section 11.4, after checking the viewer's access to that
+  project), and only the manager may warm. A pod that calls a node daemon
+  or a regional replica directly is refused, with or without a token.
 - **Knowing an ID is not permission.** Pods cannot fetch by ID at all. They
   can only mount Materializations in their own namespace. A Materialization
   resolves through its project's store with its project's credentials, and
