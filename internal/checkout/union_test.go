@@ -10,6 +10,7 @@ import (
 
 	"github.com/Avalanche-io/c4-operator/internal/capture"
 	"github.com/Avalanche-io/c4-operator/internal/objcache"
+	"github.com/Avalanche-io/c4-operator/internal/overlay"
 	"github.com/Avalanche-io/c4-operator/internal/view"
 )
 
@@ -72,6 +73,10 @@ func TestWalkUnionCapturesWhatTheMergedTreeShows(t *testing.T) {
 		}, func(r string) {
 			os.MkdirAll(filepath.Join(r, "tmp/cache"), 0o755)
 		}},
+		{"the union's own names change nothing", func(u string) {
+			put(u, ".wh..wh.meta.go.mod", "", 0o644)
+			put(u, "internal/.wh..wh.tmp.x", "", 0o644)
+		}, func(string) {}},
 		{"rewrite a file unchanged (copied up)", func(u string) {
 			put(u, "README.md", "readme\n", 0o644)
 		}, func(string) {}},
@@ -145,5 +150,24 @@ func TestUnionReserved(t *testing.T) {
 	cv, _ := view.ScanDir(clean)
 	if r := UnionReserved(cv); len(r) != 0 {
 		t.Fatalf("a clean view reserved %q", r)
+	}
+}
+
+// The union's own names (".wh..wh." and after) are not changes: they
+// delete nothing, so they make no entries at all.
+func TestWalkUnionSkipsTheUnionsOwnNames(t *testing.T) {
+	u := t.TempDir()
+	for _, p := range []string{".wh..wh.meta.go.mod", "internal/.wh..wh.tmp.x"} {
+		os.MkdirAll(filepath.Join(u, filepath.Dir(p)), 0o755)
+		os.WriteFile(filepath.Join(u, p), nil, 0o644)
+	}
+	entries, err := WalkUnion(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Kind != overlay.Dir {
+			t.Errorf("a union-internal name made an entry: %+v", e)
+		}
 	}
 }

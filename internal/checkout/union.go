@@ -17,6 +17,9 @@ import (
 const (
 	whiteoutPrefix = ".wh."
 	opaqueMarker   = ".wh.__dir_opaque"
+	// The union's own names (".wh..wh." and after): they delete nothing
+	// and are never part of the merged tree.
+	internalPrefix = ".wh..wh."
 )
 
 // WalkUnion reads a union's writable layer into its changes, as capture's
@@ -40,6 +43,8 @@ func WalkUnion(upper string) ([]overlay.Entry, error) {
 			dir, name = rel[:i+1], rel[i+1:]
 		}
 		switch {
+		case strings.HasPrefix(name, internalPrefix):
+			return nil
 		case name == opaqueMarker:
 			opaque[dir] = true
 			return nil
