@@ -50,3 +50,5 @@ e1b32cd144e64ccc99854b650c152a19b699aa2d:schema/fixtures/device/pass/browser-for
 e1b32cd144e64ccc99854b650c152a19b699aa2d:schema/fixtures/device/pass/passkey-on-a-step-up.json:generic-api-key:15
 e1b32cd144e64ccc99854b650c152a19b699aa2d:schema/fixtures/device/pass/passkey-on-a-step-up.json:generic-api-key:22
 e1b32cd144e64ccc99854b650c152a19b699aa2d:schema/fixtures/device/pass/passkey-on-a-step-up.json:jwt:21
+# AWS's published SigV4 test-suite signature for its example keys (AKIDEXAMPLE), not a secret (internal/storeurl/testdata/aws4).
+ce6bb2c0a729ad5e52e749d782734b73d1ed0433:internal/storeurl/testdata/aws4/post-sts-header-before.authz:generic-api-key:1
