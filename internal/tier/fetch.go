@@ -83,6 +83,10 @@ func (fe *Fetcher) Fill(ctx context.Context, f *fill.Flight, project string, id 
 					missing = true
 				}
 			case errors.Is(err, ErrBusy):
+			case errors.Is(err, ErrDenied) && s.Authoritative():
+				// The store refuses this project: asking again every round
+				// until the fill times out changes nothing.
+				return err
 			case errors.Is(err, errCorrupt):
 				return err
 			case Unreachable(err), errors.Is(err, errMisplaced):

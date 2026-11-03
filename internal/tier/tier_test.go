@@ -506,3 +506,24 @@ func TestOtherSizeIsNotTheObject(t *testing.T) {
 		t.Fatalf("served %d: %d bytes, the object's %v", resp.StatusCode, len(body), bytes.Equal(body, data))
 	}
 }
+
+// When the store refuses the project, the fill ends at once instead of
+// asking again every round until it times out; a peer's refusal only
+// moves on to the next source.
+func TestStoreRefusalEndsTheFill(t *testing.T) {
+	data := randomBytes(100)
+	id := c4.Identify(bytes.NewReader(data))
+	store := &fakeSource{name: "store", kind: "store", auth: true, data: data, err: fmt.Errorf("%w: project refused", ErrDenied)}
+	h := newHarness(t, fill.Limits{}, func(string, c4.ID) []Source { return []Source{store} })
+	start := time.Now()
+	resp, _ := h.get(t, id, 0)
+	if resp.StatusCode == http.StatusOK || time.Since(start) > 2*time.Second || store.calls.Load() != 1 {
+		t.Fatalf("refused store: %d after %v, %d asks", resp.StatusCode, time.Since(start), store.calls.Load())
+	}
+	peer := &fakeSource{name: "peer", kind: "peer", data: data, err: fmt.Errorf("%w: not yours", ErrDenied)}
+	ok := &fakeSource{name: "store", kind: "store", auth: true, data: data}
+	h2 := newHarness(t, fill.Limits{}, func(string, c4.ID) []Source { return []Source{peer, ok} })
+	if resp, body := h2.get(t, id, 0); resp.StatusCode != http.StatusOK || !bytes.Equal(body, data) {
+		t.Fatalf("a peer's refusal ended the fill: %d", resp.StatusCode)
+	}
+}
