@@ -41,21 +41,52 @@ func reservedName(name string) bool {
 // stayed in the lower. A view records only the exec bit, so a marker whose
 // exec bit differs from v's file is that file with its content (its C4 ID)
 // unchanged; any other marker (times, owner, other mode bits) is no change.
+//
+// The union writes a deletion or metadata marker only for a name a lower
+// has, so a marker whose name isn't in v was written under another
+// spelling of a view name (".wh.DOCS" for docs, on a case-insensitive
+// host). Read byte for byte it would delete or change nothing, and the
+// capture would silently miss the agent's change, so the walk fails
+// instead.
 func WalkUnionOver(v *view.View) func(upper string) ([]overlay.Entry, error) {
 	files := make(map[string]view.File, len(v.Files))
 	for _, f := range v.Files {
 		files[f.Path] = f
 	}
+	inView := map[string]bool{}
+	for _, d := range v.Dirs {
+		inView[strings.TrimSuffix(d, "/")] = true
+	}
+	for _, f := range v.Files {
+		inView[f.Path] = true
+	}
+	for _, l := range v.Symlinks {
+		inView[l.Path] = true
+	}
 	return func(upper string) ([]overlay.Entry, error) {
-		out, err := walkUnion(upper, func(rel string, info fs.FileInfo) *overlay.Entry {
+		out, err := walkUnion(upper, func(rel string, info fs.FileInfo) (*overlay.Entry, error) {
 			f, ok := files[rel]
-			exec := info.Mode()&0o111 != 0
-			if !ok || f.Exec == exec {
-				return nil
+			if !ok {
+				if inView[rel] {
+					return nil, nil // a directory or symlink's metadata: not part of a view
+				}
+				return nil, fmt.Errorf("checkout: the union changed %s, which the view doesn't have (another spelling of a view name?)", rel)
 			}
-			return &overlay.Entry{Path: rel, Kind: overlay.File, Size: f.Size, Exec: exec, ID: f.ID}
+			exec := info.Mode()&0o111 != 0
+			if f.Exec == exec {
+				return nil, nil
+			}
+			return &overlay.Entry{Path: rel, Kind: overlay.File, Size: f.Size, Exec: exec, ID: f.ID}, nil
 		})
-		return out, err
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range out {
+			if e.Kind == overlay.Whiteout && !inView[e.Path] {
+				return nil, fmt.Errorf("checkout: the union deleted %s, which the view doesn't have (another spelling of a view name?)", e.Path)
+			}
+		}
+		return out, nil
 	}
 }
 
@@ -69,7 +100,7 @@ func WalkUnionOver(v *view.View) func(upper string) ([]overlay.Entry, error) {
 // file or dropped.
 func WalkUnion(upper string) ([]overlay.Entry, error) { return walkUnion(upper, nil) }
 
-func walkUnion(upper string, meta func(rel string, info fs.FileInfo) *overlay.Entry) ([]overlay.Entry, error) {
+func walkUnion(upper string, meta func(rel string, info fs.FileInfo) (*overlay.Entry, error)) ([]overlay.Entry, error) {
 	var out []overlay.Entry
 	opaque := map[string]bool{} // directories (relative, ending in "/") with the marker
 	err := filepath.WalkDir(upper, func(p string, d fs.DirEntry, err error) error {
@@ -95,7 +126,11 @@ func walkUnion(upper string, meta func(rel string, info fs.FileInfo) *overlay.En
 			if err != nil {
 				return err
 			}
-			if e := meta(dir+target, info); e != nil {
+			e, err := meta(dir+target, info)
+			if err != nil {
+				return err
+			}
+			if e != nil {
 				out = append(out, *e)
 			}
 			return nil

@@ -194,6 +194,35 @@ func TestWalkUnionRefusesAFoldedMarkerName(t *testing.T) {
 	}
 }
 
+// A marker the union writes under another spelling of a view name
+// (".wh.DOCS" for docs on a case-insensitive host) would delete or change
+// nothing if read byte for byte, so walking it against the view fails
+// rather than silently missing the agent's change.
+func TestWalkUnionOverRefusesAMarkerForANameNotInTheView(t *testing.T) {
+	src := t.TempDir()
+	writeBase(t, src)
+	v, err := view.ScanDir(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{".wh.DOCS", ".wh..wh.meta.GO.MOD", "docs/.wh.SAME.txt"} {
+		u := t.TempDir()
+		os.MkdirAll(filepath.Join(u, filepath.Dir(marker)), 0o755)
+		os.WriteFile(filepath.Join(u, marker), nil, 0o755)
+		if _, err := WalkUnionOver(v)(u); err == nil {
+			t.Errorf("%s walked without complaint", marker)
+		}
+	}
+	// The exact spellings are changes as before.
+	u := t.TempDir()
+	os.WriteFile(filepath.Join(u, ".wh.docs"), nil, 0o644)
+	os.WriteFile(filepath.Join(u, ".wh..wh.meta.go.mod"), nil, 0o755)
+	entries, err := WalkUnionOver(v)(u)
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("exact markers: %v, %v", entries, err)
+	}
+}
+
 // The union's own names (".wh..wh." and after) are not changes: they
 // delete nothing, so they make no entries at all.
 func TestWalkUnionSkipsTheUnionsOwnNames(t *testing.T) {
