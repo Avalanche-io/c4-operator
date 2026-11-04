@@ -8,8 +8,8 @@ github.com/Masterminds/semver/v3 v3.4.0 h1:Zog+i5UMtVoCU8oKka5P7i9q9HgrJeGzI9SA1
 github.com/Masterminds/semver/v3 v3.4.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
 github.com/absfs/absfs v1.0.0 h1:T+OoA3wbDimdMXt5y2IpGss1qBHF9UbK0XfxXwCyu/c=
 github.com/absfs/absfs v1.0.0/go.mod h1:30jxoFsix2CEDiZdsZD6KCOm6F+SCO/JVK3CFrj1SVo=
-github.com/absfs/absnfs v1.1.1-0.20261104042448-d3b10a366020 h1:f89tiHeCTw/U67wVkLn/m9x5BY7fD/htIWf5zjjMrcw=
-github.com/absfs/absnfs v1.1.1-0.20261104042448-d3b10a366020/go.mod h1:Xs/4zCzymSPgT2tFDDO2/pqw65bbau8Ps1LHT3xeWyo=
+github.com/absfs/absnfs v1.1.1-0.20261104052547-477d3290c426 h1:0DshZXdmLlZ5UFk+WwQxnd2XsmXCICrcEKDVwao0GFs=
+github.com/absfs/absnfs v1.1.1-0.20261104052547-477d3290c426/go.mod h1:ROBfOTNyzt8YG5xcQUl6BoLF57PeJ4hC6xB7E1kXBrE=
 github.com/absfs/basefs v1.0.1-0.20261104034130-a7e0a24939a3 h1:qmQySl1NlnVe2VsJF/fuc4OYhYmZGgitWPjMhI47370=
 github.com/absfs/basefs v1.0.1-0.20261104034130-a7e0a24939a3/go.mod h1:K45WohWe6ahXOMnbe5xy2gEn9vNt+u6ygd3ilJIBPDM=
 github.com/absfs/fstesting v1.0.0 h1:Mo44CcqxlI4OiX+cUNLpVa+I7l6XEhU7BHDcPcN/XE0=
@@ -26,8 +26,8 @@ github.com/absfs/osfs v1.0.1-0.20261103234919-26d9c50c9a4d h1:BRM1pexr0SqJmtaP1V
 github.com/absfs/osfs v1.0.1-0.20261103234919-26d9c50c9a4d/go.mod h1:OZOrMHEe8jVic5CndjQHtCWKRbkzC40VXA6oDMcW2/4=
 github.com/absfs/switchfs v1.0.1-0.20261103183748-8b08df311d19 h1:JmI5Pgusjuey9WcdYFVlaOcZVxgCr71Z7jdqTRO8R7w=
 github.com/absfs/switchfs v1.0.1-0.20261103183748-8b08df311d19/go.mod h1:gFnb5t+a5Gn+K6RgMjU9Rj2D9jRnJ13byNHd12RyJ5Y=
-github.com/absfs/unionfs v1.0.1-0.20261104035904-d70ffdc44f0a h1:hFHwpG0lIPwn6XIx/dL6rTuo1hYwkwH2HhLeTsPqGHI=
-github.com/absfs/unionfs v1.0.1-0.20261104035904-d70ffdc44f0a/go.mod h1:xRda3LPhVZqkuXoBwqfU6kTA3izajYNlgoXeY/nGdfE=
+github.com/absfs/unionfs v1.0.1-0.20261104050642-fda63fe15332 h1:jxxhEWECQrImeiqJDhFuSVcwd3wh12FrpN5wiTmzCwQ=
+github.com/absfs/unionfs v1.0.1-0.20261104050642-fda63fe15332/go.mod h1:xRda3LPhVZqkuXoBwqfU6kTA3izajYNlgoXeY/nGdfE=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/bmatcuk/doublestar/v4 v4.9.1 h1:X8jg9rRZmJd4yRy7ZeNDRnM+T3ZfHv15JiBJ/avrEXE=
