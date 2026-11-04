@@ -135,6 +135,9 @@ var scripts = []struct {
 	{"modify a file to a new size", true, func(r string) error {
 		return os.WriteFile(filepath.Join(r, "internal/a/a.go"), []byte("package a\n\nvar X = 1\n"), 0o644)
 	}},
+	{"shrink a file", true, func(r string) error {
+		return os.WriteFile(filepath.Join(r, "cmd/w/main.go"), []byte("package main\n"), 0o644)
+	}},
 	{"modify a file, same size", true, func(r string) error {
 		return os.WriteFile(filepath.Join(r, "README.md"), []byte("README\n"), 0o644)
 	}},
