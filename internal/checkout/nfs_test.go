@@ -242,6 +242,15 @@ func TestNFSEditsByAnotherSpelling(t *testing.T) {
 		{"write into a directory as DOCS", false, func(r string) error {
 			return os.WriteFile(filepath.Join(r, "DOCS", "same.txt"), []byte("rewritten\n"), 0o644)
 		}},
+		// copy.txt and same.txt have the same content, one inode in the layer,
+		// and copy.txt lists first: the deleted name must not stand in for
+		// the one written.
+		{"remove copy.txt, write same.txt as SAME.TXT", false, func(r string) error {
+			if err := os.Remove(filepath.Join(r, "docs", "copy.txt")); err != nil {
+				return err
+			}
+			return os.WriteFile(filepath.Join(r, "docs", "SAME.TXT"), []byte("rewritten\n"), 0o644)
+		}},
 		{"chmod a file as GO.MOD", false, func(r string) error { return os.Chmod(filepath.Join(r, "GO.MOD"), 0o755) }},
 		{"replace docs with Docs", true, func(r string) error {
 			if err := os.RemoveAll(filepath.Join(r, "docs")); err != nil {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -259,6 +260,36 @@ func TestWalkUnionOverAsksTheHostAboutSpellings(t *testing.T) {
 	}
 	if deletesDocs != folds {
 		t.Errorf("an opaque Docs, host folds %v: deletes docs %v (%+v)", folds, deletesDocs, entries)
+	}
+}
+
+// Two view files of the same content are one inode in the layer (hard
+// links), so deleting one and writing the other under another spelling
+// must not pass as "the deleted one, respelled".
+func TestWalkUnionOverWithHardLinkedNames(t *testing.T) {
+	lower := t.TempDir()
+	os.WriteFile(filepath.Join(lower, "a.md"), []byte("same\n"), 0o644)
+	if err := os.Link(filepath.Join(lower, "a.md"), filepath.Join(lower, "b.md")); err != nil {
+		t.Fatal(err)
+	}
+	v, err := view.ScanDir(lower)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, statErr := os.Lstat(filepath.Join(lower, "B.MD"))
+	folds := statErr == nil
+	u := t.TempDir()
+	os.WriteFile(filepath.Join(u, ".wh.a.md"), nil, 0o644)
+	os.WriteFile(filepath.Join(u, "B.MD"), []byte("x\n"), 0o644)
+	_, err = WalkUnionOver(v, lower)(u)
+	if folds && err == nil {
+		t.Fatal("rm a.md and a write as B.MD walked without complaint")
+	}
+	if folds && !strings.Contains(err.Error(), "b.md") {
+		t.Errorf("the message names the wrong file: %v", err)
+	}
+	if !folds && err != nil {
+		t.Fatalf("on a host that doesn't fold, B.MD is a new name: %v", err)
 	}
 }
 

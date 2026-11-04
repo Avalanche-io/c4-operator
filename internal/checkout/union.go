@@ -108,11 +108,17 @@ func WalkUnionOver(v *view.View, lower string) func(upper string) ([]overlay.Ent
 			if e.Kind == overlay.Whiteout || inView[p] {
 				continue
 			}
-			real, err := aliasOf(lower, p)
+			names, err := aliasOf(lower, p)
 			if err != nil {
 				return nil, err
 			}
-			if real == "" || deleted[real] {
+			var kept []string
+			for _, name := range names {
+				if !deleted[name] {
+					kept = append(kept, name)
+				}
+			}
+			if len(kept) == 0 {
 				continue
 			}
 			// An opaque directory carries its whole content, so one under
@@ -121,30 +127,34 @@ func WalkUnionOver(v *view.View, lower string) func(upper string) ([]overlay.Ent
 			// Anything else is ambiguous: a file under another spelling is
 			// both what a rename leaves and what a write through that spelling
 			// leaves, and the two mean different trees.
-			if e.Kind == overlay.Dir && e.Opaque {
-				out = append(out, overlay.Entry{Path: real, Kind: overlay.Whiteout})
-				deleted[real] = true
+			if e.Kind == overlay.Dir && e.Opaque && len(kept) == 1 {
+				out = append(out, overlay.Entry{Path: kept[0], Kind: overlay.Whiteout})
+				deleted[kept[0]] = true
 				continue
 			}
-			return nil, fmt.Errorf("checkout: the union wrote %s, another spelling of the view's %s", p, real)
+			return nil, fmt.Errorf("checkout: the union wrote %s, another spelling of the view's %s", p, spelledLike(p, kept))
 		}
 		return out, nil
 	}
 }
 
-// aliasOf returns the lower entry that p, a name not in the lower byte for
-// byte, resolves to on this host, or "" when it resolves to none.
-func aliasOf(lower, p string) (string, error) {
+// aliasOf returns the lower entries that p, a name not in the lower byte for
+// byte, resolves to on this host, or none when it resolves to nothing.
+// It's every entry of that directory that is the same file, not the first:
+// the layer hard-links files of the same content, so two view names can be
+// one inode, and only the host knows which of them p spells.
+func aliasOf(lower, p string) ([]string, error) {
 	full := filepath.Join(lower, filepath.FromSlash(p))
 	info, err := os.Lstat(full)
 	if err != nil {
-		return "", nil // no such entry: a new name
+		return nil, nil // no such entry: a new name
 	}
 	dir := filepath.Dir(full)
 	ents, err := os.ReadDir(dir)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
+	var out []string
 	for _, d := range ents {
 		other, err := os.Lstat(filepath.Join(dir, d.Name()))
 		if err != nil || !os.SameFile(info, other) {
@@ -152,11 +162,25 @@ func aliasOf(lower, p string) (string, error) {
 		}
 		rel, err := filepath.Rel(lower, filepath.Join(dir, d.Name()))
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		return filepath.ToSlash(rel), nil
+		out = append(out, filepath.ToSlash(rel))
 	}
-	return "", fmt.Errorf("checkout: %s resolves in the view's folder but matches no entry there", p)
+	if len(out) == 0 {
+		return nil, fmt.Errorf("checkout: %s resolves in the view's folder but matches no entry there", p)
+	}
+	return out, nil
+}
+
+// spelledLike names, for a message, the entry of names that p most likely
+// spells: one equal under simple case folding, else all of them.
+func spelledLike(p string, names []string) string {
+	for _, n := range names {
+		if strings.EqualFold(n, p) {
+			return n
+		}
+	}
+	return strings.Join(names, " or ")
 }
 
 // WalkUnion reads a union's writable layer into its changes, as capture's
