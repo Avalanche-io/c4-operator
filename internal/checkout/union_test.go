@@ -244,6 +244,17 @@ func TestWalkUnionOverAsksTheHostAboutSpellings(t *testing.T) {
 		t.Errorf("README.MD beside README.md, host folds %v: %v", folds, err)
 	}
 
+	// A write into DOCS/ by an older union: the directory under another
+	// spelling, not opaque, nothing deleted. Its children aren't judged
+	// alone, so the directory itself must be refused.
+	u = t.TempDir()
+	os.MkdirAll(filepath.Join(u, "DOCS"), 0o755)
+	os.WriteFile(filepath.Join(u, "DOCS", "same.txt"), []byte("rewritten\n"), 0o644)
+	_, err = WalkUnionOver(v, lower)(u)
+	if folds != (err != nil) {
+		t.Errorf("DOCS/same.txt over docs/, host folds %v: %v", folds, err)
+	}
+
 	u = t.TempDir()
 	os.MkdirAll(filepath.Join(u, "Docs"), 0o755)
 	os.WriteFile(filepath.Join(u, "Docs", ".wh.__dir_opaque"), nil, 0o644)

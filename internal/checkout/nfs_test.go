@@ -3,6 +3,7 @@ package checkout
 import (
 	"context"
 	"fmt"
+	"golang.org/x/sys/unix"
 	"net"
 	"os"
 	"os/exec"
@@ -262,14 +263,25 @@ func TestNFSEditsByAnotherSpelling(t *testing.T) {
 			}
 			return os.WriteFile(filepath.Join(r, "Docs", "new.txt"), []byte("new\n"), 0o644)
 		}},
-		// The client sends the RENAME, but unionfs takes the two spellings for
-		// different entries (os.SameFile is false through basefs's wrapped
-		// FileInfo) and its rename onto "another spelling of itself" does
-		// nothing, so the workspace keeps README.md. The capture is right
-		// about the workspace; the workspace differs from the host until
-		// unionfs sees through the wrapping (its issue #10).
-		{"rename README.md to Readme.md", true, "a case-only rename does nothing in the union (unionfs #10)", func(r string) error {
+		{"rename README.md to Readme.md", true, "", func(r string) error {
 			return os.Rename(filepath.Join(r, "README.md"), filepath.Join(r, "Readme.md"))
+		}},
+		{"rename(2) docs to Docs", true, "", func(r string) error {
+			return unix.Rename(filepath.Join(r, "docs"), filepath.Join(r, "Docs"))
+		}},
+		// os.Rename and mv stat both names first, and the export gives each
+		// spelling its own file ID: os.Rename refuses to rename onto an
+		// existing directory that isn't the same file (EEXIST), and mv takes
+		// Docs for another directory and moves docs into it. rename(2)
+		// itself works (above).
+		{"os.Rename docs to Docs", true, "each spelling has its own file ID, so os.Rename sees an existing directory", func(r string) error {
+			return os.Rename(filepath.Join(r, "docs"), filepath.Join(r, "Docs"))
+		}},
+		{"mv docs Docs", true, "each spelling has its own file ID, so mv moves docs into Docs", func(r string) error {
+			if out, err := exec.Command("mv", filepath.Join(r, "docs"), filepath.Join(r, "Docs")).CombinedOutput(); err != nil {
+				return fmt.Errorf("%v: %s", err, out)
+			}
+			return nil
 		}},
 	} {
 		t.Run(sc.name, func(t *testing.T) {
@@ -282,6 +294,9 @@ func TestNFSEditsByAnotherSpelling(t *testing.T) {
 			must(t, err)
 			defer n.Unmount(ctx, ws)
 			wsErr := sc.edit(ws.Target)
+			if (refErr == nil) != (wsErr == nil) && sc.known != "" {
+				t.Skipf("known: %s (on this host: %v; in the workspace: %v)", sc.known, refErr, wsErr)
+			}
 			if (refErr == nil) != (wsErr == nil) {
 				t.Fatalf("on this host: %v; in the workspace: %v", refErr, wsErr)
 			}

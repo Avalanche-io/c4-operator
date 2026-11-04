@@ -108,6 +108,13 @@ func WalkUnionOver(v *view.View, lower string) func(upper string) ([]overlay.Ent
 			if e.Kind == overlay.Whiteout || inView[p] {
 				continue
 			}
+			// Under a directory the view doesn't have, a name was judged with
+			// that directory, which the walk lists first: renaming docs to
+			// Docs puts Docs/copy.txt in the upper, which resolves on the host
+			// through docs, deleted with the rest of it.
+			if i := strings.LastIndex(p, "/"); i >= 0 && !inView[p[:i]] {
+				continue
+			}
 			names, err := aliasOf(lower, p)
 			if err != nil {
 				return nil, err
