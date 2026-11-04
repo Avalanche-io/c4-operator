@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -152,6 +153,27 @@ func serverOptions(port int) absnfs.ServerOptions {
 	return absnfs.ServerOptions{Hostname: loopback, Port: port, MountPort: port, UseRecordMarking: true}
 }
 
+// hostFolds reports whether dir's filesystem folds case: a file made
+// there is found again under an upper-case spelling of its name.
+func hostFolds(dir string) (bool, error) {
+	f, err := os.CreateTemp(dir, "c4-case-probe-")
+	if err != nil {
+		return false, err
+	}
+	name := f.Name()
+	f.Close()
+	defer os.Remove(name)
+	made, err := os.Lstat(name)
+	if err != nil {
+		return false, err
+	}
+	other, err := os.Lstat(filepath.Join(dir, strings.ToUpper(filepath.Base(name))))
+	if err != nil {
+		return false, nil
+	}
+	return os.SameFile(made, other), nil
+}
+
 func (n *NFS) Name() string { return "nfs" }
 
 // Start serves the export and mounts it. Close undoes both.
@@ -187,7 +209,23 @@ func (n *NFS) Start() error {
 	// a restart would resolve into a different workspace. Without it, a
 	// restart makes every old handle stale, which is safe. Keep handles
 	// only once workspace names are never reused.
-	handler, err := absnfs.New(sw, absnfs.ExportOptions{AllowAnySymlinkTarget: true})
+	//
+	// The export says whether it folds case as the host under the
+	// workspaces does; a client asks once per mount, at the root, which is
+	// a case-sensitive listing here, so the answer is set, not probed per
+	// handle.
+	if err := os.MkdirAll(n.State, 0o755); err != nil {
+		return err
+	}
+	folds, err := hostFolds(n.State)
+	if err != nil {
+		return err
+	}
+	ci := absnfs.CaseInsensitiveFalse
+	if folds {
+		ci = absnfs.CaseInsensitiveTrue
+	}
+	handler, err := absnfs.New(sw, absnfs.ExportOptions{AllowAnySymlinkTarget: true, CaseInsensitive: ci})
 	if err != nil {
 		return err
 	}

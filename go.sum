@@ -8,8 +8,8 @@ github.com/Masterminds/semver/v3 v3.4.0 h1:Zog+i5UMtVoCU8oKka5P7i9q9HgrJeGzI9SA1
 github.com/Masterminds/semver/v3 v3.4.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
 github.com/absfs/absfs v1.0.0 h1:T+OoA3wbDimdMXt5y2IpGss1qBHF9UbK0XfxXwCyu/c=
 github.com/absfs/absfs v1.0.0/go.mod h1:30jxoFsix2CEDiZdsZD6KCOm6F+SCO/JVK3CFrj1SVo=
-github.com/absfs/absnfs v1.1.1-0.20261104005302-f84cdb87d227 h1:KIJqO02CPc7EZ3IcyhyK4VN9/Swdm2Nkg22lMKBSXnk=
-github.com/absfs/absnfs v1.1.1-0.20261104005302-f84cdb87d227/go.mod h1:Y+PeLreDy7p2SjNpVUfjlEE8qtRiSJkh01ULN+iSmJc=
+github.com/absfs/absnfs v1.1.1-0.20261104032231-9f77c407cf1e h1:EyyMdcScdrfnfvMFN6y79ZYeWFRJadn5CY4ncZPBgWA=
+github.com/absfs/absnfs v1.1.1-0.20261104032231-9f77c407cf1e/go.mod h1:9fAgJy3C6BzQYZJSwPN6qmr9/yNoFtd9/Py/OJJmkqc=
 github.com/absfs/basefs v1.0.1-0.20261104001807-79e9a01613ed h1:rTnyyhq8vNQDXha84tyxPX5QK13U2hpqSry5v/BQzeA=
 github.com/absfs/basefs v1.0.1-0.20261104001807-79e9a01613ed/go.mod h1:K45WohWe6ahXOMnbe5xy2gEn9vNt+u6ygd3ilJIBPDM=
 github.com/absfs/fstesting v1.0.0 h1:Mo44CcqxlI4OiX+cUNLpVa+I7l6XEhU7BHDcPcN/XE0=

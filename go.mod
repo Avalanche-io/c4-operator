@@ -37,7 +37,7 @@ require (
 	al.essio.dev/pkg/shellescape v1.5.1 // indirect
 	github.com/BurntSushi/toml v1.4.0 // indirect
 	github.com/absfs/absfs v1.0.0
-	github.com/absfs/absnfs v1.1.1-0.20261104005302-f84cdb87d227
+	github.com/absfs/absnfs v1.1.1-0.20261104032231-9f77c407cf1e
 	github.com/absfs/basefs v1.0.1-0.20261104001807-79e9a01613ed
 	github.com/absfs/memfs v1.1.0
 	github.com/absfs/osfs v1.0.1-0.20261103234919-26d9c50c9a4d
