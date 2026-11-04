@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/absfs/absfs"
+	"github.com/absfs/basefs"
 	"golang.org/x/sys/unix"
 
 	"github.com/Avalanche-io/c4-operator/internal/layer"
@@ -78,7 +80,7 @@ func TestNFSSymlinkStaysInTheWorkspace(t *testing.T) {
 	// returns, so it covers every procedure without a raw client.
 	serverRefuses := func(t *testing.T, ws *Workspace, p string) {
 		t.Helper()
-		full := n.names[ws.Target] + p
+		full := n.names[ws.Target].name + p
 		if data, err := absfsRead(n, full); err == nil {
 			t.Errorf("the server's filesystem read %q at %s, outside the workspace", data, full)
 		}
@@ -123,6 +125,12 @@ func TestNFSSymlinkStaysInTheWorkspace(t *testing.T) {
 		ws, err := n.Mount(ctx, v, filepath.Join(root, "ws1"))
 		must(t, err)
 		defer n.Unmount(ctx, ws)
+		// Every layer is confined to its folder on this host.
+		for i, fs := range n.names[ws.Target].fss {
+			if !basefs.Confined(fs.(absfs.FileSystem)) {
+				t.Errorf("layer %d isn't confined to its folder", i)
+			}
+		}
 		// Aimed right: followed on the host, the symlink reaches the secret.
 		if _, err := os.ReadFile(filepath.Join(layers.Dir(m.Key), "out", "secret")); err != nil {
 			t.Fatalf("the probe is mis-aimed: %v", err)

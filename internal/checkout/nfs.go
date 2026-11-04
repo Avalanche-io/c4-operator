@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -49,9 +50,22 @@ type NFS struct {
 	root    absfs.FileSystem // the export's root listing
 	sw      *switchfs.SwitchFS
 	srv     *absnfs.Server
-	names   map[string]string // target -> workspace name
+	names   map[string]*served // target -> what serves it
 	next    int
 	started bool
+}
+
+// served is one workspace's route and the basefs filesystems under it,
+// each holding its folder open until closed.
+type served struct {
+	name string
+	fss  []io.Closer
+}
+
+func closeAll(fss []io.Closer) {
+	for _, f := range fss {
+		f.Close()
+	}
 }
 
 // The index sidecar. A view keeps the developer's .git/index, whose stat
@@ -86,6 +100,7 @@ func (n *NFS) indexSidecar(v *view.View, lower absfs.FileSystem) (absfs.FileSyst
 		if err != nil {
 			return nil, err
 		}
+		defer up.Close()
 		n.next++
 		name := "/s" + strconv.Itoa(n.next)
 		if err := n.root.Mkdir(name, 0o755); err != nil {
@@ -194,7 +209,7 @@ func (n *NFS) Start() error {
 		return fmt.Errorf("nfs: mount_nfs: %v: %s", err, out)
 	}
 	n.host, n.root, n.sw, n.srv = host, root, sw, srv
-	n.names = map[string]string{}
+	n.names = map[string]*served{}
 	n.started = true
 	return nil
 }
@@ -214,6 +229,10 @@ func (n *NFS) Close() error {
 		time.Sleep(100 * time.Millisecond)
 	}
 	n.srv.Stop()
+	for _, ws := range n.names {
+		closeAll(ws.fss)
+	}
+	n.names = nil
 	n.started = false
 	return err
 }
@@ -231,10 +250,6 @@ func (n *NFS) Mount(_ context.Context, v *view.View, target string) (*Workspace,
 	if !n.started {
 		return nil, errors.New("nfs: not started")
 	}
-	lower, err := basefs.NewFS(n.host, n.Layers.Dir(m.Key))
-	if err != nil {
-		return nil, err
-	}
 	if err := os.MkdirAll(n.State, 0o755); err != nil {
 		return nil, err
 	}
@@ -242,27 +257,37 @@ func (n *NFS) Mount(_ context.Context, v *view.View, target string) (*Workspace,
 	if err != nil {
 		return nil, err
 	}
-	upper, err := basefs.NewFS(n.host, upperDir)
-	if err != nil {
+	var fss []io.Closer
+	fail := func(err error) (*Workspace, error) {
+		closeAll(fss)
 		os.RemoveAll(upperDir)
 		return nil, err
 	}
-	// The union is also what keeps a workspace's paths inside it. basefs
-	// follows a symlink already in its folder out of it, and checks a
-	// symlink's target only where the symlink is made, so a view's own
-	// symlink, or one an agent makes and then moves, can point out.
-	// unionfs resolves a path one component at a time and won't go through
-	// a symlink, so the export never reaches the far side. Don't serve a
-	// basefs directly, or put anything that resolves whole paths above the
-	// layers, until basefs refuses on its own; TestNFSSymlinkStaysInTheWorkspace
-	// guards this.
+	// Each layer is a basefs, confined to its folder where the host can
+	// open it as a root (Go 1.25+ on Unix; basefs.Confined says), so the
+	// host never follows a symlink out of it. The union above adds a second
+	// guard that holds where confinement isn't available: it resolves a
+	// path one component at a time and won't go through a symlink. So a
+	// view's own symlink, or one an agent makes and then moves, never leads
+	// the export out of the workspace. TestNFSSymlinkStaysInTheWorkspace
+	// guards both.
+	lower, err := basefs.NewFS(n.host, n.Layers.Dir(m.Key))
+	if err != nil {
+		return fail(err)
+	}
+	fss = append(fss, lower)
+	upper, err := basefs.NewFS(n.host, upperDir)
+	if err != nil {
+		return fail(err)
+	}
+	fss = append(fss, upper)
 	layers := []unionfs.Option{unionfs.WithWritableLayer(upper)}
 	sidecar, err := n.indexSidecar(v, lower)
 	if err != nil {
-		os.RemoveAll(upperDir)
-		return nil, fmt.Errorf("nfs workspace of %s: index sidecar: %w", v.ID, err)
+		return fail(fmt.Errorf("nfs workspace of %s: index sidecar: %w", v.ID, err))
 	}
 	if sidecar != nil {
+		fss = append(fss, sidecar.(io.Closer))
 		layers = append(layers, unionfs.WithReadOnlyLayer(sidecar))
 	}
 	layers = append(layers, unionfs.WithReadOnlyLayer(lower))
@@ -270,21 +295,18 @@ func (n *NFS) Mount(_ context.Context, v *view.View, target string) (*Workspace,
 	name := "/w" + strconv.Itoa(n.next)
 	u := unionfs.New(layers...)
 	if err := n.root.Mkdir(name, 0o755); err != nil {
-		os.RemoveAll(upperDir)
-		return nil, err
+		return fail(err)
 	}
 	if err := n.sw.AddRoute(name, u, switchfs.WithRewriter(switchfs.StripPrefix(name))); err != nil {
 		n.root.Remove(name)
-		os.RemoveAll(upperDir)
-		return nil, err
+		return fail(err)
 	}
 	if err := os.Symlink(filepath.Join(n.MountPoint, name), target); err != nil {
 		n.sw.RemoveRoute(name, switchfs.PatternPrefix)
 		n.root.Remove(name)
-		os.RemoveAll(upperDir)
-		return nil, err
+		return fail(err)
 	}
-	n.names[target] = name
+	n.names[target] = &served{name: name, fss: fss}
 	return &Workspace{View: v, Target: target, Upper: upperDir, Env: GitEnv(nil)}, nil
 }
 
@@ -297,12 +319,13 @@ func (n *NFS) Capture(ctx context.Context, ws *Workspace, in capture.Input) (*ca
 
 func (n *NFS) Unmount(_ context.Context, ws *Workspace) error {
 	n.mu.Lock()
-	name, ok := n.names[ws.Target]
+	sv, ok := n.names[ws.Target]
 	delete(n.names, ws.Target)
 	n.mu.Unlock()
 	if ok {
-		n.sw.RemoveRoute(name, switchfs.PatternPrefix)
-		n.root.Remove(name)
+		n.sw.RemoveRoute(sv.name, switchfs.PatternPrefix)
+		n.root.Remove(sv.name)
+		closeAll(sv.fss)
 	}
 	if err := os.Remove(ws.Target); err != nil && !os.IsNotExist(err) {
 		return err

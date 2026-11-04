@@ -38,9 +38,9 @@ require (
 	github.com/BurntSushi/toml v1.4.0 // indirect
 	github.com/absfs/absfs v1.0.0
 	github.com/absfs/absnfs v1.1.1-0.20261103230003-254ef19400ef
-	github.com/absfs/basefs v1.0.1-0.20261103215345-e52901fbe2ea
+	github.com/absfs/basefs v1.0.1-0.20261104000206-dd6e7c4c5184
 	github.com/absfs/memfs v1.1.0
-	github.com/absfs/osfs v1.0.1-0.20251215210911-de085c499e3f
+	github.com/absfs/osfs v1.0.1-0.20261103234919-26d9c50c9a4d
 	github.com/absfs/switchfs v1.0.1-0.20261103183748-8b08df311d19
 	github.com/absfs/unionfs v1.0.1-0.20261103194856-8003b5b49d6a
 	github.com/beorn7/perks v1.0.1 // indirect
