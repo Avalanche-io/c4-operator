@@ -37,12 +37,12 @@ require (
 	al.essio.dev/pkg/shellescape v1.5.1 // indirect
 	github.com/BurntSushi/toml v1.4.0 // indirect
 	github.com/absfs/absfs v1.0.0
-	github.com/absfs/absnfs v1.1.1-0.20261104032231-9f77c407cf1e
-	github.com/absfs/basefs v1.0.1-0.20261104001807-79e9a01613ed
+	github.com/absfs/absnfs v1.1.1-0.20261104042448-d3b10a366020
+	github.com/absfs/basefs v1.0.1-0.20261104034130-a7e0a24939a3
 	github.com/absfs/memfs v1.1.0
 	github.com/absfs/osfs v1.0.1-0.20261103234919-26d9c50c9a4d
 	github.com/absfs/switchfs v1.0.1-0.20261103183748-8b08df311d19
-	github.com/absfs/unionfs v1.0.1-0.20261104020435-e2a45dd21dba
+	github.com/absfs/unionfs v1.0.1-0.20261104035904-d70ffdc44f0a
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
