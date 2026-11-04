@@ -78,7 +78,7 @@ func closeAll(fss []io.Closer) {
 // It is built in a scratch workspace that is then thrown away, so the
 // refresh never appears as a change in an agent's capture; its file time
 // is when it was built, later than every entry, as git's racy check needs.
-func (n *NFS) indexSidecar(v *view.View, lower absfs.FileSystem) (absfs.FileSystem, error) {
+func (n *NFS) indexSidecar(v *view.View, lower absfs.FileSystem) (*basefs.SymlinkFileSystem, error) {
 	hasIndex := false
 	for _, f := range v.Files {
 		if f.Path == ".git/index" {
@@ -287,7 +287,7 @@ func (n *NFS) Mount(_ context.Context, v *view.View, target string) (*Workspace,
 		return fail(fmt.Errorf("nfs workspace of %s: index sidecar: %w", v.ID, err))
 	}
 	if sidecar != nil {
-		fss = append(fss, sidecar.(io.Closer))
+		fss = append(fss, sidecar)
 		layers = append(layers, unionfs.WithReadOnlyLayer(sidecar))
 	}
 	layers = append(layers, unionfs.WithReadOnlyLayer(lower))
