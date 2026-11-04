@@ -42,7 +42,7 @@ require (
 	github.com/absfs/memfs v1.1.0
 	github.com/absfs/osfs v1.0.1-0.20261103234919-26d9c50c9a4d
 	github.com/absfs/switchfs v1.0.1-0.20261103183748-8b08df311d19
-	github.com/absfs/unionfs v1.0.1-0.20261104010451-39f63db35965
+	github.com/absfs/unionfs v1.0.1-0.20261104020435-e2a45dd21dba
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
