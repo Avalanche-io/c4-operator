@@ -58,8 +58,9 @@ type NFS struct {
 // served is one workspace's route and the basefs filesystems under it,
 // each holding its folder open until closed.
 type served struct {
-	name string
-	fss  []io.Closer
+	name  string
+	lower string // the view's folder on this host
+	fss   []io.Closer
 }
 
 func closeAll(fss []io.Closer) {
@@ -306,14 +307,20 @@ func (n *NFS) Mount(_ context.Context, v *view.View, target string) (*Workspace,
 		n.root.Remove(name)
 		return fail(err)
 	}
-	n.names[target] = &served{name: name, fss: fss}
+	n.names[target] = &served{name: name, lower: n.Layers.Dir(m.Key), fss: fss}
 	return &Workspace{View: v, Target: target, Upper: upperDir, Env: GitEnv(nil)}, nil
 }
 
 // Capture reads the workspace's upper on disk, beside the mount, with the
 // union's markers read against the view. The workspace stays mounted.
 func (n *NFS) Capture(ctx context.Context, ws *Workspace, in capture.Input) (*capture.Result, error) {
-	in.Parent, in.Upper, in.Walk = ws.View.ID, ws.Upper, WalkUnionOver(ws.View)
+	n.mu.Lock()
+	sv := n.names[ws.Target]
+	n.mu.Unlock()
+	if sv == nil {
+		return nil, fmt.Errorf("nfs: %s isn't mounted", ws.Target)
+	}
+	in.Parent, in.Upper, in.Walk = ws.View.ID, ws.Upper, WalkUnionOver(ws.View, sv.lower)
 	return capture.Run(ctx, in)
 }
 

@@ -134,7 +134,7 @@ func TestWalkUnionCapturesWhatTheMergedTreeShows(t *testing.T) {
 				t.Fatal(err)
 			}
 			res, err := capture.Run(context.Background(), capture.Input{
-				Project: "show", Parent: v.ID, Upper: upper, Walk: WalkUnionOver(v),
+				Project: "show", Parent: v.ID, Upper: upper, Walk: WalkUnionOver(v, ""),
 				Cache: cache, Sink: store, Workers: 2,
 				Records: view.RecordFunc(func(_ context.Context, id c4.ID) ([]byte, error) { return cache.ReadAll(id) }),
 			})
@@ -209,7 +209,7 @@ func TestWalkUnionOverRefusesAMarkerForANameNotInTheView(t *testing.T) {
 		u := t.TempDir()
 		os.MkdirAll(filepath.Join(u, filepath.Dir(marker)), 0o755)
 		os.WriteFile(filepath.Join(u, marker), nil, 0o755)
-		if _, err := WalkUnionOver(v)(u); err == nil {
+		if _, err := WalkUnionOver(v, "")(u); err == nil {
 			t.Errorf("%s walked without complaint", marker)
 		}
 	}
@@ -217,9 +217,48 @@ func TestWalkUnionOverRefusesAMarkerForANameNotInTheView(t *testing.T) {
 	u := t.TempDir()
 	os.WriteFile(filepath.Join(u, ".wh.docs"), nil, 0o644)
 	os.WriteFile(filepath.Join(u, ".wh..wh.meta.go.mod"), nil, 0o755)
-	entries, err := WalkUnionOver(v)(u)
+	entries, err := WalkUnionOver(v, "")(u)
 	if err != nil || len(entries) != 2 {
 		t.Fatalf("exact markers: %v, %v", entries, err)
+	}
+}
+
+// With the view's folder to ask, a new name the host folds onto a view name
+// fails the walk, unless it's an opaque directory, which replaces the view's
+// entry. On a host that doesn't fold, both are simply new names.
+func TestWalkUnionOverAsksTheHostAboutSpellings(t *testing.T) {
+	lower := t.TempDir()
+	writeBase(t, lower)
+	v, err := view.ScanDir(lower)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, statErr := os.Lstat(filepath.Join(lower, "README.MD"))
+	folds := statErr == nil
+
+	u := t.TempDir()
+	os.WriteFile(filepath.Join(u, "README.MD"), []byte("rewritten\n"), 0o644)
+	_, err = WalkUnionOver(v, lower)(u)
+	if folds != (err != nil) {
+		t.Errorf("README.MD beside README.md, host folds %v: %v", folds, err)
+	}
+
+	u = t.TempDir()
+	os.MkdirAll(filepath.Join(u, "Docs"), 0o755)
+	os.WriteFile(filepath.Join(u, "Docs", ".wh.__dir_opaque"), nil, 0o644)
+	os.WriteFile(filepath.Join(u, "Docs", "new.txt"), []byte("new\n"), 0o644)
+	entries, err := WalkUnionOver(v, lower)(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deletesDocs := false
+	for _, e := range entries {
+		if e.Kind == overlay.Whiteout && e.Path == "docs" {
+			deletesDocs = true
+		}
+	}
+	if deletesDocs != folds {
+		t.Errorf("an opaque Docs, host folds %v: deletes docs %v (%+v)", folds, deletesDocs, entries)
 	}
 }
 

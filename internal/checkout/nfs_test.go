@@ -2,6 +2,7 @@ package checkout
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -187,5 +188,105 @@ func TestNFSRefusesReservedNames(t *testing.T) {
 	}
 	if err := os.WriteFile(at(".WHx"), []byte("x\n"), 0o644); err != nil {
 		t.Errorf("a look-alike name was refused: %v", err)
+	}
+}
+
+// An edit through another spelling of a view name ("rm -rf DOCS" for docs
+// on a case-insensitive host) is captured as what it did on this host, or
+// the capture fails: never a different tree without an error. The host's
+// own result on a native copy is the reference, so on a case-sensitive
+// host each edit is what it says. Replacing a name with another spelling of
+// it is an ordinary edit and must capture exactly.
+func TestNFSEditsByAnotherSpelling(t *testing.T) {
+	if runtime.GOOS != "darwin" || os.Getenv("C4_NFS_TESTS") == "" {
+		t.Skip("needs macOS and C4_NFS_TESTS=1 (it mounts an NFS export)")
+	}
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	writeBase(t, src)
+	v, err := view.ScanDir(src)
+	must(t, err)
+	set, err := objcache.OpenSet(filepath.Join(root, "cache"), objcache.Options{Mode: 0o644, ExecMode: 0o755, Budget: 1 << 30})
+	must(t, err)
+	cache, _ := set.Partition("p-show")
+	store := &memStore{objs: map[c4.ID][]byte{}}
+	for _, f := range v.Files {
+		data, _ := os.ReadFile(filepath.Join(src, f.Path))
+		cache.Put(f.ID, data)
+	}
+	for _, r := range v.Records() {
+		cache.Put(r.ID, r.Data)
+		store.PutBytes(context.Background(), "", r.ID, r.Data)
+	}
+	layers, err := layer.Open(cache)
+	must(t, err)
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	must(t, err)
+	port := l.Addr().(*net.TCPAddr).Port
+	l.Close()
+	n := &NFS{Layers: layers, State: filepath.Join(root, "uppers"), MountPoint: filepath.Join(root, "mnt"), Port: port}
+	must(t, n.Start())
+	defer n.Close()
+	ctx := context.Background()
+
+	for i, sc := range []struct {
+		name  string
+		exact bool // an ordinary edit: the capture must succeed
+		edit  func(r string) error
+	}{
+		{"remove a directory as DOCS", false, func(r string) error { return os.RemoveAll(filepath.Join(r, "DOCS")) }},
+		{"remove a file as README.MD", false, func(r string) error { return os.Remove(filepath.Join(r, "README.MD")) }},
+		{"write a file as README.MD", false, func(r string) error {
+			return os.WriteFile(filepath.Join(r, "README.MD"), []byte("rewritten\n"), 0o644)
+		}},
+		{"write into a directory as DOCS", false, func(r string) error {
+			return os.WriteFile(filepath.Join(r, "DOCS", "same.txt"), []byte("rewritten\n"), 0o644)
+		}},
+		{"chmod a file as GO.MOD", false, func(r string) error { return os.Chmod(filepath.Join(r, "GO.MOD"), 0o755) }},
+		{"replace docs with Docs", true, func(r string) error {
+			if err := os.RemoveAll(filepath.Join(r, "docs")); err != nil {
+				return err
+			}
+			if err := os.Mkdir(filepath.Join(r, "Docs"), 0o755); err != nil {
+				return err
+			}
+			return os.WriteFile(filepath.Join(r, "Docs", "new.txt"), []byte("new\n"), 0o644)
+		}},
+		// Loud for now: the union's bookkeeping folds too, so the upper holds
+		// Readme.md with no deletion of README.md, which is also what a write
+		// through README.MD leaves, and the two mean different trees.
+		{"rename README.md to Readme.md", false, func(r string) error {
+			return os.Rename(filepath.Join(r, "README.md"), filepath.Join(r, "Readme.md"))
+		}},
+	} {
+		t.Run(sc.name, func(t *testing.T) {
+			ref := filepath.Join(root, fmt.Sprintf("ref%d", i))
+			copyTree(t, src, ref)
+			refErr := sc.edit(ref)
+			want, err := view.ScanDir(ref)
+			must(t, err)
+			ws, err := n.Mount(ctx, v, filepath.Join(root, fmt.Sprintf("ws%d", i)))
+			must(t, err)
+			defer n.Unmount(ctx, ws)
+			wsErr := sc.edit(ws.Target)
+			if (refErr == nil) != (wsErr == nil) {
+				t.Fatalf("on this host: %v; in the workspace: %v", refErr, wsErr)
+			}
+			res, err := n.Capture(ctx, ws, capture.Input{Project: "show", Cache: cache, Sink: store, Workers: 2,
+				Records: view.RecordFunc(func(_ context.Context, id c4.ID) ([]byte, error) { return cache.ReadAll(id) })})
+			if err != nil {
+				if sc.exact {
+					t.Fatalf("capture: %v", err)
+				}
+				t.Logf("refused, loudly: %v", err)
+				return
+			}
+			if res.Output != want.ID {
+				dir, _ := filepath.EvalSymlinks(ws.Target)
+				got, _ := view.ScanDir(dir)
+				t.Fatalf("captured %s (unchanged: %v); on this host the agent's tree is %s; the workspace scans as %s",
+					res.Output, res.Output == v.ID, want.ID, got.ID)
+			}
+		})
 	}
 }

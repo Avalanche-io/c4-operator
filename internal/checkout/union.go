@@ -48,7 +48,16 @@ func reservedName(name string) bool {
 // host). Read byte for byte it would delete or change nothing, and the
 // capture would silently miss the agent's change, so the walk fails
 // instead.
-func WalkUnionOver(v *view.View) func(upper string) ([]overlay.Entry, error) {
+//
+// A write through another spelling copies the file up under that spelling,
+// beside the view's own name, which a byte-exact reader takes for a second
+// file. lower, the view's folder on this host, catches it: a new name that
+// isn't in v but that the lower resolves is another spelling of a lower
+// entry, folded by the host itself (case, or Unicode normalisation), so the
+// walk fails unless the upper deletes that entry or replaces it with an
+// opaque directory, as replacing docs with Docs does. An empty lower skips
+// the check.
+func WalkUnionOver(v *view.View, lower string) func(upper string) ([]overlay.Entry, error) {
 	files := make(map[string]view.File, len(v.Files))
 	for _, f := range v.Files {
 		files[f.Path] = f
@@ -81,13 +90,73 @@ func WalkUnionOver(v *view.View) func(upper string) ([]overlay.Entry, error) {
 		if err != nil {
 			return nil, err
 		}
+		deleted := map[string]bool{}
 		for _, e := range out {
-			if e.Kind == overlay.Whiteout && !inView[e.Path] {
+			if e.Kind != overlay.Whiteout {
+				continue
+			}
+			if !inView[e.Path] {
 				return nil, fmt.Errorf("checkout: the union deleted %s, which the view doesn't have (another spelling of a view name?)", e.Path)
 			}
+			deleted[e.Path] = true
+		}
+		if lower == "" {
+			return out, nil
+		}
+		for _, e := range out {
+			p := strings.TrimSuffix(e.Path, "/")
+			if e.Kind == overlay.Whiteout || inView[p] {
+				continue
+			}
+			real, err := aliasOf(lower, p)
+			if err != nil {
+				return nil, err
+			}
+			if real == "" || deleted[real] {
+				continue
+			}
+			// An opaque directory carries its whole content, so one under
+			// another spelling replaces the view's entry outright (rm -rf docs,
+			// then mkdir Docs; the union's own deletion marker folded away).
+			// Anything else is ambiguous: a file under another spelling is
+			// both what a rename leaves and what a write through that spelling
+			// leaves, and the two mean different trees.
+			if e.Kind == overlay.Dir && e.Opaque {
+				out = append(out, overlay.Entry{Path: real, Kind: overlay.Whiteout})
+				deleted[real] = true
+				continue
+			}
+			return nil, fmt.Errorf("checkout: the union wrote %s, another spelling of the view's %s", p, real)
 		}
 		return out, nil
 	}
+}
+
+// aliasOf returns the lower entry that p, a name not in the lower byte for
+// byte, resolves to on this host, or "" when it resolves to none.
+func aliasOf(lower, p string) (string, error) {
+	full := filepath.Join(lower, filepath.FromSlash(p))
+	info, err := os.Lstat(full)
+	if err != nil {
+		return "", nil // no such entry: a new name
+	}
+	dir := filepath.Dir(full)
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	for _, d := range ents {
+		other, err := os.Lstat(filepath.Join(dir, d.Name()))
+		if err != nil || !os.SameFile(info, other) {
+			continue
+		}
+		rel, err := filepath.Rel(lower, filepath.Join(dir, d.Name()))
+		if err != nil {
+			return "", err
+		}
+		return filepath.ToSlash(rel), nil
+	}
+	return "", fmt.Errorf("checkout: %s resolves in the view's folder but matches no entry there", p)
 }
 
 // WalkUnion reads a union's writable layer into its changes, as capture's
