@@ -269,16 +269,22 @@ func TestNFSEditsByAnotherSpelling(t *testing.T) {
 		{"rename(2) docs to Docs", true, "", func(r string) error {
 			return unix.Rename(filepath.Join(r, "docs"), filepath.Join(r, "Docs"))
 		}},
-		// os.Rename and mv stat both names first, and the export gives each
-		// spelling its own file ID: os.Rename refuses to rename onto an
-		// existing directory that isn't the same file (EEXIST), and mv takes
-		// Docs for another directory and moves docs into it. rename(2)
-		// itself works (above).
-		{"os.Rename docs to Docs", true, "each spelling has its own file ID, so os.Rename sees an existing directory", func(r string) error {
+		// os.Rename and mv stat both names first, and need the two spellings
+		// to be one file (one file ID), or they take Docs for another
+		// directory: os.Rename refuses (EEXIST) and mv moves docs into it.
+		{"os.Rename docs to Docs", true, "", func(r string) error {
 			return os.Rename(filepath.Join(r, "docs"), filepath.Join(r, "Docs"))
 		}},
-		{"mv docs Docs", true, "each spelling has its own file ID, so mv moves docs into Docs", func(r string) error {
+		{"mv docs Docs", true, "", func(r string) error {
 			if out, err := exec.Command("mv", filepath.Join(r, "docs"), filepath.Join(r, "Docs")).CombinedOutput(); err != nil {
+				return fmt.Errorf("%v: %s", err, out)
+			}
+			return nil
+		}},
+		// On a folding host cp refuses: the two names are one file. With a
+		// file ID per spelling it copied the file onto itself, emptying it.
+		{"cp README.md readme.md", true, "", func(r string) error {
+			if out, err := exec.Command("cp", filepath.Join(r, "README.md"), filepath.Join(r, "readme.md")).CombinedOutput(); err != nil {
 				return fmt.Errorf("%v: %s", err, out)
 			}
 			return nil
