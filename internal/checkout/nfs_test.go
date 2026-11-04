@@ -262,12 +262,13 @@ func TestNFSEditsByAnotherSpelling(t *testing.T) {
 			}
 			return os.WriteFile(filepath.Join(r, "Docs", "new.txt"), []byte("new\n"), 0o644)
 		}},
-		// The export reports itself case-sensitive (absnfs's PATHCONF) while
-		// it folds, and the client treats the rename as one of a file onto
-		// itself: nothing reaches the union, and the workspace keeps
-		// README.md. The capture is right about the workspace; the workspace
-		// differs from the host until the export reports its folding.
-		{"rename README.md to Readme.md", true, "a case-only rename doesn't reach the union over NFS", func(r string) error {
+		// The client sends the RENAME, but unionfs takes the two spellings for
+		// different entries (os.SameFile is false through basefs's wrapped
+		// FileInfo) and its rename onto "another spelling of itself" does
+		// nothing, so the workspace keeps README.md. The capture is right
+		// about the workspace; the workspace differs from the host until
+		// unionfs sees through the wrapping (its issue #10).
+		{"rename README.md to Readme.md", true, "a case-only rename does nothing in the union (unionfs #10)", func(r string) error {
 			return os.Rename(filepath.Join(r, "README.md"), filepath.Join(r, "Readme.md"))
 		}},
 	} {
