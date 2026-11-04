@@ -2,6 +2,7 @@ package checkout
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -154,19 +155,42 @@ func TestUnionReserved(t *testing.T) {
 	writeBase(t, root)
 	os.WriteFile(filepath.Join(root, "docs/.wh.fixture"), []byte("a real file\n"), 0o644)
 	os.MkdirAll(filepath.Join(root, ".wh.dir"), 0o755)
+	// Reserved in any ASCII case; look-alikes aren't.
+	for _, n := range []string{".WH.upper", ".Wh.mixed", ".WHx", "x.WH.y", "..wh.x", ".wh"} {
+		os.WriteFile(filepath.Join(root, "docs", n), []byte("a real file\n"), 0o644)
+	}
 	v, err := view.ScanDir(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := UnionReserved(v)
-	if len(got) != 2 || got[0] != ".wh.dir/" || got[1] != "docs/.wh.fixture" {
-		t.Fatalf("reserved %q", got)
+	got := map[string]bool{}
+	for _, p := range UnionReserved(v) {
+		got[p] = true
+	}
+	want := []string{".wh.dir/", "docs/.wh.fixture", "docs/.WH.upper", "docs/.Wh.mixed"}
+	for _, p := range want {
+		if !got[p] {
+			t.Errorf("%s isn't reserved", p)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("reserved %v, want exactly %v", got, want)
 	}
 	clean := filepath.Join(t.TempDir(), "clean")
 	writeBase(t, clean)
 	cv, _ := view.ScanDir(clean)
 	if r := UnionReserved(cv); len(r) != 0 {
 		t.Fatalf("a clean view reserved %q", r)
+	}
+}
+
+// A reserved name that isn't an exact marker can't come through the union,
+// so finding one in the writable layer fails the walk.
+func TestWalkUnionRefusesAFoldedMarkerName(t *testing.T) {
+	u := t.TempDir()
+	os.WriteFile(filepath.Join(u, ".WH.x"), []byte("planted\n"), 0o644)
+	if _, err := WalkUnion(u); !errors.Is(err, ErrReservedNames) {
+		t.Fatalf("walking a planted .WH.x: %v", err)
 	}
 }
 

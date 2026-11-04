@@ -1,6 +1,7 @@
 package checkout
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -25,6 +26,15 @@ const (
 	// lower. The marker's own attributes are that metadata.
 	metaPrefix = ".wh..wh.meta."
 )
+
+// reservedName reports a name the union keeps for its markers: one whose
+// first four bytes are ".wh." in any ASCII case. The union refuses to
+// create such a name on every host, because on a case-insensitive one
+// ".WH.x" is the same file as the marker ".wh.x" (no other code point
+// folds into the prefix). Markers themselves are recognised exactly.
+func reservedName(name string) bool {
+	return len(name) >= len(whiteoutPrefix) && strings.EqualFold(name[:len(whiteoutPrefix)], whiteoutPrefix)
+}
 
 // WalkUnionOver is WalkUnion for a workspace of v, which also reads the
 // union's metadata markers: a file whose mode changed while its bytes
@@ -53,7 +63,10 @@ func WalkUnionOver(v *view.View) func(upper string) ([]overlay.Entry, error) {
 // entries: an empty file .wh.<name> deletes name from its directory, a
 // .wh.__dir_opaque file makes its directory replace the lower one
 // entirely, and everything else is what was written there. Metadata
-// markers are skipped: WalkUnionOver reads them against the view.
+// markers are skipped: WalkUnionOver reads them against the view. Any
+// other reserved name (".WH.x") can't have come through the union, which
+// refuses to make one, so it fails the walk rather than being taken as a
+// file or dropped.
 func WalkUnion(upper string) ([]overlay.Entry, error) { return walkUnion(upper, nil) }
 
 func walkUnion(upper string, meta func(rel string, info fs.FileInfo) *overlay.Entry) ([]overlay.Entry, error) {
@@ -96,6 +109,8 @@ func walkUnion(upper string, meta func(rel string, info fs.FileInfo) *overlay.En
 				out = append(out, overlay.Entry{Path: dir + target, Kind: overlay.Whiteout})
 			}
 			return nil
+		case reservedName(name):
+			return fmt.Errorf("%w: %s is in the writable layer, which the union never makes", ErrReservedNames, rel)
 		}
 		info, err := d.Info()
 		if err != nil {
@@ -129,14 +144,14 @@ func walkUnion(upper string, meta func(rel string, info fs.FileInfo) *overlay.En
 }
 
 // UnionReserved lists the paths of v that a union of this form can't
-// carry: a name starting with .wh. reads as a marker, so the file would
-// vanish from the merged view. A backend built on such a union refuses
-// these views (another backend serves them).
+// carry: a name starting with .wh., in any ASCII case, reads as a marker
+// or can't be made in the writable layer (reservedName). A backend built
+// on such a union refuses these views (another backend serves them).
 func UnionReserved(v *view.View) []string {
 	var out []string
 	reserved := func(p string) bool {
 		name := p[strings.LastIndex(strings.TrimSuffix(p, "/"), "/")+1:]
-		return strings.HasPrefix(name, whiteoutPrefix)
+		return reservedName(name)
 	}
 	for _, d := range v.Dirs {
 		if reserved(d) {

@@ -138,3 +138,54 @@ func TestNFSIndexSidecar(t *testing.T) {
 		}
 	}
 }
+
+// A client can't make a name the union reserves, in any ASCII case, by any
+// call: on a case-insensitive host ".WH.x" would be the marker ".wh.x".
+func TestNFSRefusesReservedNames(t *testing.T) {
+	if runtime.GOOS != "darwin" || os.Getenv("C4_NFS_TESTS") == "" {
+		t.Skip("needs macOS and C4_NFS_TESTS=1 (it mounts an NFS export)")
+	}
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	writeBase(t, src)
+	v, err := view.ScanDir(src)
+	must(t, err)
+	set, err := objcache.OpenSet(filepath.Join(root, "cache"), objcache.Options{Mode: 0o644, ExecMode: 0o755, Budget: 1 << 30})
+	must(t, err)
+	cache, _ := set.Partition("p-show")
+	for _, f := range v.Files {
+		data, _ := os.ReadFile(filepath.Join(src, f.Path))
+		cache.Put(f.ID, data)
+	}
+	for _, r := range v.Records() {
+		cache.Put(r.ID, r.Data)
+	}
+	layers, err := layer.Open(cache)
+	must(t, err)
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	must(t, err)
+	port := l.Addr().(*net.TCPAddr).Port
+	l.Close()
+	n := &NFS{Layers: layers, State: filepath.Join(root, "uppers"), MountPoint: filepath.Join(root, "mnt"), Port: port}
+	must(t, n.Start())
+	defer n.Close()
+	ctx := context.Background()
+	ws, err := n.Mount(ctx, v, filepath.Join(root, "ws"))
+	must(t, err)
+	defer n.Unmount(ctx, ws)
+	at := func(name string) string { return filepath.Join(ws.Target, name) }
+	must(t, os.WriteFile(at("plain"), []byte("x\n"), 0o644))
+	for what, err := range map[string]error{
+		"create .WH.x":    os.WriteFile(at(".WH.x"), []byte("x\n"), 0o644),
+		"mkdir .Wh.d":     os.Mkdir(at(".Wh.d"), 0o755),
+		"symlink .wH.l":   os.Symlink("plain", at(".wH.l")),
+		"rename to .WH.r": os.Rename(at("plain"), at(".WH.r")),
+	} {
+		if err == nil {
+			t.Errorf("%s: allowed", what)
+		}
+	}
+	if err := os.WriteFile(at(".WHx"), []byte("x\n"), 0o644); err != nil {
+		t.Errorf("a look-alike name was refused: %v", err)
+	}
+}
