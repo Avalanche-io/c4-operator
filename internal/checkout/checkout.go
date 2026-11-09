@@ -24,6 +24,12 @@ type Backend interface {
 	// Capture reads the workspace's writes into a changeset over its
 	// view. in carries the store to write to (Project, Cache, Records,
 	// Sink, Workers); the backend sets Parent, Upper and Walk.
+	//
+	// A capture never changes the workspace: every file keeps its content,
+	// mode and date, and nothing the agent writes afterwards reaches what
+	// was captured. Only a backend that ends the workspace first (overlay
+	// unmounts it) may set Consume, which links the dead upper's files
+	// into the cache.
 	Capture(ctx context.Context, ws *Workspace, in capture.Input) (*capture.Result, error)
 	// Unmount removes the workspace.
 	Unmount(ctx context.Context, ws *Workspace) error

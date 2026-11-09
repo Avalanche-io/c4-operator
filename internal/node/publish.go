@@ -405,6 +405,9 @@ func (d *Daemon) runCapture(ctx context.Context, vol *Volume) error {
 	res, err := capture.Run(ctx, capture.Input{
 		Project: p.Name, Parent: parent, Upper: upper,
 		Cache: pc.cache, Records: d.records(pc), Sink: d.sink(pc), Workers: 8,
+		// Unpublish unmounted the overlay, and removes the upper once this
+		// succeeds: its files may be linked into the cache.
+		Consume:  true,
 		Progress: func(done, of int64) { egress.set(ctx, Egress{Bytes: done, Of: of}, false) },
 	})
 	if err != nil {

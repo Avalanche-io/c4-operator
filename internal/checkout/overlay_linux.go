@@ -59,6 +59,8 @@ func (o *Overlay) Capture(ctx context.Context, ws *Workspace, in capture.Input) 
 		return nil, err
 	}
 	in.Parent, in.Upper, in.Walk = ws.View.ID, ws.Upper, nil
+	// Unmounted, the upper is dead: its files may be linked into the cache.
+	in.Consume = true
 	return capture.Run(ctx, in)
 }
 

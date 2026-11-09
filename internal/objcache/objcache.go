@@ -261,14 +261,52 @@ func (c *Cache) Commit(tmp string, id c4.ID) error {
 	return nil
 }
 
-// Adopt moves an existing file on the same filesystem (a file captured
-// from an upper directory) into the cache as id, without copying. The
-// caller has hashed it.
-func (c *Cache) Adopt(src string, id c4.ID) error {
+// Adopt makes a file of a dead upper directory the cache's object for
+// id, without copying. The caller has hashed it. src and the object are
+// then one inode, which takes the cache's mode and date, so src must
+// never be used again: a write to it would change the object under its
+// ID. For a file that stays in use, take a Snapshot and Commit that.
+//
+// exec says src is an executable. The link then goes to the executable
+// variant, so src keeps an executable bit and a capture that is retried
+// reads the same entry; the plain object is a copy. An object already
+// cached is left as it is, and src is not touched.
+func (c *Cache) Adopt(src string, id c4.ID, exec bool) error {
+	if !exec {
+		if c.Has(id) {
+			c.touch(id)
+			return nil
+		}
+		return c.linkInto(src, c.Path(id), c.set.opts.Mode, id)
+	}
+	if c.set.opts.ExecMode&0o111 != 0 {
+		if _, err := os.Stat(c.ExecPathOf(id)); err != nil {
+			if err := c.linkInto(src, c.ExecPathOf(id), c.set.opts.ExecMode, id); err != nil {
+				return err
+			}
+		}
+	}
 	if c.Has(id) {
 		c.touch(id)
 		return nil
 	}
+	// The plain object is its own inode: a link would give src the plain
+	// mode, and the retry would read the file as not executable.
+	tmp, err := c.TempFile()
+	if err != nil {
+		return err
+	}
+	tmp.Close()
+	if err := copyFile(src, tmp.Name()); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	return c.Commit(tmp.Name(), id)
+}
+
+// linkInto hardlinks src to final (copying across filesystems) with the
+// given mode and the epoch date.
+func (c *Cache) linkInto(src, final string, mode os.FileMode, id c4.ID) error {
 	tmp, err := c.TempFile()
 	if err != nil {
 		return err
@@ -280,10 +318,56 @@ func (c *Cache) Adopt(src string, id c4.ID) error {
 			return err
 		}
 		if err := copyFile(src, tmp.Name()); err != nil {
+			os.Remove(tmp.Name())
 			return err
 		}
 	}
-	return c.Commit(tmp.Name(), id)
+	if final == c.Path(id) {
+		return c.Commit(tmp.Name(), id)
+	}
+	if err := os.MkdirAll(filepath.Dir(final), 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), mode); err != nil {
+		return err
+	}
+	if err := os.Chtimes(tmp.Name(), time.Now(), time.Unix(0, 0)); err != nil {
+		return err
+	}
+	st, err := os.Stat(tmp.Name())
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(tmp.Name(), final); err != nil {
+		return err
+	}
+	c.set.add(st.Size())
+	return nil
+}
+
+// Snapshot copies src into the partition's tmp directory and returns the
+// copy's path: a clone where the filesystem has one (APFS), so no bytes
+// move, and a plain copy elsewhere. The copy shares no inode with src, so
+// nothing done to either reaches the other. Hash the copy and Commit it
+// under that ID, or remove it. This is how a file that stays in use (a
+// live workspace's) enters the cache.
+func (c *Cache) Snapshot(src string) (string, error) {
+	tmp, err := c.TempFile()
+	if err != nil {
+		return "", err
+	}
+	name := tmp.Name()
+	tmp.Close()
+	os.Remove(name)
+	if err := cloneFile(src, name); err == nil {
+		return name, nil
+	}
+	os.Remove(name)
+	if err := copyFile(src, name); err != nil {
+		os.Remove(name)
+		return "", err
+	}
+	return name, nil
 }
 
 // Put stores small content (records, changesets) under id.

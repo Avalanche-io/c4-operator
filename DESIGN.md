@@ -493,7 +493,11 @@ It:
      replaced by the upper's;
    - other directories: merged; symlinks: added or changed;
 3. hardlinks each new file into the node's object cache, so a later stage on
-   this node reads it without a fetch;
+   this node reads it without a fetch. The upper is dead by now, so sharing
+   an inode with it is safe; an executable is linked as the cache's
+   executable variant, so it keeps an executable bit and a capture that is
+   retried reads the same entry. A workspace that stays in use is never
+   linked: its files are copied (cloned on APFS) and the copy is hashed;
 4. computes the output view by rewriting only the records along changed
    paths (the parent's records come from the node cache), and computes the
    changeset c4m;

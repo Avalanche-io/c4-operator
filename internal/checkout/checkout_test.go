@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -189,6 +190,37 @@ func TestCloneConformance(t *testing.T) {
 	conformance(t, func(l *layer.Store) Backend { return &Clone{Layers: l} })
 }
 
+// fileAttrs is what a capture must not change about a workspace's file.
+type fileAttrs struct {
+	mode os.FileMode
+	time time.Time
+	size int64
+}
+
+func (a fileAttrs) String() string {
+	return fmt.Sprintf("mode %v, dated %s, %d bytes", a.mode.Perm(), a.time.UTC().Format(time.RFC3339), a.size)
+}
+
+// attrsUnder lists every regular file under dir with its attributes.
+func attrsUnder(t *testing.T, dir string) map[string]fileAttrs {
+	t.Helper()
+	out := map[string]fileAttrs{}
+	err := filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() {
+			rel, _ := filepath.Rel(dir, p)
+			out[rel] = fileAttrs{info.Mode(), info.ModTime(), info.Size()}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
 // conformance runs every script on workspaces from one backend and checks
 // each against the same script on a plain copy.
 func conformance(t *testing.T, backend func(*layer.Store) Backend) {
@@ -259,9 +291,25 @@ func conformance(t *testing.T, backend func(*layer.Store) Backend) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// A backend that keeps the workspace alive must leave every
+			// file of it as the agent left it. Read on disk, not through
+			// a mount, whose client may answer from its cache.
+			live := b.Name() != "overlay"
+			var before map[string]fileAttrs
+			if live {
+				before = attrsUnder(t, ws.Upper)
+			}
 			res, err := b.Capture(ctx, ws, in)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if live {
+				after := attrsUnder(t, ws.Upper)
+				for p, was := range before {
+					if now, ok := after[p]; !ok || now != was {
+						t.Errorf("the capture changed %s: %s, was %s", p, now, was)
+					}
+				}
 			}
 			if res.Output != want.ID {
 				t.Fatalf("captured %s, the agent's tree is %s", res.Output, want.ID)

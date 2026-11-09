@@ -8,11 +8,24 @@
 // new directory records and the changeset c4m. A file that was copied up
 // without changing (a metadata-only write) has the parent's ID and is not
 // a change.
+//
+// A capture never changes the directory it reads. Each new file is first
+// copied into the node cache (a clone where the filesystem has one), and
+// it is the copy that is hashed and stored: the ID names exactly the
+// bytes kept, whatever is written to the directory meanwhile or
+// afterwards, and the directory's files keep their modes and dates. A
+// workspace that stays in use after a capture depends on this.
+//
+// Input.Consume gives that up for speed, for an upper that is dead: the
+// overlay has been unmounted and the directory is removed once its
+// capture succeeds. Its files are then hardlinked into the cache rather
+// than copied.
 package capture
 
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -50,6 +63,13 @@ type Input struct {
 	// compared with its base); all of them come back as the same entries,
 	// so the changeset never depends on the form. Nil means overlay.Walk.
 	Walk func(upper string) ([]overlay.Entry, error)
+	// Consume says Upper is dead: nothing will read or write it again, and
+	// it is removed once its capture succeeds. Its new files are then
+	// hardlinked into the cache, not copied, and so take the cache's mode
+	// and date. Leave it false for a workspace that stays in use: a link
+	// would make the workspace's file and the cache's object one inode,
+	// and the next write to the file would change the object under its ID.
+	Consume bool
 }
 
 // Result describes a capture.
@@ -71,7 +91,9 @@ type Result struct {
 }
 
 // Run captures one upper directory. It is idempotent: running it again on
-// the same upper gives the same result and writes nothing new.
+// the same upper gives the same result and writes nothing new, including
+// after a run that failed part way. Unless Input.Consume is set it leaves
+// the upper exactly as it found it.
 func Run(ctx context.Context, in Input) (*Result, error) {
 	start := time.Now()
 	res := &Result{Output: in.Parent}
@@ -110,14 +132,29 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 		}
 	}
 
+	if !in.Consume {
+		// The upper stays in use: work from private copies, so what is
+		// hashed is what is stored, and the upper is never touched.
+		snaps, err := snapshotAll(in.Cache, files, in.Workers)
+		defer func() {
+			for _, s := range snaps {
+				os.Remove(s) // those committed have been renamed away
+			}
+		}()
+		if err != nil {
+			return nil, err
+		}
+	}
 	ids, err := hashAll(files, in.Workers)
 	if err != nil {
 		return nil, err
 	}
 	paths := make(map[c4.ID]string, len(files))
+	execs := make(map[c4.ID]bool, len(files))
 	for i, f := range files {
 		edits = append(edits, view.Edit{Path: f.Path, Entry: view.FileEntry("", f.Size, ids[i], f.Exec)})
 		paths[ids[i]] = f.Full
+		execs[ids[i]] = f.Exec
 		res.Hashed += f.Size
 	}
 	metrics.NodeHashedBytes.WithLabelValues("capture").Add(float64(res.Hashed))
@@ -137,9 +174,8 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 	res.Records = len(applied.Records)
 	res.Files = applied.Files
 
-	// New objects: keep a copy in the node cache (a hardlink from the
-	// upper, so later stages on this node read them without a fetch) and
-	// write them to the store.
+	// New objects: keep them in the node cache (so later stages on this
+	// node read them without a fetch) and write them to the store.
 	changed := map[c4.ID]bool{}
 	written := 0 // changed files whose bytes are in the upper
 	for _, f := range applied.Files {
@@ -149,7 +185,7 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 		}
 	}
 	res.Reused = len(files) - written
-	if err := upload(ctx, in, changed, paths, res); err != nil {
+	if err := upload(ctx, in, changed, paths, execs, res); err != nil {
 		return nil, err
 	}
 	// Records, then the changeset: a reader that finds the changeset finds
@@ -219,7 +255,58 @@ func hashAll(files []overlay.Entry, workers int) ([]c4.ID, error) {
 	return ids, first
 }
 
-func upload(ctx context.Context, in Input, changed map[c4.ID]bool, paths map[c4.ID]string, res *Result) error {
+// snapshotAll replaces each file's Full with a private copy in the cache's
+// tmp directory, and its Size with the copy's. It returns the copies made,
+// for the caller to remove, also when it fails.
+func snapshotAll(cache *objcache.Cache, files []overlay.Entry, workers int) ([]string, error) {
+	if workers <= 0 {
+		workers = 4
+	}
+	snaps := make([]string, len(files))
+	var (
+		wg    sync.WaitGroup
+		mu    sync.Mutex
+		first error
+		next  = make(chan int)
+	)
+	for range min(workers, max(len(files), 1)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range next {
+				s, err := cache.Snapshot(files[i].Full)
+				var st os.FileInfo
+				if err == nil {
+					snaps[i] = s
+					st, err = os.Stat(s)
+				}
+				if err != nil {
+					mu.Lock()
+					if first == nil {
+						first = fmt.Errorf("copy %s: %w", files[i].Path, err)
+					}
+					mu.Unlock()
+					continue
+				}
+				files[i].Full, files[i].Size = s, st.Size()
+			}
+		}()
+	}
+	for i := range files {
+		next <- i
+	}
+	close(next)
+	wg.Wait()
+	made := snaps[:0]
+	for _, s := range snaps {
+		if s != "" {
+			made = append(made, s)
+		}
+	}
+	return made, first
+}
+
+func upload(ctx context.Context, in Input, changed map[c4.ID]bool, paths map[c4.ID]string, execs map[c4.ID]bool, res *Result) error {
 	workers := in.Workers
 	if workers <= 0 {
 		workers = 4
@@ -249,7 +336,13 @@ func upload(ctx context.Context, in Input, changed map[c4.ID]bool, paths map[c4.
 		go func() {
 			defer wg.Done()
 			for id := range ch {
-				err := in.Cache.Adopt(paths[id], id)
+				var err error
+				if in.Consume {
+					err = in.Cache.Adopt(paths[id], id, execs[id])
+				} else {
+					// paths[id] is this capture's own copy.
+					err = in.Cache.Commit(paths[id], id)
+				}
 				if err == nil {
 					err = in.Sink.PutFile(ctx, in.Project, id, in.Cache.Path(id))
 				}

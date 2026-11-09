@@ -194,6 +194,7 @@ func TestCaptureMatchesTheMountedTree(t *testing.T) {
 	res, err := Run(context.Background(), Input{
 		Project: "show", Parent: f.base.ID, Upper: upper,
 		Cache: f.cache, Records: f.records(), Sink: f.sink, Workers: 4,
+		Consume: true, // unmounted above: the upper is dead, as the node daemon's is
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -218,7 +219,7 @@ func TestCaptureMatchesTheMountedTree(t *testing.T) {
 	// Running capture again writes nothing new and gives the same view.
 	again, err := Run(context.Background(), Input{
 		Project: "show", Parent: f.base.ID, Upper: upper,
-		Cache: f.cache, Records: f.records(), Sink: f.sink,
+		Cache: f.cache, Records: f.records(), Sink: f.sink, Consume: true,
 	})
 	if err != nil || again.Output != res.Output || again.Changeset != res.Changeset {
 		t.Fatalf("capture is not idempotent: %v", err)
