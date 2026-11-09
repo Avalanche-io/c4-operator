@@ -193,3 +193,87 @@ func TestAdoptKeepsAnExecutableExecutable(t *testing.T) {
 		t.Fatalf("a plain file is linked as the object: %v, %v", po, err)
 	}
 }
+
+func tmpFiles(c *Cache) []string {
+	left, _ := filepath.Glob(filepath.Join(c.Dir(), "tmp", "*"))
+	return left
+}
+
+// A snapshot is of a regular file and never follows a link: the name was
+// a file when a walk saw it, and can be anything by the time it is copied.
+func TestSnapshotTakesOnlyARegularFile(t *testing.T) {
+	s, _ := OpenSet(filepath.Join(t.TempDir(), "cache"), Options{Mode: 0o666, ExecMode: 0o777, Budget: 1 << 20})
+	c, _ := s.Partition("p-show")
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	os.WriteFile(target, []byte("secret\n"), 0o600)
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if snap, err := c.Snapshot(link); err == nil {
+		t.Errorf("a snapshot followed a symlink: %s", snap)
+	}
+	if snap, err := c.Snapshot(dir); err == nil {
+		t.Errorf("a snapshot took a folder: %s", snap)
+	}
+	if left := tmpFiles(c); len(left) != 0 {
+		t.Errorf("left in tmp: %v", left)
+	}
+	// And Commit refuses anything but a regular file, removing it.
+	tmp := filepath.Join(c.Dir(), "tmp", "a-link")
+	if err := os.Symlink(target, tmp); err != nil {
+		t.Fatal(err)
+	}
+	id := c4.Identify(bytes.NewReader([]byte("secret\n")))
+	if err := c.Commit(tmp, id); err == nil {
+		t.Error("a symlink was committed as an object")
+	}
+	if fi, _ := os.Stat(target); fi.Mode().Perm() != 0o600 {
+		t.Errorf("the link's target is now mode %v", fi.Mode().Perm())
+	}
+	if c.Has(id) || len(tmpFiles(c)) != 0 {
+		t.Errorf("after the refusal: cached %v, tmp %v", c.Has(id), tmpFiles(c))
+	}
+}
+
+// An adopt that fails leaves no second name for the upper's file behind,
+// and two adopters of one executable count it once.
+func TestAdoptLeavesNothingBehindAndCountsOnce(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory modes")
+	}
+	s, _ := OpenSet(filepath.Join(t.TempDir(), "cache"), Options{Mode: 0o666, ExecMode: 0o777, Budget: 1 << 20})
+	c, _ := s.Partition("p-show")
+	dir := t.TempDir()
+	body := bytes.Repeat([]byte("x"), 4096)
+	id := c4.Identify(bytes.NewReader(body))
+	a, b := filepath.Join(dir, "a.bin"), filepath.Join(dir, "b.bin")
+	os.WriteFile(a, body, 0o755)
+	os.WriteFile(b, body, 0o755)
+
+	x := filepath.Join(c.Dir(), "xobjects")
+	os.Chmod(x, 0o500)
+	err := c.Adopt(a, id, true)
+	os.Chmod(x, 0o700)
+	if err == nil {
+		t.Fatal("an adopt into a folder that can't be written succeeded")
+	}
+	if left := tmpFiles(c); len(left) != 0 {
+		t.Errorf("a failed adopt left %d name(s) in tmp", len(left))
+	}
+
+	before := s.Bytes()
+	if err := c.linkInto(a, c.ExecPathOf(id), 0o777, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.linkInto(b, c.ExecPathOf(id), 0o777, id); err != nil {
+		t.Fatal(err)
+	}
+	if counted := s.Bytes() - before; counted != int64(len(body)) {
+		t.Errorf("one %d-byte variant is counted as %d bytes", len(body), counted)
+	}
+	if left := tmpFiles(c); len(left) != 0 {
+		t.Errorf("left in tmp: %v", left)
+	}
+}

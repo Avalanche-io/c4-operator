@@ -17,9 +17,20 @@
 // workspace that stays in use after a capture depends on this.
 //
 // Input.Consume gives that up for speed, for an upper that is dead: the
-// overlay has been unmounted and the directory is removed once its
-// capture succeeds. Its files are then hardlinked into the cache rather
-// than copied.
+// overlay has been unmounted (not merely detached from a holder that can
+// still write) and the directory is removed once its capture succeeds. Its
+// files are then hardlinked into the cache rather than copied.
+//
+// What each costs. Without Consume, where the filesystem has no clones,
+// every candidate file is copied before it is hashed, so a capture needs
+// that much free space, and the copies sit in the cache's tmp directory
+// until the capture ends: the cache must have one owner, since opening it
+// clears tmp. With Consume, each captured executable is stored twice, as
+// the linked executable variant and as a copied plain object.
+//
+// A file that is gone, or is no longer a regular file, by the time it is
+// copied fails the capture; so does a file that cannot be read. Nothing is
+// stored for a capture that fails, and running it again is safe.
 package capture
 
 import (
@@ -132,13 +143,20 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 		}
 	}
 
+	var handed sync.Map // snapshots given to the cache
 	if !in.Consume {
 		// The upper stays in use: work from private copies, so what is
 		// hashed is what is stored, and the upper is never touched.
 		snaps, err := snapshotAll(in.Cache, files, in.Workers)
 		defer func() {
+			// Remove the copies nothing took: files that turned out
+			// unchanged, and all but one of several with one content. A
+			// copy handed to the cache is the cache's, and its name may
+			// already belong to someone else.
 			for _, s := range snaps {
-				os.Remove(s) // those committed have been renamed away
+				if _, taken := handed.Load(s); !taken {
+					os.Remove(s)
+				}
 			}
 		}()
 		if err != nil {
@@ -185,7 +203,7 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 		}
 	}
 	res.Reused = len(files) - written
-	if err := upload(ctx, in, changed, paths, execs, res); err != nil {
+	if err := upload(ctx, in, changed, paths, execs, &handed, res); err != nil {
 		return nil, err
 	}
 	// Records, then the changeset: a reader that finds the changeset finds
@@ -235,6 +253,11 @@ func hashAll(files []overlay.Entry, workers int) ([]c4.ID, error) {
 			defer wg.Done()
 			for i := range next {
 				id, _, err := view.HashFile(files[i].Full)
+				if err == nil && id.IsNil() {
+					// A read that failed part way hashes to no ID at all;
+					// it must never be stored or named as one.
+					err = fmt.Errorf("hash %s: the file could not be read", files[i].Path)
+				}
 				if err != nil {
 					mu.Lock()
 					if first == nil {
@@ -306,7 +329,7 @@ func snapshotAll(cache *objcache.Cache, files []overlay.Entry, workers int) ([]s
 	return made, first
 }
 
-func upload(ctx context.Context, in Input, changed map[c4.ID]bool, paths map[c4.ID]string, execs map[c4.ID]bool, res *Result) error {
+func upload(ctx context.Context, in Input, changed map[c4.ID]bool, paths map[c4.ID]string, execs map[c4.ID]bool, handed *sync.Map, res *Result) error {
 	workers := in.Workers
 	if workers <= 0 {
 		workers = 4
@@ -340,7 +363,9 @@ func upload(ctx context.Context, in Input, changed map[c4.ID]bool, paths map[c4.
 				if in.Consume {
 					err = in.Cache.Adopt(paths[id], id, execs[id])
 				} else {
-					// paths[id] is this capture's own copy.
+					// paths[id] is this capture's own copy; Commit takes it,
+					// and removes it if it fails.
+					handed.Store(paths[id], true)
 					err = in.Cache.Commit(paths[id], id)
 				}
 				if err == nil {

@@ -2,7 +2,10 @@
 
 package objcache
 
-import "errors"
+import (
+	"errors"
+	"os"
+)
 
-// cloneFile has no portable form; Snapshot copies where it fails.
-func cloneFile(string, string) error { return errors.New("no clonefile on this platform") }
+// cloneOpenFile has no portable form; Snapshot copies where it fails.
+func cloneOpenFile(*os.File, string) error { return errors.New("no clonefile on this platform") }

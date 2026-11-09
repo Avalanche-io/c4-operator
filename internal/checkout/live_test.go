@@ -162,3 +162,80 @@ func TestCaptureLeavesACloneWorkspaceAlone(t *testing.T) {
 		t.Fatalf("the store's copy of the first script reads %q", data)
 	}
 }
+
+// A file of the view edited to the same size and captured twice. A
+// capture that set the file's date back to the epoch made the second one
+// read it as unchanged, and return the base view: the edit reverted.
+func TestCloneCaptureTwiceKeepsASameSizeEdit(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("clone workspaces need APFS")
+	}
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	writeBase(t, src)
+	v, err := view.ScanDir(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := objcache.OpenSet(filepath.Join(root, "cache"), objcache.Options{Mode: 0o644, ExecMode: 0o755, Budget: 1 << 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache, _ := set.Partition("p-show")
+	store := &memStore{objs: map[c4.ID][]byte{}}
+	for _, f := range v.Files {
+		data, _ := os.ReadFile(filepath.Join(src, f.Path))
+		cache.Put(f.ID, data)
+	}
+	for _, r := range v.Records() {
+		cache.Put(r.ID, r.Data)
+		store.PutBytes(context.Background(), "", r.ID, r.Data)
+	}
+	layers, err := layer.Open(cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &Clone{Layers: layers}
+	in := capture.Input{
+		Project: "show", Cache: cache, Sink: store, Workers: 2,
+		Records: view.RecordFunc(func(_ context.Context, id c4.ID) ([]byte, error) { return cache.ReadAll(id) }),
+	}
+	ctx := context.Background()
+	target := filepath.Join(root, "ws", "live")
+	os.MkdirAll(filepath.Dir(target), 0o755)
+	ws, err := b.Mount(ctx, v, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Unmount(ctx, ws)
+
+	// One file of the view, rewritten in place to the same size.
+	var path string
+	var size int64
+	for _, f := range v.Files {
+		if fi, err := os.Lstat(filepath.Join(ws.Target, f.Path)); err == nil && fi.Mode().IsRegular() && fi.Size() > 0 {
+			path, size = f.Path, fi.Size()
+			break
+		}
+	}
+	if path == "" {
+		t.Fatal("the base has no regular file to edit")
+	}
+	if err := os.WriteFile(filepath.Join(ws.Target, path), bytes.Repeat([]byte("Z"), int(size)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first, err := b.Capture(ctx, ws, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Output == v.ID {
+		t.Fatal("the first capture saw no change")
+	}
+	second, err := b.Capture(ctx, ws, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Output != first.Output {
+		t.Fatalf("the second capture gave %s, the first %s (the base is %s)", second.Output, first.Output, v.ID)
+	}
+}

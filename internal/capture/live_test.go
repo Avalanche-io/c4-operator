@@ -252,16 +252,139 @@ func TestCaptureRetriedAfterAFailureIsTheSame(t *testing.T) {
 				t.Fatalf("a further run gave %s (%v), not %s", again.Output, err, want)
 			}
 			id := c4.Identify(bytes.NewReader([]byte(script)))
-			x, err := f.cache.ExecPath(id)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if fi, err := os.Stat(x); err != nil || fi.Mode()&0o111 == 0 {
+			// The capture itself made the variant; ExecPath would make one.
+			if fi, err := os.Stat(f.cache.ExecPathOf(id)); consume && (err != nil || fi.Mode()&0o111 == 0) {
 				t.Fatalf("the script's executable variant: %v %v", fi, err)
 			}
 			if fi, err := os.Stat(f.cache.Path(id)); err != nil || fi.Mode().Perm() != 0o666 {
 				t.Fatalf("the script's plain object: %v %v", fi, err)
 			}
 		})
+	}
+}
+
+func tmpLeft(f *liveFixture) []string {
+	left, _ := filepath.Glob(filepath.Join(f.cache.Dir(), "tmp", "*"))
+	return left
+}
+
+// In a live workspace a name the walk saw as a file can be something else
+// a moment later. A capture never follows it: a symlink swapped in, to a
+// file outside the workspace or inside it, is not read, not stored, and
+// not given the cache's mode and date.
+func TestCaptureNeverFollowsAFileThatBecameALink(t *testing.T) {
+	when := time.Date(2024, 3, 1, 12, 0, 0, 0, time.UTC)
+	for _, where := range []string{"outside", "inside"} {
+		t.Run(where, func(t *testing.T) {
+			f := newLiveFixture(t)
+			upper := filepath.Join(f.root, "upper")
+			writeUpper(t, upper, "#!/bin/sh\necho one\n")
+			body := []byte("the secret\n")
+			target := filepath.Join(f.root, "outside", "secret.txt")
+			if where == "inside" {
+				target = filepath.Join(upper, "aaa-private.txt")
+			}
+			os.MkdirAll(filepath.Dir(target), 0o700)
+			if err := os.WriteFile(target, body, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			os.Chtimes(target, when, when)
+
+			in := f.input(upper, false)
+			in.Walk = func(u string) ([]overlay.Entry, error) {
+				out, err := plainWalk(u)
+				var kept []overlay.Entry
+				for _, e := range out {
+					if e.Path != "aaa-private.txt" { // the walk did not report the target itself
+						kept = append(kept, e)
+					}
+				}
+				// After the walk, before the copy: the swap.
+				p := filepath.Join(u, "bin", "tool.sh")
+				os.Remove(p)
+				if err := os.Symlink(target, p); err != nil {
+					t.Fatal(err)
+				}
+				return kept, err
+			}
+			if _, err := Run(context.Background(), in); err == nil {
+				t.Error("a capture went through a file that had become a symlink")
+			}
+			fi, err := os.Stat(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fi.Mode().Perm() != 0o600 || !fi.ModTime().Equal(when) {
+				t.Errorf("the capture changed the link's target: mode %v, dated %s", fi.Mode().Perm(), fi.ModTime().UTC().Format(time.RFC3339))
+			}
+			id := c4.Identify(bytes.NewReader(body))
+			if _, err := os.Lstat(f.cache.Path(id)); err == nil {
+				t.Error("the target's bytes are in the cache")
+			}
+			f.sink.mu.Lock()
+			_, stored := f.sink.objs[id]
+			f.sink.mu.Unlock()
+			if stored {
+				t.Error("the target's bytes are in the store")
+			}
+			if left := tmpLeft(f); len(left) != 0 {
+				t.Errorf("left in the cache's tmp: %v", left)
+			}
+		})
+	}
+}
+
+// A name that is a folder by the time it is copied, or a file that can't
+// be read, fails the capture. Nothing is stored under the nil C4 ID, and a
+// store that trusts the node's IDs is never handed one.
+func TestCaptureRefusesWhatIsNoLongerAFile(t *testing.T) {
+	f := newLiveFixture(t)
+	upper := filepath.Join(f.root, "upper")
+	writeUpper(t, upper, "#!/bin/sh\necho one\n")
+	in := f.input(upper, false)
+	in.Walk = func(u string) ([]overlay.Entry, error) {
+		out, err := plainWalk(u)
+		p := filepath.Join(u, "notes.txt")
+		os.Remove(p)
+		os.MkdirAll(filepath.Join(p, "inner"), 0o755)
+		os.WriteFile(filepath.Join(p, "inner", "x"), []byte("x"), 0o644)
+		return out, err
+	}
+	res, err := Run(context.Background(), in)
+	if err == nil {
+		t.Fatalf("a capture went through a file that had become a folder: %+v", res)
+	}
+	var none c4.ID
+	if _, err := os.Lstat(f.cache.Path(none)); err == nil {
+		t.Error("the cache holds an object under the nil C4 ID")
+	}
+	f.sink.mu.Lock()
+	_, stored := f.sink.objs[none]
+	f.sink.mu.Unlock()
+	if stored {
+		t.Error("the store holds an object under the nil C4 ID")
+	}
+	if left := tmpLeft(f); len(left) != 0 {
+		t.Errorf("left in the cache's tmp: %v", left)
+	}
+}
+
+// The copies a capture does not keep are removed: all but one of several
+// files with one content, and a file rewritten with the view's own bytes.
+func TestCaptureRemovesTheCopiesItDidNotKeep(t *testing.T) {
+	f := newLiveFixture(t)
+	upper := filepath.Join(f.root, "upper")
+	writeUpper(t, upper, "#!/bin/sh\necho one\n")
+	os.WriteFile(filepath.Join(upper, "copy-of-notes.txt"), []byte("notes\n"), 0o644)
+	os.WriteFile(filepath.Join(upper, "README.md"), []byte("readme"), 0o644) // the view's own bytes
+	res, err := Run(context.Background(), f.input(upper, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Reused != 1 {
+		t.Errorf("files rewritten without changing: %d, want 1", res.Reused)
+	}
+	if left := tmpLeft(f); len(left) != 0 {
+		t.Errorf("left in the cache's tmp: %v", left)
 	}
 }

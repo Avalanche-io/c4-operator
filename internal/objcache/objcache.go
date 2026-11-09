@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -232,26 +233,36 @@ func (c *Cache) TempFile() (*os.File, error) {
 
 // Commit moves a completed temporary file into place as id. It is safe to
 // commit an ID that is already cached; the temporary file is then removed.
-func (c *Cache) Commit(tmp string, id c4.ID) error {
+// tmp must be a regular file: anything else is refused, since a link there
+// would have its target given the cache's mode and date. Whatever happens,
+// tmp is gone when Commit returns.
+func (c *Cache) Commit(tmp string, id c4.ID) (err error) {
+	defer func() {
+		if err != nil {
+			os.Remove(tmp)
+		}
+	}()
+	st, err := os.Lstat(tmp)
+	if err != nil {
+		return err
+	}
+	if !st.Mode().IsRegular() {
+		return fmt.Errorf("commit %s: %s is not a regular file", id, filepath.Base(tmp))
+	}
 	final := c.Path(id)
+	if _, err := os.Stat(final); err == nil {
+		os.Remove(tmp)
+		c.touch(id)
+		return nil
+	}
 	if err := os.MkdirAll(filepath.Dir(final), 0o700); err != nil {
 		return err
 	}
 	if err := os.Chmod(tmp, c.set.opts.Mode); err != nil {
 		return err
 	}
-	epoch := time.Unix(0, 0)
-	if err := os.Chtimes(tmp, time.Now(), epoch); err != nil {
+	if err := os.Chtimes(tmp, time.Now(), time.Unix(0, 0)); err != nil {
 		return err
-	}
-	st, err := os.Stat(tmp)
-	if err != nil {
-		return err
-	}
-	if _, err := os.Stat(final); err == nil {
-		os.Remove(tmp)
-		c.touch(id)
-		return nil
 	}
 	if err := os.Rename(tmp, final); err != nil {
 		return err
@@ -269,8 +280,10 @@ func (c *Cache) Commit(tmp string, id c4.ID) error {
 //
 // exec says src is an executable. The link then goes to the executable
 // variant, so src keeps an executable bit and a capture that is retried
-// reads the same entry; the plain object is a copy. An object already
-// cached is left as it is, and src is not touched.
+// reads the same entry; the plain object is a copy, so each captured
+// executable is stored twice. A variant already cached is left as it is,
+// and so is a plain object: src is linked, and changed, only for the one
+// that is missing.
 func (c *Cache) Adopt(src string, id c4.ID, exec bool) error {
 	if !exec {
 		if c.Has(id) {
@@ -305,40 +318,48 @@ func (c *Cache) Adopt(src string, id c4.ID, exec bool) error {
 }
 
 // linkInto hardlinks src to final (copying across filesystems) with the
-// given mode and the epoch date.
+// given mode and the epoch date. The name it uses in tmp is gone when it
+// returns, whatever happens.
 func (c *Cache) linkInto(src, final string, mode os.FileMode, id c4.ID) error {
 	tmp, err := c.TempFile()
 	if err != nil {
 		return err
 	}
+	name := tmp.Name()
 	tmp.Close()
-	os.Remove(tmp.Name())
-	if err := os.Link(src, tmp.Name()); err != nil {
+	os.Remove(name)
+	if err := os.Link(src, name); err != nil {
 		if !errors.Is(err, syscall.EXDEV) {
 			return err
 		}
-		if err := copyFile(src, tmp.Name()); err != nil {
-			os.Remove(tmp.Name())
+		if err := copyFile(src, name); err != nil {
+			os.Remove(name)
 			return err
 		}
 	}
 	if final == c.Path(id) {
-		return c.Commit(tmp.Name(), id)
+		return c.Commit(name, id)
 	}
+	defer os.Remove(name)
 	if err := os.MkdirAll(filepath.Dir(final), 0o700); err != nil {
 		return err
 	}
-	if err := os.Chmod(tmp.Name(), mode); err != nil {
+	if err := os.Chmod(name, mode); err != nil {
 		return err
 	}
-	if err := os.Chtimes(tmp.Name(), time.Now(), time.Unix(0, 0)); err != nil {
+	if err := os.Chtimes(name, time.Now(), time.Unix(0, 0)); err != nil {
 		return err
 	}
-	st, err := os.Stat(tmp.Name())
+	st, err := os.Stat(name)
 	if err != nil {
 		return err
 	}
-	if err := os.Rename(tmp.Name(), final); err != nil {
+	// Published with a link, which fails if another adopter got there
+	// first: then the variant is there and was counted once.
+	if err := os.Link(name, final); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return nil
+		}
 		return err
 	}
 	c.set.add(st.Size())
@@ -348,26 +369,64 @@ func (c *Cache) linkInto(src, final string, mode os.FileMode, id c4.ID) error {
 // Snapshot copies src into the partition's tmp directory and returns the
 // copy's path: a clone where the filesystem has one (APFS), so no bytes
 // move, and a plain copy elsewhere. The copy shares no inode with src, so
-// nothing done to either reaches the other. Hash the copy and Commit it
-// under that ID, or remove it. This is how a file that stays in use (a
-// live workspace's) enters the cache.
+// nothing done to either reaches the other, and it keeps nothing of src
+// but its bytes: no flags, no extended attributes. Hash the copy and
+// Commit it under that ID, or remove it. This is how a file that stays
+// in use (a live workspace's) enters the cache.
+//
+// src must be a regular file, and is never followed: the walk saw one,
+// but in a live workspace the name may be a symlink, a FIFO or a folder
+// by now, and following it would copy, and then chmod, something else.
 func (c *Cache) Snapshot(src string) (string, error) {
+	f, err := os.OpenFile(src, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	if !fi.Mode().IsRegular() {
+		return "", fmt.Errorf("%s is no longer a regular file", src)
+	}
+	name, err := c.tempName()
+	if err != nil {
+		return "", err
+	}
+	if err := cloneOpenFile(f, name); err == nil {
+		return name, nil
+	}
+	os.Remove(name)
+	// A fresh name: a clone that could not be cleaned may still hold the first.
+	if name, err = c.tempName(); err != nil {
+		return "", err
+	}
+	out, err := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(out, f); err != nil {
+		out.Close()
+		os.Remove(name)
+		return "", err
+	}
+	if err := out.Close(); err != nil {
+		os.Remove(name)
+		return "", err
+	}
+	return name, nil
+}
+
+// tempName returns a name in the partition's tmp directory that no file has.
+func (c *Cache) tempName() (string, error) {
 	tmp, err := c.TempFile()
 	if err != nil {
 		return "", err
 	}
 	name := tmp.Name()
 	tmp.Close()
-	os.Remove(name)
-	if err := cloneFile(src, name); err == nil {
-		return name, nil
-	}
-	os.Remove(name)
-	if err := copyFile(src, name); err != nil {
-		os.Remove(name)
-		return "", err
-	}
-	return name, nil
+	return name, os.Remove(name)
 }
 
 // Put stores small content (records, changesets) under id.

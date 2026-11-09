@@ -69,18 +69,28 @@ func bindReadOnly(src, target string) error {
 // Unmount unmounts target if it is mounted. A busy mount is detached, so
 // an exiting container never wedges kubelet.
 func Unmount(target string) error {
+	_, err := UnmountBusy(target)
+	return err
+}
+
+// UnmountBusy is Unmount, and reports whether the mount was busy and so
+// was only detached: whatever holds it (a working directory, an open
+// file) can still write through it, into the upper. An upper whose mount
+// was detached is not dead, and its files must not be linked anywhere.
+func UnmountBusy(target string) (busy bool, err error) {
 	mounted, err := IsMounted(target)
 	if err != nil || !mounted {
-		return err
+		return false, err
 	}
 	err = unix.Unmount(target, 0)
 	if errors.Is(err, unix.EBUSY) {
+		busy = true
 		err = unix.Unmount(target, unix.MNT_DETACH)
 	}
 	if err != nil && !errors.Is(err, unix.EINVAL) {
-		return fmt.Errorf("unmount %s: %w", target, err)
+		return busy, fmt.Errorf("unmount %s: %w", target, err)
 	}
-	return nil
+	return busy, nil
 }
 
 // IsMounted reports whether target is a mount point.

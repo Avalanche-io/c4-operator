@@ -44,6 +44,10 @@ type Volume struct {
 	ReadOnly        bool      `json:"readOnly"`
 	Class           string    `json:"class,omitempty"`
 	Published       time.Time `json:"published"`
+	// Detached says the volume's mount was busy when it was unmounted and
+	// was only detached: something may still write its upper, so capture
+	// copies its files and never links them. Kept across kubelet's retries.
+	Detached bool `json:"detached,omitempty"`
 }
 
 // PublishRequest is a NodePublishVolume call.
@@ -354,8 +358,15 @@ func (d *Daemon) Unpublish(ctx context.Context, volumeID, target string) error {
 	if err != nil {
 		return err
 	}
-	if err := overlay.Unmount(vol.Target); err != nil {
+	busy, err := overlay.UnmountBusy(vol.Target)
+	if err != nil {
 		return err
+	}
+	if busy && !vol.Detached {
+		vol.Detached = true
+		if err := d.saveVolume(vol); err != nil {
+			return err
+		}
 	}
 	metrics.NodeMounts.WithLabelValues(vol.Project).Dec()
 	if vol.Capture {
@@ -406,8 +417,10 @@ func (d *Daemon) runCapture(ctx context.Context, vol *Volume) error {
 		Project: p.Name, Parent: parent, Upper: upper,
 		Cache: pc.cache, Records: d.records(pc), Sink: d.sink(pc), Workers: 8,
 		// Unpublish unmounted the overlay, and removes the upper once this
-		// succeeds: its files may be linked into the cache.
-		Consume:  true,
+		// succeeds: its files may be linked into the cache. Unless the
+		// mount was busy and only detached: then something can still
+		// write the upper, and its files are copied.
+		Consume:  !vol.Detached,
 		Progress: func(done, of int64) { egress.set(ctx, Egress{Bytes: done, Of: of}, false) },
 	})
 	if err != nil {
