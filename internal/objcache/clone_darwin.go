@@ -34,6 +34,14 @@ func cloneOpenFile(f *os.File, dst string) error {
 	if err := unix.Fclonefileat(int(f.Fd()), unix.AT_FDCWD, dst, 0); err != nil {
 		return err
 	}
+	// A flag set between the check and the clone came along with it.
+	if err := unix.Lstat(dst, &st); err != nil {
+		return err
+	}
+	if st.Flags != 0 {
+		unix.Chflags(dst, 0) // so the caller can remove it
+		return errFlagged
+	}
 	size, err := unix.Listxattr(dst, nil)
 	if err != nil || size == 0 {
 		return err

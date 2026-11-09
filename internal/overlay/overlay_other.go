@@ -16,7 +16,7 @@ func Mount(string, []string, string, string) error { return errNotLinux }
 func Unmount(string) error { return errNotLinux }
 
 // UnmountBusy needs Linux.
-func UnmountBusy(string) (bool, error) { return false, errNotLinux }
+func UnmountBusy(string) (clean, busy bool, err error) { return false, false, errNotLinux }
 
 // IsMounted needs Linux.
 func IsMounted(string) (bool, error) { return false, errNotLinux }

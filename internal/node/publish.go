@@ -361,8 +361,9 @@ func (d *Daemon) Unpublish(ctx context.Context, volumeID, target string) error {
 	// Whether the mount was busy, and so only detached, is saved before the
 	// unmount is tried: were the daemon to die between a detach and the
 	// save, a retry would find nothing mounted and take a still-writable
-	// upper for a dead one. Saved first, the worst a crash leaves is an
-	// upper copied that could have been linked.
+	// upper for a dead one. Saved first, the worst a crash, or a volume
+	// that was never mounted, leaves is an upper copied that could have
+	// been linked.
 	marked := !vol.Detached
 	if marked {
 		vol.Detached = true
@@ -370,11 +371,13 @@ func (d *Daemon) Unpublish(ctx context.Context, volumeID, target string) error {
 			return err
 		}
 	}
-	busy, err := overlay.UnmountBusy(vol.Target)
+	clean, _, err := overlay.UnmountBusy(vol.Target)
 	if err != nil {
 		return err
 	}
-	if marked && !busy {
+	// Cleared only by the call that set it and then unmounted outright:
+	// a call that finds nothing mounted knows nothing about the upper.
+	if marked && clean {
 		vol.Detached = false
 		if err := d.saveVolume(vol); err != nil {
 			return err
