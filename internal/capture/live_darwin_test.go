@@ -14,6 +14,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/Avalanche-io/c4"
+	"github.com/Avalanche-io/c4-operator/internal/view"
 )
 
 func xattrNames(t *testing.T, p string) []string {
@@ -86,5 +87,62 @@ func TestCaptureKeepsOnlyTheBytes(t *testing.T) {
 			os.Remove(p)
 		}
 		t.Errorf("left in the cache's tmp: %d", len(left))
+	}
+}
+
+// A transparently compressed file (as ditto, installers and toolchains
+// write) keeps its bytes in an extended attribute behind a flag. Its
+// capture must hold the real bytes: a clone with the flag cleared reads
+// as empty.
+func TestCaptureOfACompressedFileHoldsItsBytes(t *testing.T) {
+	f := newLiveFixture(t)
+	upper := filepath.Join(f.root, "upper")
+	writeUpper(t, upper, "#!/bin/sh\necho one\n")
+	// Nothing here can write such a file, so one is borrowed: a clone of
+	// a compressed file the system already has on this volume.
+	packed := filepath.Join(upper, "packed.bin")
+	var body []byte
+	var candidates []string
+	for _, pat := range []string{"/Library/Developer/CommandLineTools/usr/bin/*", "/Applications/*.app/Contents/Info.plist", "/Applications/*.app/Contents/_CodeSignature/CodeResources"} {
+		m, _ := filepath.Glob(pat)
+		candidates = append(candidates, m...)
+	}
+	for _, c := range candidates {
+		var st unix.Stat_t
+		if unix.Lstat(c, &st) != nil || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Flags&unix.UF_COMPRESSED == 0 || st.Size == 0 || st.Size > 8<<20 {
+			continue
+		}
+		if unix.Clonefile(c, packed, unix.CLONE_NOFOLLOW) != nil {
+			continue
+		}
+		if unix.Lstat(packed, &st) == nil && st.Flags&unix.UF_COMPRESSED != 0 {
+			if body, _ = os.ReadFile(packed); len(body) > 0 {
+				break
+			}
+		}
+		os.Remove(packed)
+	}
+	if len(body) == 0 {
+		t.Skip("no transparently compressed file to clone on this volume")
+	}
+	res, err := Run(context.Background(), f.input(upper, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := c4.Identify(bytes.NewReader(body))
+	got, err := f.cache.ReadAll(id)
+	if err != nil || !bytes.Equal(got, body) {
+		t.Fatalf("the compressed file's bytes are not in the cache under their C4 ID (%d bytes read, %v)", len(got), err)
+	}
+	v, err := view.Load(context.Background(), res.Output, f.input(upper, false).Records, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := v.Root.Files["packed.bin"]
+	if e == nil || e.Size != int64(len(body)) || e.C4ID != id {
+		t.Fatalf("the output's entry for the compressed file: %+v", e)
+	}
+	if after, _ := os.ReadFile(packed); !bytes.Equal(after, body) {
+		t.Fatal("the capture changed the compressed file")
 	}
 }

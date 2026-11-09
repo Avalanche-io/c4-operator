@@ -374,21 +374,32 @@ func (c *Cache) linkInto(src, final string, mode os.FileMode, id c4.ID) error {
 // Commit it under that ID, or remove it. This is how a file that stays
 // in use (a live workspace's) enters the cache.
 //
-// src must be a regular file, and is never followed: the walk saw one,
-// but in a live workspace the name may be a symlink, a FIFO or a folder
-// by now, and following it would copy, and then chmod, something else.
+// src must be a regular file, and its last component is never followed:
+// the walk saw a file, but in a live workspace the name may be a symlink,
+// a FIFO or a folder by now, and following it would copy something else.
+// A caller that must not leave a directory tree opens the file beneath it
+// (os.Root) and calls SnapshotFile.
 func (c *Cache) Snapshot(src string) (string, error) {
-	f, err := os.OpenFile(src, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	f, err := os.OpenFile(src, SnapshotOpenFlags, 0)
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
+	return c.SnapshotFile(f)
+}
+
+// SnapshotOpenFlags opens a file for SnapshotFile: read-only, never
+// following a symlink at the name, never blocking on a FIFO.
+const SnapshotOpenFlags = os.O_RDONLY | syscall.O_NOFOLLOW | syscall.O_NONBLOCK
+
+// SnapshotFile is Snapshot of a file already open.
+func (c *Cache) SnapshotFile(f *os.File) (string, error) {
 	fi, err := f.Stat()
 	if err != nil {
 		return "", err
 	}
 	if !fi.Mode().IsRegular() {
-		return "", fmt.Errorf("%s is no longer a regular file", src)
+		return "", fmt.Errorf("%s is no longer a regular file", f.Name())
 	}
 	name, err := c.tempName()
 	if err != nil {

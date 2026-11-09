@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -386,5 +387,74 @@ func TestCaptureRemovesTheCopiesItDidNotKeep(t *testing.T) {
 	}
 	if left := tmpLeft(f); len(left) != 0 {
 		t.Errorf("left in the cache's tmp: %v", left)
+	}
+}
+
+// A folder on the way to a file, swapped after the walk for a symlink to a
+// folder outside the upper, is not followed: the file is opened beneath
+// the upper, so nothing outside it is read, cached or stored.
+func TestCaptureNeverLeavesTheUpperThroughAFolder(t *testing.T) {
+	f := newLiveFixture(t)
+	upper := filepath.Join(f.root, "upper")
+	writeUpper(t, upper, "#!/bin/sh\necho one\n")
+	outside := filepath.Join(f.root, "outside")
+	body := []byte("#!/bin/sh\necho the host's own\n")
+	os.MkdirAll(outside, 0o755)
+	if err := os.WriteFile(filepath.Join(outside, "tool.sh"), body, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	in := f.input(upper, false)
+	in.Walk = func(u string) ([]overlay.Entry, error) {
+		out, err := plainWalk(u)
+		// After the walk, before the copy: bin becomes a way out.
+		if err := os.Rename(filepath.Join(u, "bin"), filepath.Join(f.root, "bin-was")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(u, "bin")); err != nil {
+			t.Fatal(err)
+		}
+		return out, err
+	}
+	if _, err := Run(context.Background(), in); err == nil {
+		t.Error("a capture went out of the upper through a folder that had become a symlink")
+	}
+	id := c4.Identify(bytes.NewReader(body))
+	if _, err := os.Lstat(f.cache.Path(id)); err == nil {
+		t.Error("the outside file's bytes are in the cache")
+	}
+	f.sink.mu.Lock()
+	_, stored := f.sink.objs[id]
+	f.sink.mu.Unlock()
+	if stored {
+		t.Error("the outside file's bytes are in the store")
+	}
+	if left := tmpLeft(f); len(left) != 0 {
+		t.Errorf("left in the cache's tmp: %v", left)
+	}
+}
+
+// With Consume the files are hashed where they are. A name that can't be
+// read by then (here it has become a folder) hashes to no ID at all, and
+// that must fail the capture, never reach the cache as an object.
+func TestConsumedCaptureRefusesWhatCannotBeRead(t *testing.T) {
+	f := newLiveFixture(t)
+	upper := filepath.Join(f.root, "upper")
+	writeUpper(t, upper, "#!/bin/sh\necho one\n")
+	in := f.input(upper, true)
+	in.Walk = func(u string) ([]overlay.Entry, error) {
+		out, err := plainWalk(u)
+		p := filepath.Join(u, "bin", "tool.sh")
+		os.Remove(p)
+		if err := os.Mkdir(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return out, err
+	}
+	_, err := Run(context.Background(), in)
+	if err == nil || !strings.Contains(err.Error(), "could not be read") {
+		t.Fatalf("a consumed capture of a name that can't be read: %v", err)
+	}
+	if _, err := os.Lstat(f.cache.Path(c4.ID{})); err == nil {
+		t.Error("an object is stored under the nil C4 ID")
 	}
 }

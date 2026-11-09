@@ -29,14 +29,16 @@
 // the linked executable variant and as a copied plain object.
 //
 // A file that is gone, or is no longer a regular file, by the time it is
-// copied fails the capture; so does a file that cannot be read. Nothing is
-// stored for a capture that fails, and running it again is safe.
+// copied fails the capture; so does a file that cannot be read. A capture
+// that fails records nothing (objects it had already stored stay, as
+// content nothing names), and running it again is safe.
 package capture
 
 import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -147,7 +149,7 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 	if !in.Consume {
 		// The upper stays in use: work from private copies, so what is
 		// hashed is what is stored, and the upper is never touched.
-		snaps, err := snapshotAll(in.Cache, files, in.Workers)
+		snaps, err := snapshotAll(in.Cache, in.Upper, files, in.Workers)
 		defer func() {
 			// Remove the copies nothing took: files that turned out
 			// unchanged, and all but one of several with one content. A
@@ -281,9 +283,33 @@ func hashAll(files []overlay.Entry, workers int) ([]c4.ID, error) {
 // snapshotAll replaces each file's Full with a private copy in the cache's
 // tmp directory, and its Size with the copy's. It returns the copies made,
 // for the caller to remove, also when it fails.
-func snapshotAll(cache *objcache.Cache, files []overlay.Entry, workers int) ([]string, error) {
+//
+// Each file is opened beneath upper (os.Root), so a folder on the way that
+// was swapped for a symlink out of the upper after the walk is refused,
+// as a symlink at the name itself is.
+func snapshotAll(cache *objcache.Cache, upper string, files []overlay.Entry, workers int) ([]string, error) {
 	if workers <= 0 {
 		workers = 4
+	}
+	if len(files) == 0 {
+		return nil, nil
+	}
+	root, err := os.OpenRoot(upper)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	snapshot := func(e overlay.Entry) (string, error) {
+		rel, err := filepath.Rel(upper, e.Full)
+		if err != nil || !filepath.IsLocal(rel) {
+			return "", fmt.Errorf("%s is not under the directory captured", e.Full)
+		}
+		f, err := root.OpenFile(rel, objcache.SnapshotOpenFlags, 0)
+		if err != nil {
+			return "", err
+		}
+		defer f.Close()
+		return cache.SnapshotFile(f)
 	}
 	snaps := make([]string, len(files))
 	var (
@@ -297,7 +323,7 @@ func snapshotAll(cache *objcache.Cache, files []overlay.Entry, workers int) ([]s
 		go func() {
 			defer wg.Done()
 			for i := range next {
-				s, err := cache.Snapshot(files[i].Full)
+				s, err := snapshot(files[i])
 				var st os.FileInfo
 				if err == nil {
 					snaps[i] = s
