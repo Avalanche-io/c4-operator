@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Avalanche-io/c4"
+
 	"github.com/Avalanche-io/c4-operator/internal/gitimport"
 	"github.com/Avalanche-io/c4-operator/internal/view"
 )
@@ -393,4 +395,77 @@ func TestAMappingWhoseCountsSkipANumber(t *testing.T) {
 	o.log.Reset()
 	o.commit(map[string]string{"top.txt": "t7\n"})
 	o.ok("the push after", "main")
+}
+
+// A lost changeset is made again only as what the mapping records. Each
+// way that cannot be done is an error that says which, and nothing is
+// taken to stand for the changeset: the commit comes to something else,
+// the line records the changeset in the form written before 2026-11-09,
+// the commit is no longer in the repository.
+func TestALostChangesetThatCannotBeMadeAgain(t *testing.T) {
+	ctx := context.Background()
+	o := newOrdinary(t, 0)
+	a := o.commit(map[string]string{"a.txt": "a\n"})
+	o.commit(map[string]string{"b.txt": "b\n"})
+	o.ok("two commits", "main")
+	m, err := gitimport.ReadMapping(o.svc.out)
+	if err != nil || len(m) != 2 || m[1].Changeset.IsNil() {
+		t.Fatalf("the mapping: %d lines, %v", len(m), err)
+	}
+	opts := o.svc.base
+	opts.Known, opts.KnownFiles = gitimport.KnownViews(m), gitimport.KnownFiles(m)
+
+	// With nothing lost, each commit comes to what its line records, and
+	// nothing is written.
+	for i, line := range m {
+		if err := gitimport.Remake(ctx, opts, line); err != nil {
+			t.Fatalf("line %d imported again: %v", i+1, err)
+		}
+	}
+	if now, _ := gitimport.ReadMapping(o.svc.out); len(now) != 2 {
+		t.Fatalf("the mapping has %d lines after two commits were imported again", len(now))
+	}
+	// A line that is not a record of its commit.
+	other := m[1]
+	other.View = m[0].View
+	if err := gitimport.Remake(ctx, opts, other); err == nil || !strings.Contains(err.Error(), "and the mapping records the view") {
+		t.Fatalf("a line whose view is not its commit's: %v", err)
+	}
+	other = m[1]
+	other.Changeset = m[0].Changeset
+	if err := gitimport.Remake(ctx, opts, other); err == nil || !strings.Contains(err.Error(), "and the mapping records the view") {
+		t.Fatalf("a line whose changeset is not its commit's: %v", err)
+	}
+	// A line written before 2026-11-09: its changeset's C4 ID is of the
+	// text followed by the view's C4 ID.
+	stored, err := o.svc.base.Records.Record(ctx, m[1].Changeset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := m[1]
+	old.Changeset = c4.Identify(bytes.NewReader(append(append([]byte(nil), stored...), m[1].View.String()+"\n"...)))
+	if err := gitimport.Remake(ctx, opts, old); err == nil || !strings.Contains(err.Error(), "before 2026-11-09") {
+		t.Fatalf("a line with a changeset in the earlier form: %v", err)
+	}
+
+	// The commit is gone from the repository (the branch was moved back
+	// and the repository pruned), its changeset from the store, and the
+	// chain file with them. The import says so; a reader is not served a
+	// chain.
+	if p := o.object(m[1].Changeset); p == "" || os.Remove(p) != nil {
+		t.Fatal("the changeset was not in the store to remove")
+	}
+	os.Remove(o.svc.chainPath("refs/heads/main"))
+	o.git(o.remote, "update-ref", "refs/heads/main", a)
+	o.git(o.remote, "reflog", "expire", "--expire=now", "--all")
+	o.git(o.remote, "gc", "-q", "--prune=now")
+	rec, _ := o.post(o.h, `{"ref":"refs/heads/main","after":"`+a+`"}`, nil)
+	for _, want := range []string{m[1].Changeset.String(), "(mapping line 2) is not in the store and could not be made again from the repository", "commit " + m[1].Commit + " is not in the repository"} {
+		if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("with the commit gone: %d %s\nwant %q in it", rec.Code, rec.Body, want)
+		}
+	}
+	if code, _ := o.head("refs/heads/main"); code == http.StatusOK {
+		t.Fatal("a reader was served a chain the store cannot make")
+	}
 }

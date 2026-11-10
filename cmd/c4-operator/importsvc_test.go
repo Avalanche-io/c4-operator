@@ -60,6 +60,27 @@ func newPushRig(t *testing.T) *pushRig {
 	return r
 }
 
+// object returns the store's file of an object, or "" when the store does
+// not hold it.
+func (r *pushRig) object(id c4.ID) string {
+	found := ""
+	for _, dir := range r.shards {
+		filepath.Walk(dir, func(p string, fi os.FileInfo, err error) error {
+			if err != nil || fi.IsDir() {
+				return nil
+			}
+			if f, err := os.Open(p); err == nil {
+				if c4.Identify(f) == id {
+					found = p
+				}
+				f.Close()
+			}
+			return nil
+		})
+	}
+	return found
+}
+
 func (r *pushRig) git(dir string, args ...string) string {
 	r.t.Helper()
 	if dir != "" {
@@ -391,24 +412,9 @@ func TestTheNextPushAfterATornFile(t *testing.T) {
 		}
 		return out
 	}
-	// object is the store's file of an object.
 	object := func(id c4.ID) string {
 		t.Helper()
-		found := ""
-		for _, dir := range r.shards {
-			filepath.Walk(dir, func(p string, fi os.FileInfo, err error) error {
-				if err != nil || fi.IsDir() {
-					return nil
-				}
-				if f, err := os.Open(p); err == nil {
-					if c4.Identify(f) == id {
-						found = p
-					}
-					f.Close()
-				}
-				return nil
-			})
-		}
+		found := r.object(id)
 		if found == "" {
 			t.Fatalf("%s is not in the store", id)
 		}
@@ -473,24 +479,55 @@ func TestTheNextPushAfterATornFile(t *testing.T) {
 	}
 
 	// A changeset the mapping names is gone from the store, and the chain
-	// file with it. The import says which, where the mapping records it,
-	// and what to do.
+	// file with it: the first commit's, which was imported in full, and one
+	// in the middle. A reader is told the next import makes it again. The
+	// next import does, from the repository: the commit is imported again,
+	// comes to the same changeset, and that is stored. No line of the
+	// mapping is cut or added, and the other ref is as it was.
+	var logged bytes.Buffer
+	r.svc.log = &logged
 	rc := recordedNow()
-	lost := len(rc.Changesets) - 3
-	os.Remove(object(rc.Changesets[lost]))
-	os.Remove(chainPath)
-	rec, _ := postMain()
-	if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), rc.Changesets[lost].String()) || !strings.Contains(rec.Body.String(), fmt.Sprintf("(mapping line %d) cannot be read from the store", rc.Lines[lost])) {
-		t.Fatalf("with a recorded changeset gone from the store: %d %s", rec.Code, rec.Body)
+	lines, _ := gitimport.ReadMapping(r.svc.out)
+	if !lines[rc.Lines[0]-1].Base {
+		t.Fatal("the chain's first line is not a commit imported in full; the test tells nothing of one")
 	}
-	cutBack("a changeset gone from the store", rec.Body.String(), rc)
+	mappingWas, _ := os.ReadFile(r.svc.out)
+	for _, lost := range []int{0, len(rc.Changesets) - 3} {
+		what := fmt.Sprintf("with changeset %d of %d gone from the store", lost+1, len(rc.Changesets))
+		os.Remove(object(rc.Changesets[lost]))
+		os.Remove(chainPath)
+		got := httptest.NewRecorder()
+		h.ServeHTTP(got, httptest.NewRequest(http.MethodGet, "/chains/refs/heads/main", nil))
+		if got.Code == http.StatusOK || !strings.Contains(got.Body.String(), rc.Changesets[lost].String()) || !strings.Contains(got.Body.String(), fmt.Sprintf("(mapping line %d) cannot be read from the store", rc.Lines[lost])) || !strings.Contains(got.Body.String(), "The next import of the ref makes it again") {
+			t.Fatalf("%s, a reader: %d %s", what, got.Code, got.Body)
+		}
+		logged.Reset()
+		rec, res := postMain()
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s, the next import: %d %s", what, rec.Code, rec.Body)
+		}
+		if want := fmt.Sprintf("the changeset %s of commit %s (mapping line %d) was not in the store and was made again from the repository", rc.Changesets[lost], rc.Commits[lost], rc.Lines[lost]); !strings.Contains(logged.String(), want) {
+			t.Fatalf("%s: logged %q, want %q", what, logged.String(), want)
+		}
+		object(rc.Changesets[lost])
+		headIs(what, res)
+		if now, _ := os.ReadFile(r.svc.out); !bytes.Equal(now, mappingWas) {
+			t.Fatalf("%s: the mapping was written", what)
+		}
+		if at := refs()["refs/heads/dev"]; at["commit"] != dev || at["view"] != devWas.View {
+			t.Fatalf("%s: dev is at %v", what, at)
+		}
+		full, err := view.ReadChain(chains())
+		if err != nil || full.Base != rc.Base || len(full.Sections) != len(rc.Changesets) {
+			t.Fatalf("%s: the chain served has %d sections (%v), want all %d", what, len(full.Sections), err, len(rc.Changesets))
+		}
+	}
 
 	// A wrong object under a changeset's C4 ID (cut short). A store keeps
-	// the object it has, so importing the commit again does not replace
-	// it: the error says it has to be removed first. Removed, the same way
-	// out; and then the chain can be made again from the store.
-	rc = recordedNow()
-	lost = len(rc.Changesets) - 3
+	// the object it has, so importing the commit again would not replace
+	// it: the error says it has to be removed. Removed, the next import
+	// makes the changeset again as it was, with no line of the mapping cut.
+	lost := len(rc.Changesets) - 3
 	wrong := object(rc.Changesets[lost])
 	stored, _ := os.ReadFile(wrong)
 	os.Chmod(wrong, 0o644)
@@ -498,19 +535,26 @@ func TestTheNextPushAfterATornFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.Remove(chainPath)
-	rec, _ = postMain()
-	if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), "wrong object") || !strings.Contains(rec.Body.String(), "removed from the store first") {
+	rec, _ := postMain()
+	if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), "wrong object") || !strings.Contains(rec.Body.String(), "has to be removed from the store") || strings.Contains(rec.Body.String(), "cut the mapping") {
 		t.Fatalf("with a wrong object under a changeset's C4 ID: %d %s", rec.Code, rec.Body)
+	}
+	if now, _ := os.ReadFile(wrong); len(now) != len(stored)/2 {
+		t.Fatal("the wrong object was written over")
 	}
 	if err := os.Remove(wrong); err != nil {
 		t.Fatal(err)
 	}
-	cutBack("a wrong object removed from the store", rec.Body.String(), rc)
-	os.Remove(chainPath)
-	if rec, res := postMain(); rec.Code != http.StatusOK {
-		t.Fatalf("the chain cannot be made again after the wrong object was replaced: %d %s", rec.Code, rec.Body)
-	} else {
-		headIs("made again from the replaced object", res)
+	rec, res = postMain()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("after the wrong object was removed: %d %s", rec.Code, rec.Body)
+	}
+	headIs("after the wrong object was removed", res)
+	if now, _ := os.ReadFile(object(rc.Changesets[lost])); !bytes.Equal(now, stored) {
+		t.Fatal("the changeset made again is not the bytes that were stored")
+	}
+	if now, _ := os.ReadFile(r.svc.out); !bytes.Equal(now, mappingWas) {
+		t.Fatal("the mapping was written")
 	}
 
 	// A line of zeros in the middle of the mapping, with whole lines after
@@ -520,10 +564,10 @@ func TestTheNextPushAfterATornFile(t *testing.T) {
 	// back to.
 	rc = recordedNow()
 	m, _ := os.ReadFile(r.svc.out)
-	lines := bytes.SplitAfter(m, []byte("\n"))
+	raw := bytes.SplitAfter(m, []byte("\n"))
 	at := rc.Lines[len(rc.Lines)-3] - 1
-	lines[at] = append(make([]byte, len(lines[at])-1), 0x0a)
-	if err := os.WriteFile(r.svc.out, bytes.Join(lines, nil), 0o644); err != nil {
+	raw[at] = append(make([]byte, len(raw[at])-1), 0x0a)
+	if err := os.WriteFile(r.svc.out, bytes.Join(raw, nil), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	rec, _ = postMain()
@@ -545,14 +589,13 @@ func TestTheNextPushAfterATornFile(t *testing.T) {
 	// to before it.
 	rc = recordedNow()
 	m, _ = os.ReadFile(r.svc.out)
-	lines = bytes.SplitAfter(m, []byte("\n"))
+	raw = bytes.SplitAfter(m, []byte("\n"))
 	at = rc.Lines[len(rc.Lines)-3] - 1
 	goneCommit := rc.Commits[len(rc.Commits)-3]
-	if err := os.WriteFile(r.svc.out, bytes.Join(append(append([][]byte(nil), lines[:at]...), lines[at+1:]...), nil), 0o644); err != nil {
+	if err := os.WriteFile(r.svc.out, bytes.Join(append(append([][]byte(nil), raw[:at]...), raw[at+1:]...), nil), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	var logged bytes.Buffer
-	r.svc.log = &logged
+	logged.Reset()
 	rec, res = postMain()
 	if rec.Code != http.StatusOK || !strings.Contains(logged.String(), "chain file for refs/heads/main made again") {
 		t.Fatalf("with a line gone from the middle of the mapping: %d %s; logged %q", rec.Code, rec.Body, logged.String())

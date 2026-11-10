@@ -225,9 +225,9 @@ type RecordedChain struct {
 	Commits []string
 }
 
-// reimport is the way out when the mapping cannot be used from one line
+// reimport is the way out when the mapping cannot be read from one line
 // on. The cut takes every ref's lines from there on with it, so every such
-// ref has to be imported again, not only the one the error is for.
+// ref has to be imported again.
 const reimport = "cut the mapping back to before line %d and import again every ref that has a line from there on: their commits are imported again to the same changesets, and until a ref is imported again it is published as the shorter mapping has it"
 
 // ChainRecorded returns what the mapping m records of ref's chain file,
@@ -285,18 +285,27 @@ func (rc RecordedChain) holds(ch *ChainFile) bool {
 	return ch.Base == rc.Base && ch.Sections == len(rc.Changesets) || ch.Sections == 0
 }
 
-// CannotRemake is why a recorded chain could not be made again: the stored
-// changeset it lacks, and where the mapping records it.
+// CannotRemake is why a recorded chain could not be made again from the
+// store: the changeset the store does not hold, or holds wrongly, and
+// where the mapping records it. A changeset the store does not hold is
+// made again from the repository by the next import of the ref (Remake).
+// A wrong object under its C4 ID is not: a store keeps the object it has,
+// so that one has to be removed first.
 type CannotRemake struct {
 	Changeset c4.ID
 	Commit    string
-	Line      int // the mapping line that records it, counted from 1
+	Line      int  // the mapping line that records it, counted from 1
+	Wrong     bool // the store holds other bytes under the C4 ID
 	Err       error
 }
 
 func (e *CannotRemake) Error() string {
-	return fmt.Sprintf("the changeset %s of commit %s (mapping line %d) %v. It can be made again from the repository: "+reimport,
-		e.Changeset, e.Commit, e.Line, e.Err, e.Line)
+	if e.Wrong {
+		return fmt.Sprintf("the changeset %s of commit %s (mapping line %d) is a wrong object in the store: its bytes are not what that C4 ID names. A store keeps the object it has, so it has to be removed from the store; the next import of the ref then makes it again from the repository",
+			e.Changeset, e.Commit, e.Line)
+	}
+	return fmt.Sprintf("the changeset %s of commit %s (mapping line %d) cannot be read from the store (%v). The next import of the ref makes it again from the repository",
+		e.Changeset, e.Commit, e.Line, e.Err)
 }
 
 func (e *CannotRemake) Unwrap() error { return e.Err }
@@ -312,15 +321,15 @@ func (rc RecordedChain) bytes(ctx context.Context, src view.RecordSource) ([]byt
 	c := &view.Chain{Base: rc.Base}
 	seals := make([]c4.ID, len(rc.Changesets))
 	for i, id := range rc.Changesets {
-		lost := func(err error) error {
-			return &CannotRemake{Changeset: id, Commit: rc.Commits[i], Line: rc.Lines[i], Err: err}
-		}
+		lost := &CannotRemake{Changeset: id, Commit: rc.Commits[i], Line: rc.Lines[i]}
 		data, err := src.Record(ctx, id)
 		if err != nil {
-			return nil, lost(fmt.Errorf("cannot be read from the store: %w", err))
+			lost.Err = err
+			return nil, lost
 		}
 		if got := c4.Identify(bytes.NewReader(data)); got != id {
-			return nil, lost(errors.New("is a wrong object in the store (its bytes are not what that C4 ID names), which has to be removed from the store first, since a store keeps the object it has"))
+			lost.Wrong = true
+			return nil, lost
 		}
 		one, err := view.ReadChain(data)
 		if err != nil || len(one.Sections) != 1 {

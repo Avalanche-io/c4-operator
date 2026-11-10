@@ -135,7 +135,7 @@ func (s *importService) importRef(ctx context.Context, ref, rev string, sinceLas
 		// a file torn by a crash, or ahead of or behind the mapping, is
 		// made again from the stored changesets first.
 		var repaired string
-		if chain, repaired, err = gitimport.OpenRecordedChain(ctx, s.chainPath(ref), s.base.Records, prior, ref); err != nil {
+		if chain, repaired, err = s.openChain(ctx, ref, prior, opts); err != nil {
 			return nil, err
 		}
 		if repaired != "" {
@@ -199,6 +199,33 @@ func (s *importService) importRef(ctx context.Context, ref, rev string, sinceLas
 	}
 	res.TotalMs = msSince(start)
 	return res, nil
+}
+
+// openChain opens ref's chain file as the mapping records it. A recorded
+// changeset the store does not hold is made again from the repository
+// first: its commit is imported again, which comes to the same changeset
+// or is an error, and the chain is opened again. Each lost changeset is
+// made again once; one that is still not there afterwards, a wrong object
+// under a changeset's C4 ID, and a commit that cannot be imported again to
+// what the mapping records are errors.
+func (s *importService) openChain(ctx context.Context, ref string, prior []gitimport.Commit, opts gitimport.Options) (*gitimport.ChainFile, string, error) {
+	var made c4.ID
+	for {
+		chain, repaired, err := gitimport.OpenRecordedChain(ctx, s.chainPath(ref), s.base.Records, prior, ref)
+		var lost *gitimport.CannotRemake
+		if err == nil || !errors.As(err, &lost) || lost.Wrong {
+			return chain, repaired, err
+		}
+		what := fmt.Sprintf("the changeset %s of commit %s (mapping line %d)", lost.Changeset, lost.Commit, lost.Line)
+		if lost.Changeset == made {
+			return nil, "", fmt.Errorf("%s was made again from the repository and still cannot be read from the store: %w", what, lost.Err)
+		}
+		if err := gitimport.Remake(ctx, opts, prior[lost.Line-1]); err != nil {
+			return nil, "", fmt.Errorf("%s is not in the store and could not be made again from the repository: %w", what, err)
+		}
+		made = lost.Changeset
+		fmt.Fprintf(s.log, "%s was not in the store and was made again from the repository\n", what)
+	}
 }
 
 // chainAppend appends a commit's changeset to its ref's chain and records

@@ -3,6 +3,7 @@ package gitimport
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -326,13 +327,18 @@ func TestAChainThatCannotBeMadeAgain(t *testing.T) {
 	w.Close()
 	os.WriteFile(p, torn, 0o644)
 	// The error says which, where the mapping records it, and that the
-	// object has to go before anything can be made again: a store keeps the
-	// object it has under a C4 ID.
+	// object has to go before the changeset can be made again: a store
+	// keeps the object it has under a C4 ID. It is marked, so an import
+	// does not try to make again what the store would not take.
 	_, _, err = OpenRecordedChain(ctx, p, h.src, m, "main")
-	for _, want := range []string{"wrong object", id.String(), "mapping line 3", "removed from the store first", "cut the mapping back to before line 3 ", "every ref"} {
+	for _, want := range []string{"wrong object", id.String(), "mapping line 3", "has to be removed from the store"} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("a wrong object under a changeset's ID: %v\nwant %q in it", err, want)
 		}
+	}
+	var lost *CannotRemake
+	if !errors.As(err, &lost) || !lost.Wrong || lost.Changeset != id || lost.Line != 3 || lost.Commit != m[2].Commit {
+		t.Fatalf("a wrong object under a changeset's ID: %+v", lost)
 	}
 	if _, err := RecordedChainBytes(ctx, p, h.src, m, "main"); err == nil || !strings.Contains(err.Error(), "wrong object") {
 		t.Fatalf("a reader, with a wrong object under a changeset's ID: %v", err)

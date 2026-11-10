@@ -213,17 +213,8 @@ func Run(ctx context.Context, opts Options) (*Summary, error) {
 	if opts.Rev == "" {
 		opts.Rev = "HEAD"
 	}
-	if opts.Filter == "" {
-		opts.Filter = "c4"
-	}
-	if opts.Jobs <= 0 {
-		opts.Jobs = 8
-	}
-	if opts.Sink == nil {
-		return nil, errors.New("no sink")
-	}
-	if opts.Warn == nil {
-		opts.Warn = func(string) {}
+	if err := opts.defaults(); err != nil {
+		return nil, err
 	}
 	history, err := firstParentHistory(ctx, opts.Repo, opts.Rev, opts.Since, opts.MaxCommits)
 	if err != nil {
@@ -247,21 +238,11 @@ func Run(ctx context.Context, opts Options) (*Summary, error) {
 		return sum, nil
 	}
 
-	cat, err := startCatFile(ctx, opts.Repo)
+	im, err := newImporter(ctx, opts, sum)
 	if err != nil {
 		return nil, err
 	}
-	defer cat.close()
-	im := &importer{
-		ctx: ctx, opts: opts, cat: cat, sum: sum,
-		blobs:   map[string]*blobInfo{},
-		c4git:   map[c4.ID]int64{},
-		managed: map[string]bool{},
-		records: newRecordCache(opts.Records),
-		up:      &uploads{sem: make(chan struct{}, opts.Jobs)},
-	}
-	// On an error return, let writes in flight finish before returning.
-	defer im.up.wg.Wait()
+	defer im.close()
 
 	// The view the first imported commit applies to.
 	first := history[0]
@@ -288,6 +269,46 @@ func Run(ctx context.Context, opts Options) (*Summary, error) {
 	}
 	sum.Elapsed = time.Since(start)
 	return sum, nil
+}
+
+// defaults fills in what an import needs that the caller left out.
+func (opts *Options) defaults() error {
+	if opts.Filter == "" {
+		opts.Filter = "c4"
+	}
+	if opts.Jobs <= 0 {
+		opts.Jobs = 8
+	}
+	if opts.Sink == nil {
+		return errors.New("no sink")
+	}
+	if opts.Warn == nil {
+		opts.Warn = func(string) {}
+	}
+	return nil
+}
+
+// newImporter starts an importer over opts.Repo; close ends it.
+func newImporter(ctx context.Context, opts Options, sum *Summary) (*importer, error) {
+	cat, err := startCatFile(ctx, opts.Repo)
+	if err != nil {
+		return nil, err
+	}
+	return &importer{
+		ctx: ctx, opts: opts, cat: cat, sum: sum,
+		blobs:   map[string]*blobInfo{},
+		c4git:   map[c4.ID]int64{},
+		managed: map[string]bool{},
+		records: newRecordCache(opts.Records),
+		up:      &uploads{sem: make(chan struct{}, opts.Jobs)},
+	}, nil
+}
+
+// close lets writes in flight finish, on an error return as well, and
+// ends the importer's git process.
+func (im *importer) close() {
+	im.up.wg.Wait()
+	im.cat.close()
 }
 
 // importBase imports one commit in full from ls-tree, over the empty view.
