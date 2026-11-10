@@ -65,7 +65,9 @@ test:
 
 # Overlay mounts, whiteouts and capture need root on Linux. The test
 # binaries are cross-compiled here and run in a privileged container on a
-# Docker volume (ext4), never on the host.
+# Docker volume (ext4), never on the host. They run verbosely: nothing else
+# runs these tests, so what they log (what an overlay's upper really holds)
+# is seen in this output or nowhere.
 test-linux:
 	@mkdir -p bin/linux-tests
 	@for p in $(LINUX_TEST_PKGS); do \
@@ -77,7 +79,7 @@ test-linux:
 	@for t in bin/linux-tests/*.test; do \
 	  echo "== $$t"; \
 	  docker run --rm --privileged -v $(CURDIR)/bin/linux-tests:/t:ro -v c4-linux-tests:/scratch \
-	    -e TMPDIR=/scratch -e C4_PRIVILEGED_TESTS=1 alpine:latest /t/$$(basename $$t) -test.count=1 || exit 1; \
+	    -e TMPDIR=/scratch -e C4_PRIVILEGED_TESTS=1 alpine:latest /t/$$(basename $$t) -test.count=1 -test.v || exit 1; \
 	done
 
 build:
