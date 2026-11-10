@@ -727,3 +727,65 @@ func TestALastLineNoIDPrintsAsIsStillChecked(t *testing.T) {
 		t.Fatal("a chain ending with a line that names nothing it resolves to verified")
 	}
 }
+
+// A directory is replaced wholesale and a subdirectory of the same name is
+// made again inside it: rm -rf build, mkdir -p build/obj, write
+// build/obj/new.o, where the view had build/obj/old.o. The changeset has
+// to say old.o is gone. The writer compared the remade obj/ with nothing,
+// stated only what was added, and every reader of the changeset kept the
+// old files.
+func TestADirectoryMadeAgainInsideAReplacedOne(t *testing.T) {
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{
+		"build/obj/old.o":       "old",
+		"build/obj/keep.o":      "keep",
+		"build/obj/deep/x.o":    "x",
+		"build/obj/deep/more/y": "y",
+		"build/top.txt":         "top",
+		"src/a.c":               "a",
+	})
+	base, err := ScanDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ram := store.NewRAM()
+	publish(t, ram, base)
+	file := func(content string) *c4m.Entry {
+		return FileEntry("", int64(len(content)), c4.Identify(strings.NewReader(content)), false)
+	}
+	// What an overlay's upper shows after that: build/ replaced (opaque),
+	// build/obj/ and build/obj/deep/ plain directories, and the files
+	// written: one new, one the same bytes as before.
+	os.RemoveAll(dir + "/build")
+	os.MkdirAll(dir+"/build/obj/deep", 0o755)
+	os.WriteFile(dir+"/build/obj/new.o", []byte("new"), 0o644)
+	os.WriteFile(dir+"/build/obj/keep.o", []byte("keep"), 0o644)
+	edits := []Edit{
+		{Path: "build/", Entry: &c4m.Entry{Name: "build/"}, Opaque: true},
+		{Path: "build/obj/", Entry: &c4m.Entry{Name: "obj/"}},
+		{Path: "build/obj/deep/", Entry: &c4m.Entry{Name: "deep/"}},
+		{Path: "build/obj/new.o", Entry: file("new")},
+		{Path: "build/obj/keep.o", Entry: file("keep")},
+	}
+	SortEdits(edits)
+	a := everyReader(t, "a directory made again", ram, base.ID, edits)
+	want, err := ScanDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.ID != want.ID {
+		t.Fatalf("Apply gives %s, the filesystem %s", a.ID, want.ID)
+	}
+	// And by the c4m library's own rule, over the base as a whole c4m file.
+	pm, err := c4m.NewDecoder(bytes.NewReader(a.Changeset)).Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := nodeFromManifest(c4m.ApplyPatch(base.Manifest(), pm))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id := root.Identify(); id != want.ID {
+		t.Fatalf("by the c4m library the changeset gives %s, the filesystem %s\n%s", id, want.ID, a.Changeset)
+	}
+}

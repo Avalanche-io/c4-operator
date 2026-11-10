@@ -325,9 +325,38 @@ func (t *atree) emit(n *anode, prefix string, depth int, out *[]*c4m.Entry, res 
 			}
 			continue
 		}
+		// A directory made again where the parent view had one (its
+		// parent was replaced wholesale, then this name written anew) is
+		// a fresh node: it never loaded what the old directory held. A
+		// reader of the patch merges what follows into the old directory,
+		// so what the old one held and the new one doesn't must be
+		// restated as removed, and what both hold alike not stated at
+		// all (stated, it would read as a removal).
+		if child.loaded && child.base != o.C4ID {
+			if err := t.recall(child, o.C4ID); err != nil {
+				return err
+			}
+		}
 		if err := t.emit(child, prefix+name, depth+1, out, res); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// recall gives a node made anew the listing of the directory the parent
+// view had under its name, for emit to compare against.
+func (t *atree) recall(n *anode, was c4.ID) error {
+	n.orig = map[string]*c4m.Entry{}
+	if was.IsNil() || was == emptyID {
+		return nil
+	}
+	entries, err := fetchRecord(t.ctx, t.src, was)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		n.orig[e.Name] = e
 	}
 	return nil
 }

@@ -332,3 +332,61 @@ func TestOutputIsRestoredAfterARestartAndFoldedOnto(t *testing.T) {
 		t.Fatalf("the stored chain verifies to %d views, the last not the status's output: %v", len(views), err)
 	}
 }
+
+// A unit replaces a directory and makes a subdirectory of the same name
+// again inside it. The job's output is the unit's view: the files the unit
+// no longer has are gone from it. The changeset once failed to say so, and
+// the fold kept them.
+func TestFoldADirectoryMadeAgainInsideAReplacedOne(t *testing.T) {
+	ctx := context.Background()
+	st, _ := foldStore(t)
+	q := &Queue{}
+	src := c4view.StoreRecords(st)
+	put := func(data []byte) c4.ID {
+		id, err := st.PutBytes(ctx, data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	put(nil)
+	file := func(content string) *c4m.Entry {
+		return c4view.FileEntry("", int64(len(content)), put([]byte(content)), false)
+	}
+	apply := func(parent c4.ID, edits ...c4view.Edit) (c4.ID, string) {
+		c4view.SortEdits(edits)
+		a, err := c4view.Apply(ctx, parent, edits, src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range a.Records {
+			put(r.Data)
+		}
+		return a.ID, put(a.Changeset).String()
+	}
+	in, first := apply(c4view.EmptyID(),
+		c4view.Edit{Path: "build/obj/old.o", Entry: file("old")},
+		c4view.Edit{Path: "build/obj/keep.o", Entry: file("keep")},
+		c4view.Edit{Path: "build/top.txt", Entry: file("top")})
+	want, second := apply(in,
+		c4view.Edit{Path: "build/", Entry: &c4m.Entry{Name: "build/"}, Opaque: true},
+		c4view.Edit{Path: "build/obj/", Entry: &c4m.Entry{Name: "obj/"}},
+		c4view.Edit{Path: "build/obj/new.o", Entry: file("new")},
+		c4view.Edit{Path: "build/obj/keep.o", Entry: file("keep")})
+	o := newOutput()
+	for i, cs := range []string{first, second} {
+		if err := q.fold(ctx, st, o, i, cs, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if o.view != want {
+		v, _ := c4view.Load(ctx, o.view, src, 2)
+		var held []string
+		if v != nil {
+			for _, f := range v.Files {
+				held = append(held, f.Path)
+			}
+		}
+		t.Fatalf("the output is not the unit's view; it holds %v, want build/obj/keep.o and build/obj/new.o", held)
+	}
+}

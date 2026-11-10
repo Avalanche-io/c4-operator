@@ -304,3 +304,84 @@ func TestLayerObjectsAreSharedByInode(t *testing.T) {
 		t.Fatal("a write through overlay reached the cached object")
 	}
 }
+
+// A unit replaces a directory wholesale and makes a subdirectory of the
+// same name again inside it: rm -rf shots/sh010, mkdir -p
+// shots/sh010/plates, write one new frame and one frame with the bytes it
+// had. The capture's view must be the mounted tree, and so must what its
+// changeset resolves to: the frames that are gone have to be stated as
+// gone. The test also logs what the overlay's upper holds for those
+// directories, since the changeset writer's fault here depends on the
+// outer directory being opaque and the inner one not.
+func TestCaptureOfADirectoryMadeAgainInsideAReplacedOne(t *testing.T) {
+	privileged(t)
+	f := newFixture(t)
+	full, err := f.layers.BuildFull(f.base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mnt := filepath.Join(f.root, "mnt")
+	upper := filepath.Join(f.root, "vol", "upper")
+	work := filepath.Join(f.root, "vol", "work")
+	os.MkdirAll(upper, 0o777)
+	os.MkdirAll(work, 0o700)
+	os.Chmod(upper, 0o777)
+	if err := overlay.Mount(mnt, []string{f.layers.Dir(full.Key)}, upper, work); err != nil {
+		t.Fatal(err)
+	}
+	mounted := true
+	defer func() {
+		if mounted {
+			overlay.Unmount(mnt)
+		}
+	}()
+	m := func(p string) string { return filepath.Join(mnt, p) }
+	if err := os.RemoveAll(m("shots/sh010")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(m("shots/sh010/plates"), 0o777); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(m("shots/sh010/plates/sh010.2001.exr"), []byte("plate 2001"), 0o644)
+	os.WriteFile(m("shots/sh010/plates/sh010.1002.exr"), []byte("plate 1002"), 0o644) // the bytes it had
+
+	want, err := view.ScanDir(mnt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := overlay.Unmount(mnt); err != nil {
+		t.Fatal(err)
+	}
+	mounted = false
+
+	entries, err := overlay.Walk(upper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		t.Logf("upper: %-40s kind %d opaque %v", e.Path, e.Kind, e.Opaque)
+	}
+
+	res, err := Run(context.Background(), Input{
+		Project: "show", Parent: f.base.ID, Upper: upper,
+		Cache: f.cache, Records: f.records(), Sink: f.sink, Workers: 4,
+		Consume: true, // unmounted above
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Output != want.ID {
+		t.Fatalf("captured %s, the mounted tree was %s", res.Output, want.ID)
+	}
+	r, err := view.FromID(res.Changeset, f.sink, view.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.View().ID != want.ID {
+		var held []string
+		for _, file := range r.View().Files {
+			held = append(held, file.Path)
+		}
+		t.Fatalf("the changeset resolves to %s, the mounted tree was %s; it holds %v", r.View().ID, want.ID, held)
+	}
+}
