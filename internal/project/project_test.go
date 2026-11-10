@@ -48,6 +48,13 @@ func TestVerifiesFills(t *testing.T) {
 			t.Errorf("%s: %v, want %v", p.Name, got, want)
 		}
 	}
+	// By name, as a tier server asks: the same answers, and yes for a
+	// project that can't be looked up.
+	for name, want := range map[string]bool{"strict": false, "asks": true, "lax": true, "alone": false, "no-such-project": true} {
+		if got := r.VerifiesFillsFor(ctx, name); got != want {
+			t.Errorf("by name, %s: %v, want %v", name, got, want)
+		}
+	}
 	r = &Registry{Cache: failingList{}}
 	if !r.VerifiesFills(ctx, lax) {
 		t.Error("a shared project whose partners can't be listed doesn't verify")

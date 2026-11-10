@@ -83,7 +83,7 @@ func FromID(id c4.ID, st Store, f Filter) (*Resolved, error) {
 }
 
 // ReadObject reads a whole (small) object. It does not rehash: bytes are
-// verified once, where they enter the system.
+// checked where they cross into a cache or the store (DESIGN.md section 1).
 func ReadObject(st Store, id c4.ID) ([]byte, error) {
 	rc, err := st.Open(id)
 	if err != nil {

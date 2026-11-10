@@ -281,3 +281,22 @@ func TestAFailedSyncNamesNothing(t *testing.T) {
 		t.Errorf("ExecPath: left in tmp: %d", len(left))
 	}
 }
+
+// The sync behind the seam is a real one: on a file that has been closed
+// it fails, where a function that only returned nil would not.
+func TestTheSyncIsASync(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "synced-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write([]byte("bytes")); err != nil {
+		t.Fatal(err)
+	}
+	if err := syncData(f); err != nil {
+		t.Fatalf("syncing an open file: %v", err)
+	}
+	f.Close()
+	if err := syncData(f); err == nil {
+		t.Fatal("syncing a closed file reported success: nothing was asked of the system")
+	}
+}

@@ -107,10 +107,12 @@ Project says not to, and are trusted from the local cache from then on.**
   defaults to true; false is a Project's stated choice to take its sources'
   word, and a Project that shares a partition with one that verifies is
   verified too, since they share fills. (Until 2026-11 this was off unless
-  asked for, and the regional tier never checked.) Hashing while writing
-  ran at about 1.5 GiB/s on one core of an M3 Max, which is 12.9 Gbit/s:
-  free where the network is slower than that, and the limit on a fill where
-  it is faster. It is not measured on x86.
+  asked for, and the regional tier never checked.) A tier server that was
+  given no rule checks every fill. On one core of an M3 Max, hashing alone
+  ran at about 1.5 GiB/s, and hashing while writing the file in the same
+  goroutine at about 0.66 GiB/s (5.7 Gbit/s): free where the network is
+  slower than that, and the limit on a fill where it is faster. It is not
+  measured on x86.
 - **A PUT is hashed** by the tier that receives it (section 1.2).
 - **What a capture adopts was hashed by that capture**, from the bytes it
   then keeps: a private copy for a workspace still in use, the file itself
@@ -123,16 +125,18 @@ Project says not to, and are trusted from the local cache from then on.**
   the device a flush and the device honours it, which is not so with
   barriers turned off, a virtual disk with unsafe caching, or a kind node
   whose disk is a file on a Mac. On macOS the sync is fsync(2), not a full
-  flush (about 20 µs an object against 6 ms): it survives a crash, not a
-  power cut on a drive that reorders writes. Directories are not synced; a
+  flush (writing and naming a small object costs 8 to 20 µs more with it
+  than without, where a full flush costs about 6 ms): it survives a crash,
+  not a power cut on a drive that reorders writes. Directories are not synced; a
   lost name is a miss. None of this is shown by a crash: the tests show
   the order of the calls, and the rest is how these filesystems are
   documented to behave.
-  A layer is links and directories, which a journaling filesystem replays
-  in order, and one small meta file, written last and not synced. A layer
-  whose meta is missing or cannot be read is not built: it is built again
-  when next wanted, which keeps its directory and rewrites the meta, or it
-  is collected.
+  A layer is links, directories and other metadata (symlinks, whiteouts,
+  the mark on an opaque directory), which a journaling filesystem replays
+  in order, and one small meta file, written last and not synced. That
+  file is the exception to the order: a crash can leave it a name over no
+  bytes, and such a layer is at present taken as built, never listed and
+  never collected. That is a fault, with its own fix to come.
 - **Not built: a scrub.** After a power cut on macOS, or a disk fault
   anywhere, a cache can hold wrong bytes under a C4 ID and nothing finds
   them. The rule this breaks is that IDs are checked, never trusted. What
@@ -171,8 +175,11 @@ node daemons:
 2. **Transport integrity.** Tier-to-tier traffic is TLS in production.
    Length is checked on every fill. A short read is resumed with a ranged
    request, never accepted.
-3. **The fill check.** What a cache holds was hashed as it arrived (section
-   1.1), so an object that was wrong upstream never gets a name here.
+3. **The fill check.** What a cache takes in is hashed as it arrives
+   (section 1.1) unless the Project has turned that off, so an object that
+   was wrong upstream gets no name here. That is so of fills made with the
+   check on; what a cache held before 2026-11, or took in for a Project
+   that turned it off, it holds on its source's word.
 
 What this gives up: an object that goes wrong on a cache's own disk after it
 was committed is served until something rehashes it, and nothing does yet
@@ -534,7 +541,8 @@ It:
 
 1. unmounts the overlay, so the upper is quiescent;
 2. walks the upper:
-   - regular file: added or modified. It is hashed (the verify-once point).
+   - regular file: added or modified. It is hashed (the point where a
+     capture's bytes get their C4 ID).
      If its ID and executable bit equal the lower's, it was a metadata-only
      copy-up and is not a change;
    - character device 0/0: a whiteout, so the path was deleted;

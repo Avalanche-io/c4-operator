@@ -134,7 +134,7 @@ func runIngest(args []string) error {
 	record := ""
 	if signer != nil {
 		// The ingest record vouches for the view as hashed here, the point
-		// where content is verified once (DESIGN.md section 1).
+		// where this content gets its C4 IDs (DESIGN.md section 1).
 		t := v.Totals()
 		pred := map[string]any{"source": filepath.Base(filepath.Clean(dir)), "files": t.Files, "bytes": t.Bytes,
 			"uniqueObjects": t.UniqueObjects, "uploaded": uploaded.Load(), "ingester": "c4-operator ingest " + version}

@@ -221,10 +221,7 @@ func (d *Daemon) ServePeers(ctx context.Context) error {
 		// join: it verifies when the project (or a project sharing its
 		// partition) asks, as runFill does, and when the project can't be
 		// looked up.
-		VerifyFill: func(project string) bool {
-			p, err := d.Projects.Get(context.Background(), project)
-			return err != nil || d.Projects.VerifiesFills(context.Background(), p)
-		},
+		VerifyFill: func(project string) bool { return d.Projects.VerifiesFillsFor(context.Background(), project) },
 		MaxServing: d.Cfg.MaxServing,
 		Log:        d.Log.WithName("peers"),
 	}

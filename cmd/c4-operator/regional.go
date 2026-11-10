@@ -113,10 +113,7 @@ func runRegional(args []string) error {
 		// A fill from the store crosses a machine boundary like any other:
 		// it is checked against its C4 ID unless the project says not to,
 		// and when the project can't be looked up.
-		VerifyFill: func(name string) bool {
-			p, err := reg.Get(context.Background(), name)
-			return err != nil || reg.VerifiesFills(context.Background(), p)
-		},
+		VerifyFill: func(name string) bool { return reg.VerifiesFillsFor(context.Background(), name) },
 		MaxServing: *maxServing,
 		MaxRate:    rate.Value(),
 		Log:        log,

@@ -88,6 +88,13 @@ func (r *Registry) List(ctx context.Context) ([]c4v1.Project, error) {
 	return list.Items, nil
 }
 
+// VerifiesFillsFor is VerifiesFills for the project named, and yes when the
+// project can't be looked up: what a tier server asks before a fill.
+func (r *Registry) VerifiesFillsFor(ctx context.Context, name string) bool {
+	p, err := r.Get(ctx, name)
+	return err != nil || r.VerifiesFills(ctx, p)
+}
+
 // VerifiesFills reports whether fills for p hash what they fetch. They do
 // unless p says not to (spec.store.verifyFill: false), and then still do
 // when p shares its partition (Shared isolation) with a project that

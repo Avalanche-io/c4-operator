@@ -567,6 +567,39 @@ func TestVerifyingFillHoldsTheLastByte(t *testing.T) {
 
 // A fill started for a project that verifies its fills hashes what it
 // fetches, whoever asked: a forged object is never served or cached.
+// A server that was told nothing about projects checks every fill: not
+// checking is what has to be said. So a command that forgot to pass the
+// rule fails towards checking.
+func TestFillsVerifyUnlessToldNotTo(t *testing.T) {
+	data := randomBytes(4096)
+	id := c4.Identify(bytes.NewReader(data))
+	forged := append([]byte(nil), data...)
+	forged[0] ^= 0xff
+	for _, c := range []struct {
+		name   string
+		rule   func(string) bool
+		cached bool
+	}{
+		{"no rule given", nil, false},
+		{"the rule says check", func(string) bool { return true }, false},
+		{"the rule says this project takes its sources' word", func(string) bool { return false }, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			src := &fakeSource{name: "peer", kind: "peer", data: forged}
+			h := newHarness(t, fill.Limits{}, func(string, c4.ID) []Source { return []Source{src} })
+			h.srv.Fetcher.MaxRounds = 1
+			h.srv.VerifyFill = c.rule
+			resp, body := h.get(t, id, 0)
+			served := resp.StatusCode == http.StatusOK && bytes.Equal(body, forged)
+			time.Sleep(50 * time.Millisecond)
+			cache, _ := h.caches.Partition("p-show")
+			if served != c.cached || cache.Has(id) != c.cached {
+				t.Fatalf("wrong bytes: served %v, cached %v; want both %v", served, cache.Has(id), c.cached)
+			}
+		})
+	}
+}
+
 func TestFillsVerifyForProjectsThatAsk(t *testing.T) {
 	data := randomBytes(4096)
 	id := c4.Identify(bytes.NewReader(data))
