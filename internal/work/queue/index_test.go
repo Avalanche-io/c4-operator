@@ -6,17 +6,24 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/Avalanche-io/c4"
 
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
+	"github.com/Avalanche-io/c4-operator/work/sched"
 )
 
 // oldIndex and oldFold are the provenance index as it was stored before
@@ -74,12 +81,20 @@ func newRecordSigner(t *testing.T) *recordSigner {
 // changeset, as the node does, and returns its C4 ID.
 func (r *recordSigner) record(t *testing.T, st *storeurl.Sharded, uid, changeset string) string {
 	t.Helper()
+	return r.recordOf(t, st, provenance.PredicateTask, provenance.Invocation{Project: "show", Namespace: "ns", Pod: "pod-of-" + uid, PodUID: uid}, changeset)
+}
+
+// recordOf stores a record of the given kind for an invocation, which may
+// name the job and unit it ran as, the way a node does when it can still
+// see the pod.
+func (r *recordSigner) recordOf(t *testing.T, st *storeurl.Sharded, kind string, inv provenance.Invocation, changeset string) string {
+	t.Helper()
 	pred := provenance.TaskPredicate{
-		Invocation: provenance.Invocation{Project: "show", Namespace: "ns", Pod: "pod-of-" + uid, PodUID: uid},
+		Invocation: inv,
 		Output:     provenance.Output{Changeset: changeset},
 		Runtime:    provenance.Runtime{Node: "node-1"},
 	}
-	env, err := provenance.SignStatement(context.Background(), r.signer, provenance.PredicateTask, nil, pred, r.now)
+	env, err := provenance.SignStatement(context.Background(), r.signer, kind, nil, pred, r.now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +189,7 @@ func TestAnIndexFromBeforeRunsTakesThemFromItsRecords(t *testing.T) {
 			old := storeOld(t, st, o)
 
 			re := restored(t, st, o)
-			says, err := re.loadIndex(ctx, st, old, "job", roots)
+			says, err := re.loadIndex(ctx, st, old, "job", roots, map[string]recordRun{})
 			if err != nil || len(says) != 0 {
 				t.Fatalf("loading the old index: %v, said %v", err, says)
 			}
@@ -222,7 +237,7 @@ func TestAnIndexFromBeforeRunsTakesThemFromItsRecords(t *testing.T) {
 				t.Fatal(err)
 			}
 			again := restored(t, st, re)
-			if says, err := again.loadIndex(ctx, st, re.index.String(), "job", roots); err != nil || len(says) != 0 || again.dirty || again.index != re.index {
+			if says, err := again.loadIndex(ctx, st, re.index.String(), "job", roots, map[string]recordRun{}); err != nil || len(says) != 0 || again.dirty || again.index != re.index {
 				t.Fatalf("an index in the new form was converted again: %v, %v, dirty %v", err, says, again.dirty)
 			}
 		})
@@ -272,7 +287,7 @@ func TestAnOldFoldWithNoRecordToSayIsFoldedAndReported(t *testing.T) {
 				func(cs string) string { return rs.record(t, st, "pod-b", cs) })
 			old := storeOld(t, st, o)
 			re := restored(t, st, o)
-			says, err := re.loadIndex(ctx, st, old, "job", rs.roots)
+			says, err := re.loadIndex(ctx, st, old, "job", rs.roots, map[string]recordRun{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -372,7 +387,7 @@ func TestAnIndexIsConvertedWholeOrNotAtAll(t *testing.T) {
 		t.Fatal(err)
 	}
 	re := restored(t, st, o)
-	says, err := re.loadIndex(ctx, st, old, "job", rs.roots)
+	says, err := re.loadIndex(ctx, st, old, "job", rs.roots, map[string]recordRun{})
 	if !errors.Is(err, errIndexNotConverted) || len(says) != 0 {
 		t.Fatalf("with a record that cannot be read: %v, said %v", err, says)
 	}
@@ -413,7 +428,7 @@ func TestAnIndexIsConvertedWholeOrNotAtAll(t *testing.T) {
 	// A manager that starts over from the old index converts it to the
 	// same index, byte for byte.
 	re = restored(t, st, o)
-	if _, err := re.loadIndex(ctx, st, old, "ns/job", rs.roots); err != nil || re.index != first {
+	if _, err := re.loadIndex(ctx, st, old, "ns/job", rs.roots, map[string]recordRun{}); err != nil || re.index != first {
 		t.Fatalf("converted again: %v, index %s, was %s", err, re.index, first)
 	}
 
@@ -431,7 +446,7 @@ func TestAnIndexIsConvertedWholeOrNotAtAll(t *testing.T) {
 		os.Chmod(d, 0o555)
 	}
 	re = restored(t, st, o)
-	_, err = re.loadIndex(ctx, st, old, "another-job", rs.roots)
+	_, err = re.loadIndex(ctx, st, old, "another-job", rs.roots, map[string]recordRun{})
 	for _, d := range dirs {
 		os.Chmod(d, 0o755)
 	}
@@ -462,10 +477,349 @@ func TestAnIndexInTheNewFormIsNotConverted(t *testing.T) {
 		t.Fatalf("a saved index has no version: %s", data)
 	}
 	re := restored(t, st, o)
-	if says, err := re.loadIndex(ctx, st, o.index.String(), "job", rs.roots); err != nil || len(says) != 0 {
+	if says, err := re.loadIndex(ctx, st, o.index.String(), "job", rs.roots, map[string]recordRun{}); err != nil || len(says) != 0 {
 		t.Fatal(err, says)
 	}
 	if len(re.folds) != 1 || re.folds[0].Run != "" || re.folds[0].BeforeRuns || re.dirty || re.index != o.index {
 		t.Fatalf("a new-form index was touched: %+v, dirty %v", re.folds, re.dirty)
+	}
+}
+
+// A fold made from an earlier run's record is a reused computation: it has
+// no run of its own. In an old index it is told by its record, a good one
+// that names another unit or another job, and it keeps no run. Given the
+// earlier run's, a rebuild of the output would take it for that run folded
+// twice and drop it.
+func TestAReusedFoldInAnOldIndexKeepsNoRun(t *testing.T) {
+	ctx := context.Background()
+	st, _ := foldStore(t)
+	q := &Queue{Stores: func(context.Context, string) (*storeurl.Sharded, error) { return st, nil }}
+	rs := newRecordSigner(t)
+	in := inputView(t, st, map[string]string{"in.txt": "input"})
+	cs := unitChangeset(t, st, in, map[string]string{"f.txt": "computed once"})
+	other := unitChangeset(t, st, in, map[string]string{"g.txt": "another"})
+	// Unit 0 ran as pod-c; unit 1 reused that run; unit 2 reused a run of
+	// another job; unit 3 ran as pod-d and is superseded later.
+	recC := rs.recordOf(t, st, provenance.PredicateTask, provenance.Invocation{Namespace: "ns", Job: "job", Unit: "0", PodUID: "pod-c"}, cs)
+	recElsewhere := rs.recordOf(t, st, provenance.PredicateTask, provenance.Invocation{Namespace: "ns", Job: "an-earlier-job", Unit: "2", PodUID: "pod-e"}, other)
+	recD := rs.recordOf(t, st, provenance.PredicateTask, provenance.Invocation{Namespace: "ns", Job: "job", Unit: "3", PodUID: "pod-d"}, other)
+	o := newOutput()
+	for _, f := range []Fold{{Unit: 0, Changeset: cs, Record: recC}, {Unit: 1, Changeset: cs, Record: recC}, {Unit: 2, Changeset: other, Record: recElsewhere}, {Unit: 3, Changeset: other, Record: recD}} {
+		if err := q.fold(ctx, st, o, f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := storeOld(t, st, o)
+	m := &jobMem{out: newOutput(), outLoad: o.id.String(), outView: o.view.String(), outIndex: old, superseded: map[int]bool{3: true}}
+	v := &view{key: "ns/job", project: "show", mem: m}
+	q.Roots = rs.roots
+	if !q.refoldOutput(ctx, v) {
+		t.Fatalf("the rebuild asked to be tried again: %s", v.foldWait)
+	}
+	var got []string
+	for _, f := range m.out.folds {
+		got = append(got, fmt.Sprintf("%d:%s:%v", f.Unit, f.Run, f.BeforeRuns))
+	}
+	if want := "[0:pod-c:false 1::false 2::false]"; fmt.Sprint(got) != want {
+		t.Fatalf("after conversion and a rebuild the folds are %v, want %s", got, want)
+	}
+	if said := strings.Join(m.out.conflicts, "\n"); strings.Contains(said, "upgrade") {
+		t.Fatalf("something was said of the upgrade: %q", m.out.conflicts)
+	}
+}
+
+// An index written by the first version that named runs has them on its
+// pods' folds and no version. It gets its version and nothing else: no
+// record is read, and a reused computation's fold keeps no run and no mark.
+func TestAnIndexWithRunsAndNoVersionGetsOnlyItsVersion(t *testing.T) {
+	ctx := context.Background()
+	st, _ := foldStore(t)
+	q := &Queue{}
+	in := inputView(t, st, map[string]string{"in.txt": "input"})
+	cs := unitChangeset(t, st, in, map[string]string{"f.txt": "f"})
+	gone := c4.Identify(strings.NewReader("a record the store does not hold")).String()
+	o := newOutput()
+	folds := []Fold{{Unit: 0, Changeset: cs, Record: gone, Run: "pod-0"}, {Unit: 1, Changeset: cs, Record: gone}}
+	for _, f := range folds {
+		if err := q.fold(ctx, st, o, f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// As that version stored it: the folds as they are, and no version.
+	b, err := json.Marshal(struct {
+		Job   string `json:"job"`
+		Folds []Fold `json:"folds"`
+	}{"job", o.folds})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.PutBytes(ctx, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	re := restored(t, st, o)
+	read := map[string]recordRun{}
+	says, err := re.loadIndex(ctx, st, id.String(), "job", nil, read)
+	if err != nil || len(says) != 0 || len(read) != 0 {
+		t.Fatalf("%v, said %v, %d records read", err, says, len(read))
+	}
+	if fmt.Sprint(re.folds) != fmt.Sprint(folds) || re.dirty || re.index == id {
+		t.Fatalf("the folds were touched, or the version not saved: %+v, dirty %v", re.folds, re.dirty)
+	}
+	// The reused unit's own first pod is a fold like any other, and
+	// nothing is said of an upgrade.
+	if err := q.fold(ctx, st, re, Fold{Unit: 1, Changeset: cs, Run: "pod-1"}); err != nil || len(re.folds) != 3 || len(re.conflicts) != 0 {
+		t.Fatalf("%v, %d folds, conflicts %q", err, len(re.folds), re.conflicts)
+	}
+}
+
+// The report of a fold made again after an upgrade is for a pod of that
+// unit with that changeset, and for no other fold.
+func TestTheUpgradeReportIsForThatUnitAndChangeset(t *testing.T) {
+	ctx := context.Background()
+	st, _ := foldStore(t)
+	q := &Queue{}
+	in := inputView(t, st, map[string]string{"in.txt": "input"})
+	cs := unitChangeset(t, st, in, map[string]string{"f.txt": "f"})
+	another := unitChangeset(t, st, in, map[string]string{"g.txt": "g"})
+	o := newOutput()
+	if err := q.fold(ctx, st, o, Fold{Unit: 0, Changeset: cs}); err != nil {
+		t.Fatal(err)
+	}
+	o.folds[0].BeforeRuns = true
+	said := func() int {
+		n := 0
+		for _, line := range o.conflicts {
+			if strings.Contains(line, "after an upgrade") {
+				n++
+			}
+		}
+		return n
+	}
+	for _, f := range []Fold{
+		{Unit: 1, Changeset: cs, Run: "pod-of-another-unit"},
+		{Unit: 0, Changeset: another, Run: "pod-with-another-changeset"},
+		{Unit: 0, Changeset: cs}, // a reused computation: no pod, so not that run
+	} {
+		if err := q.fold(ctx, st, o, f); err != nil {
+			t.Fatal(err)
+		}
+		if said() != 0 || !o.folds[0].BeforeRuns {
+			t.Fatalf("the fold %+v was taken for the old fold seen again", f)
+		}
+	}
+	if err := q.fold(ctx, st, o, Fold{Unit: 0, Changeset: cs, Run: "pod-0"}); err != nil || said() != 1 || o.folds[0].BeforeRuns {
+		t.Fatalf("the pod of that unit and changeset: %v, said %d times", err, said())
+	}
+}
+
+// A record that is not a task record gives no run, with the farm's roots
+// and without them. What is wrong with a record reaches the job's
+// conflicts, and the wait has its reason in the job's status.
+func TestARecordOfAnotherKindGivesNoRun(t *testing.T) {
+	ctx := context.Background()
+	for _, verified := range []bool{true, false} {
+		st, _ := foldStore(t)
+		q := &Queue{Stores: func(context.Context, string) (*storeurl.Sharded, error) { return st, nil }}
+		rs := newRecordSigner(t)
+		if verified {
+			q.Roots = rs.roots
+		}
+		o, a, _ := history(t, st, q,
+			func(cs string) string {
+				return rs.recordOf(t, st, provenance.PredicateResolution, provenance.Invocation{PodUID: "pod-a"}, cs)
+			},
+			func(cs string) string { return rs.record(t, st, "pod-b", cs) })
+		m := &jobMem{out: newOutput(), outLoad: o.id.String(), outView: o.view.String(), outIndex: storeOld(t, st, o)}
+		v := &view{key: "ns/job", project: "show", mem: m}
+		if !q.foldChangeset(ctx, v, a) {
+			t.Fatalf("verified %v: %s", verified, v.foldWait)
+		}
+		if !strings.Contains(strings.Join(m.out.conflicts, "\n"), "not a task record") {
+			t.Errorf("verified %v: the job's conflicts do not say what was wrong with the record: %q", verified, m.out.conflicts)
+		}
+		if len(m.out.folds) != 3 || m.out.folds[0].Run != "" {
+			t.Errorf("verified %v: a record of another kind gave a run: %+v", verified, m.out.folds)
+		}
+	}
+
+	// The reason reaches the status.
+	q := &Queue{}
+	j := &c4v1.WorkJob{}
+	st := q.status(time.Unix(1700000100, 0), sched.Decisions{}, &view{key: "ns/job", job: j, mem: &jobMem{}, foldWait: "load output: not converted", foldReason: "IndexNotConverted"})
+	if c := meta.FindStatusCondition(st.Conditions, ConditionOutputRecorded); c == nil || c.Reason != "IndexNotConverted" || !strings.Contains(c.Message, "not converted") {
+		t.Fatalf("the status says %+v", c)
+	}
+}
+
+// A long log is converted over several ticks: each reads a bounded number
+// of records, what was read is kept, and the index is saved only when
+// every fold is settled. The rebuild of the output waits the same way and
+// says so.
+func TestALongIndexIsConvertedOverSeveralTicks(t *testing.T) {
+	ctx := context.Background()
+	st, _ := foldStore(t)
+	q := &Queue{Stores: func(context.Context, string) (*storeurl.Sharded, error) { return st, nil }}
+	rs := newRecordSigner(t)
+	in := inputView(t, st, map[string]string{"in.txt": "input"})
+	n := 2*maxRecordReadsPerTick + 5
+	o := newOutput()
+	for i := range n {
+		cs := unitChangeset(t, st, in, map[string]string{fmt.Sprintf("out/%03d.txt", i): fmt.Sprint(i)})
+		if err := q.fold(ctx, st, o, Fold{Unit: i, Changeset: cs, Record: rs.record(t, st, fmt.Sprintf("pod-%03d", i), cs)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := storeOld(t, st, o)
+	m := &jobMem{out: newOutput(), outLoad: o.id.String(), outView: o.view.String(), outIndex: old, superseded: map[int]bool{0: true}}
+	q.Roots = rs.roots
+	for tick := 1; ; tick++ {
+		v := &view{key: "ns/job", project: "show", mem: m}
+		if q.refoldOutput(ctx, v) {
+			if tick != 3 {
+				t.Fatalf("converted in %d ticks, want 3", tick)
+			}
+			break
+		}
+		if v.foldReason != "IndexNotConverted" || !strings.Contains(v.foldWait, "read so far") || m.outIndex != old || len(m.out.folds) != 0 {
+			t.Fatalf("tick %d: %q (%s), %d folds taken", tick, v.foldWait, v.foldReason, len(m.out.folds))
+		}
+		if len(m.outRuns) != tick*maxRecordReadsPerTick {
+			t.Fatalf("tick %d: %d records kept", tick, len(m.outRuns))
+		}
+		if tick > 5 {
+			t.Fatal("it never finishes")
+		}
+	}
+	if len(m.out.folds) != n-1 || m.out.folds[0].Run != "pod-001" || m.outRuns != nil {
+		t.Fatalf("after the conversion and the rebuild: %d folds, first %+v", len(m.out.folds), m.out.folds[0])
+	}
+}
+
+// Through the manager, across restarts: while an old index cannot be
+// converted (a record cannot be read), the job's status goes on naming
+// that index and says why it waits. A restart in that state finds the fold
+// log where it was, and once the store answers, the pod still listed is
+// not folded again: the later write stands.
+func TestARestartWhileAnOldIndexWaits(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root reads a file it has no permission to read")
+	}
+	for _, c := range []struct{ name, reason string }{
+		{"a record cannot be read", "IndexNotConverted"},
+		{"the index itself cannot be read", "FoldFailed"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ns, q, now, _ := graphFarm(t)
+			st, dir := foldStore(t)
+			q.Stores = func(context.Context, string) (*storeurl.Sharded, error) { return st, nil }
+			ctx := context.Background()
+			if err := k8s.Create(ctx, job(ns, "bon", "graph", "cpu-"+ns, nil, now.Add(8*time.Hour))); err != nil {
+				t.Fatal(err)
+			}
+			tick(t, q)
+			doc := putDoc(t, st, `{"version": 1, "units": [{"name": "a1"}, {"name": "b"}]}`)
+			finishUnit(t, now, ns, "bon", 0, map[string]string{c4v1.AnnotationOutputExpand: doc})
+			tick(t, q)
+
+			// Unit 1's pod stays listed: a finalizer that is not the queue's.
+			rs := newRecordSigner(t)
+			p1 := podOfUnit(t, ns, "bon", 1)
+			p1.Finalizers = append(p1.Finalizers, "test.c4.avalanche.io/hold")
+			if err := k8s.Update(ctx, p1); err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				var held corev1.Pod
+				if k8s.Get(ctx, client.ObjectKeyFromObject(p1), &held) == nil {
+					held.Finalizers = nil
+					k8s.Update(ctx, &held)
+				}
+			}()
+			csA := unitChangeset(t, st, c4view.EmptyID(), map[string]string{"f.txt": "from A"})
+			csB := unitChangeset(t, st, c4view.EmptyID(), map[string]string{"f.txt": "from B"})
+			recA := rs.record(t, st, string(p1.UID), csA)
+			recB := rs.record(t, st, string(podOfUnit(t, ns, "bon", 2).UID), csB)
+			finishUnit(t, now, ns, "bon", 1, map[string]string{c4v1.AnnotationOutputChangeset: csA, c4v1.AnnotationOutputProvenance: recA})
+			tick(t, q)
+			finishUnit(t, now, ns, "bon", 2, map[string]string{c4v1.AnnotationOutputChangeset: csB, c4v1.AnnotationOutputProvenance: recB})
+			tick(t, q)
+			tick(t, q)
+			got := get(t, ns, "bon")
+			if got.Status.Output == nil || got.Status.Output.Changesets != 2 || got.Status.Output.Provenance == "" {
+				t.Fatalf("before the upgrade: %+v", got.Status.Output)
+			}
+
+			// The status's index as the manager before the upgrade stored it.
+			ixID, _ := c4.Parse(got.Status.Output.Provenance)
+			data, err := c4view.ReadObject(st, ixID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var cur Index
+			if err := json.Unmarshal(data, &cur); err != nil {
+				t.Fatal(err)
+			}
+			old := oldIndex{Job: cur.Job, Output: cur.Output, Records: cur.Records, Units: cur.Units}
+			for _, f := range cur.Folds {
+				old.Folds = append(old.Folds, oldFold{Unit: f.Unit, Changeset: f.Changeset, Record: f.Record})
+			}
+			ob, _ := json.Marshal(old)
+			oldID, err := st.PutBytes(ctx, ob)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got.Status.Output.Provenance = oldID.String()
+			if err := k8s.Status().Update(ctx, got); err != nil {
+				t.Fatal(err)
+			}
+
+			locked := objectFile(t, dir, recB)
+			if c.reason == "FoldFailed" {
+				locked = objectFile(t, dir, oldID.String())
+			}
+			if err := os.Chmod(locked, 0); err != nil {
+				t.Fatal(err)
+			}
+			restart := func() {
+				q = &Queue{Client: q.Client, Policy: q.Policy, Cfg: q.Cfg, Log: q.Log, Now: q.Now, CaptureWait: q.CaptureWait, Stores: q.Stores, Roots: rs.roots}
+			}
+			// The upgraded manager starts while the store cannot answer.
+			restart()
+			tick(t, q)
+			tick(t, q)
+			mid := get(t, ns, "bon")
+			if mid.Status.Output == nil || mid.Status.Output.Provenance != oldID.String() {
+				t.Fatalf("while the index waits the status names %+v, want the old index %s", mid.Status.Output, oldID)
+			}
+			if cond := meta.FindStatusCondition(mid.Status.Conditions, ConditionOutputRecorded); cond == nil || cond.Reason != c.reason {
+				t.Fatalf("while the index waits the status says %+v, want %s", mid.Status.Conditions, c.reason)
+			}
+
+			// It restarts again in that state, and then the store answers.
+			if err := os.Chmod(locked, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			restart()
+			tick(t, q)
+			tick(t, q)
+			end := get(t, ns, "bon")
+			if end.Status.Output == nil || end.Status.Output.Changesets != 2 {
+				t.Fatalf("at the end: %+v", end.Status.Output)
+			}
+			out, _ := c4.Parse(end.Status.Output.View)
+			if files := outputFilesOf(t, st, out); files["f.txt"] != idOf("from B") {
+				t.Fatalf("the pod still listed was folded again over the later write: %v", files)
+			}
+			if meta.FindStatusCondition(end.Status.Conditions, ConditionOutputRecorded) != nil {
+				t.Fatalf("the status still says it waits: %+v", end.Status.Conditions)
+			}
+			id, _ := c4.Parse(end.Status.Output.Provenance)
+			data, err = c4view.ReadObject(st, id)
+			var ix Index
+			if err != nil || json.Unmarshal(data, &ix) != nil || ix.Version != indexVersion || len(ix.Folds) != 2 || ix.Folds[0].Run != string(p1.UID) {
+				t.Fatalf("the index the status names at the end: %v, %s", err, data)
+			}
+		})
 	}
 }

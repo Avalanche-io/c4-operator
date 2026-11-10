@@ -322,9 +322,12 @@ type jobMem struct {
 	outLoad       string // the stored chain to load before the next fold
 	outView       string // the view that chain resolves to, as the status keeps it
 	outIndex      string // the stored provenance index to load before the next fold
-	launched      map[int]time.Time
-	nodeFails     map[string]int
-	blacklist     map[string]bool
+	// outRuns is what has been read so far of an old index's task records,
+	// kept between ticks while it is being converted (fold.go, loadIndex).
+	outRuns   map[string]recordRun
+	launched  map[int]time.Time
+	nodeFails map[string]int
+	blacklist map[string]bool
 	// resume holds, per unit, the view a yielded attempt captured: the
 	// next attempt mounts it and continues from its checkpoint.
 	resume map[int]string
@@ -2423,18 +2426,7 @@ func (q *Queue) foldChangeset(ctx context.Context, v *view, f Fold) bool {
 	// fails. One that can never succeed (a changeset the fold refuses)
 	// would otherwise show only as a unit that stays finishing, so the
 	// reason goes to the job's status (report.go, OutputRecorded).
-	failed := func(what string, err error) bool {
-		q.Log.Error(err, what, "job", v.key, "unit", f.Unit)
-		if v.foldWait == "" {
-			v.foldWait = fmt.Sprintf("unit %d, %s: %v", f.Unit, what, err)
-			if errors.Is(err, errIndexNotConverted) {
-				// Not this unit's fold failing: the whole job waits on its
-				// index from before the upgrade (fold.go, loadIndex).
-				v.foldReason = "IndexNotConverted"
-			}
-		}
-		return false
-	}
+	failed := func(what string, err error) bool { return q.foldFailed(v, f.Unit, what, err) }
 	st, err := q.Stores(ctx, v.project)
 	if err != nil {
 		return failed("open store for fold", err)
@@ -2450,6 +2442,26 @@ func (q *Queue) foldChangeset(ctx context.Context, v *view, f Fold) bool {
 		return failed("fold", err)
 	}
 	return true
+}
+
+// foldFailed records why a fold, or the rebuild of the output (unit -1),
+// was not made this tick, for the job's status, and reports false. The
+// first failure of a tick is the one kept.
+func (q *Queue) foldFailed(v *view, unit int, what string, err error) bool {
+	q.Log.Error(err, what, "job", v.key, "unit", unit)
+	if v.foldWait != "" {
+		return false
+	}
+	v.foldWait = fmt.Sprintf("unit %d, %s: %v", unit, what, err)
+	if unit < 0 {
+		v.foldWait = fmt.Sprintf("%s: %v", what, err)
+	}
+	if errors.Is(err, errIndexNotConverted) {
+		// Not one unit's fold failing: the whole job waits on its index
+		// from before the upgrade (fold.go, loadIndex).
+		v.foldReason = "IndexNotConverted"
+	}
+	return false
 }
 
 // maxFoldsPerTick bounds the store work one tick does.

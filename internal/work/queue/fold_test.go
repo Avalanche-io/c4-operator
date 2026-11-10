@@ -617,7 +617,7 @@ func TestFoldABATheSameRunSeenAgain(t *testing.T) {
 	if err := re.load(st, o.id.String(), o.view.String()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := re.loadIndex(ctx, st, o.index.String(), "job", nil); err != nil {
+	if _, err := re.loadIndex(ctx, st, o.index.String(), "job", nil, map[string]recordRun{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := q.fold(ctx, st, re, a); err != nil {

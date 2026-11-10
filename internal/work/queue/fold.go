@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io/fs"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Avalanche-io/c4"
@@ -65,7 +66,8 @@ type Fold struct {
 	Record    string `json:"record,omitempty"`
 	// Run names the run of the unit: its pod's UID. A run in the log is
 	// never folded again. Empty for a reused computation, which has no run
-	// of its own and is folded as its unit is marked succeeded.
+	// of its own and is folded as its unit is marked succeeded: its record
+	// is the earlier run's, and that run is not this fold's.
 	Run string `json:"run,omitempty"`
 	// BeforeRuns marks a fold read from an index written before folds
 	// named their runs, whose task record is not there to say which pod
@@ -141,7 +143,7 @@ var errIndexNotConverted = errors.New("the index from before the upgrade is not 
 //
 // What was found wrong with a record is returned in says, for the job's
 // conflicts; a record that is simply not there says nothing.
-func (o *output) loadIndex(ctx context.Context, st *storeurl.Sharded, id, job string, roots *x509.CertPool) (says []string, err error) {
+func (o *output) loadIndex(ctx context.Context, st *storeurl.Sharded, id, job string, roots *x509.CertPool, read map[string]recordRun) (says []string, err error) {
 	pid, err := c4.Parse(id)
 	if err != nil {
 		return nil, err
@@ -154,20 +156,39 @@ func (o *output) loadIndex(ctx context.Context, st *storeurl.Sharded, id, job st
 	if err := json.Unmarshal(data, &ix); err != nil {
 		return nil, err
 	}
-	if ix.Version < indexVersion {
+	// An index with no version in which some fold names its run was
+	// written by the first version that named them: its folds with no run
+	// are reused computations, by construction, and it needs its version
+	// and nothing else.
+	convert := ix.Version < indexVersion
+	for _, f := range ix.Folds {
+		convert = convert && f.Run == ""
+	}
+	if convert {
+		asked := 0
 		for i := range ix.Folds {
 			f := &ix.Folds[i]
-			if f.Run != "" {
-				continue
+			// Kept by the fold, not by the record alone: two folds can
+			// name one record (a unit's run, and a reuse of it), and what
+			// the record says differs for each.
+			key := fmt.Sprintf("%d %s %s", f.Unit, f.Changeset, f.Record)
+			r, ok := read[key]
+			if !ok {
+				if asked == maxRecordReadsPerTick {
+					return nil, fmt.Errorf("%w: %d of its %d folds' task records read so far", errIndexNotConverted, i, len(ix.Folds))
+				}
+				asked++
+				if r, err = runOfRecord(st, roots, job, f); err != nil {
+					return nil, fmt.Errorf("%w: the task record of unit %d's fold: %v", errIndexNotConverted, f.Unit, err)
+				}
+				if read != nil {
+					read[key] = r
+				}
 			}
-			run, why, err := runOfRecord(st, roots, f)
-			if err != nil {
-				return nil, fmt.Errorf("%w: the task record of unit %d's fold: %v", errIndexNotConverted, f.Unit, err)
+			if r.why != "" {
+				says = append(says, fmt.Sprintf("unit %d's fold from before the upgrade: %s; which run it was of is not known", f.Unit, r.why))
 			}
-			if why != "" {
-				says = append(says, fmt.Sprintf("unit %d's fold from before the upgrade: %s; which run it was of is not known", f.Unit, why))
-			}
-			f.Run, f.BeforeRuns = run, run == ""
+			f.Run, f.BeforeRuns = r.run, r.run == "" && !r.reused
 		}
 	}
 	was := *o
@@ -179,7 +200,7 @@ func (o *output) loadIndex(ctx context.Context, st *storeurl.Sharded, id, job st
 	}
 	o.folds = ix.Folds
 	o.index = pid
-	if ix.Version < indexVersion {
+	if ix.Version < indexVersion && len(ix.Folds) > 0 {
 		o.dirty = true
 		if err := o.saveIndex(ctx, st, job); err != nil {
 			*o = was
@@ -189,72 +210,94 @@ func (o *output) loadIndex(ctx context.Context, st *storeurl.Sharded, id, job st
 	return says, nil
 }
 
-// runOfRecord returns the UID of the pod the fold f's task record was
-// signed for. Without one it returns "", and in why what is wrong with the
-// record, or nothing when the store simply does not hold it. An error is
-// the store failing to answer, which says nothing about the record.
+// maxRecordReadsPerTick bounds the store reads one tick spends converting
+// an index. What was read is kept (loadOutput), so a long log is converted
+// over several ticks, and still saved only when every fold is settled.
+const maxRecordReadsPerTick = 64
+
+// recordRun is what a fold's task record says of its run.
+type recordRun struct {
+	run string // the pod's UID, when the record can be believed
+	why string // what is wrong with the record, when something is
+	// reused: the record is a good one of another unit or job, so the fold
+	// is a reused computation and has no run of its own.
+	reused bool
+}
+
+// runOfRecord reads what the fold f's task record says of its run. An
+// error is the store failing to answer, which says nothing about the
+// record. A record the store simply does not hold says nothing either,
+// and leaves the fold with no run.
 //
 // The record is checked as far as that costs nothing: its bytes must hash
 // to the ID the index names, it must be a task record of this fold's
 // changeset, and where the queue has the farm's roots its signature and
 // signer are verified. Without roots it is believed as far as the index
-// that names it, which is not signed either.
-func runOfRecord(st *storeurl.Sharded, roots *x509.CertPool, f *Fold) (run, why string, err error) {
+// that names it, which is not signed either. A good record of another
+// unit, or of another job, is a reused computation's: the fold was made
+// from that earlier run's record and has no run of its own.
+func runOfRecord(st *storeurl.Sharded, roots *x509.CertPool, job string, f *Fold) (recordRun, error) {
+	wrong := func(format string, args ...any) (recordRun, error) {
+		return recordRun{why: fmt.Sprintf(format, args...)}, nil
+	}
 	if f.Record == "" {
-		return "", "", nil
+		return recordRun{}, nil
 	}
 	id, err := c4.Parse(f.Record)
 	if err != nil {
-		return "", fmt.Sprintf("its task record ID %q is not a C4 ID", f.Record), nil
+		return wrong("its task record ID %q is not a C4 ID", f.Record)
 	}
 	data, err := c4view.ReadObject(st, id)
 	if errors.Is(err, storeurl.ErrNotFound) || errors.Is(err, fs.ErrNotExist) {
-		return "", "", nil
+		return recordRun{}, nil
 	}
 	if err != nil {
-		return "", "", err
+		return recordRun{}, err
 	}
 	short := shortRecord(f.Record)
 	if got := c4.Identify(bytes.NewReader(data)); got != id {
-		return "", fmt.Sprintf("the store holds a wrong object under its task record %s", short), nil
+		return wrong("the store holds a wrong object under its task record %s", short)
 	}
 	var pred json.RawMessage
 	if roots != nil {
 		vr, err := provenance.VerifyBundle(data, roots)
 		if err != nil {
-			return "", fmt.Sprintf("its task record %s does not verify (%v)", short, err), nil
+			return wrong("its task record %s does not verify (%v)", short, err)
 		}
 		if vr.PredicateType != provenance.PredicateTask {
-			return "", fmt.Sprintf("record %s is a %s record, not a task record", short, vr.PredicateType), nil
+			return wrong("record %s is a %s record, not a task record", short, vr.PredicateType)
 		}
 		if err := provenance.CheckSigner(vr); err != nil {
-			return "", fmt.Sprintf("its task record %s: %v", short, err), nil
+			return wrong("its task record %s: %v", short, err)
 		}
 		pred = vr.Predicate
 	} else {
 		var b provenance.Bundle
 		var stmt provenance.AnyStatement
-		notOne := fmt.Sprintf("record %s is not a task record", short)
 		if json.Unmarshal(data, &b) != nil {
-			return "", notOne, nil
+			return wrong("record %s is not a task record", short)
 		}
 		payload, err := base64.StdEncoding.DecodeString(b.DSSEEnvelope.Payload)
 		if err != nil || json.Unmarshal(payload, &stmt) != nil || stmt.PredicateType != provenance.PredicateTask {
-			return "", notOne, nil
+			return wrong("record %s is not a task record", short)
 		}
 		pred = stmt.Predicate
 	}
 	var task provenance.TaskPredicate
 	if err := json.Unmarshal(pred, &task); err != nil {
-		return "", fmt.Sprintf("its task record %s does not read (%v)", short, err), nil
+		return wrong("its task record %s does not read (%v)", short, err)
 	}
 	if task.Output.Changeset != f.Changeset {
-		return "", fmt.Sprintf("its task record %s is of another changeset", short), nil
+		return wrong("its task record %s is of another changeset", short)
 	}
-	if task.Invocation.PodUID == "" {
-		return "", fmt.Sprintf("its task record %s names no pod", short), nil
+	inv := task.Invocation
+	if inv.Unit != "" && inv.Unit != strconv.Itoa(f.Unit) || inv.Job != "" && inv.Namespace+"/"+inv.Job != job {
+		return recordRun{reused: true}, nil
 	}
-	return task.Invocation.PodUID, "", nil
+	if inv.PodUID == "" {
+		return wrong("its task record %s names no pod", short)
+	}
+	return recordRun{run: inv.PodUID}, nil
 }
 
 // load restores an output after a restart: its stored chain, and the view
@@ -482,8 +525,7 @@ func (q *Queue) refoldOutput(ctx context.Context, v *view) bool {
 		return true
 	}
 	if err := q.loadOutput(ctx, st, v); err != nil {
-		q.Log.Error(err, "load output", "job", v.key)
-		return false
+		return q.foldFailed(v, -1, "load output", err)
 	}
 	drop := false
 	for _, f := range m.out.folds {
@@ -546,12 +588,15 @@ func (q *Queue) loadOutput(ctx context.Context, st *storeurl.Sharded, v *view) e
 		m.outLoad, m.outView = "", ""
 	}
 	if m.outIndex != "" {
-		says, err := m.out.loadIndex(ctx, st, m.outIndex, v.key, q.Roots)
+		if m.outRuns == nil {
+			m.outRuns = map[string]recordRun{}
+		}
+		says, err := m.out.loadIndex(ctx, st, m.outIndex, v.key, q.Roots, m.outRuns)
 		if err != nil {
 			return err
 		}
 		m.out.conflicts = append(m.out.conflicts, says...)
-		m.outIndex = ""
+		m.outIndex, m.outRuns = "", nil
 	}
 	return nil
 }

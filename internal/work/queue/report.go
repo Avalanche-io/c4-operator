@@ -370,7 +370,14 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	}
 	if o := m.out; o != nil && !o.view.IsNil() {
 		st.Output = &c4v1.WorkOutput{View: o.view.String(), Chain: o.id.String(), Changesets: int32(o.count)}
-		if !o.index.IsNil() {
+		switch {
+		case m.outIndex != "":
+			// The index the last status named is not loaded yet (it could
+			// not be read, or is being converted). The status goes on
+			// naming it: dropped here, a restart would find a chain with no
+			// fold log and fold every listed pod again.
+			st.Output.Provenance = m.outIndex
+		case !o.index.IsNil():
 			st.Output.Provenance = o.index.String()
 		}
 		if n := len(o.conflicts); n > 0 {
