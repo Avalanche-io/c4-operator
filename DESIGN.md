@@ -1905,9 +1905,9 @@ unit or another job marks a reused computation, which has no run of its own
 and is given none. The conversion is whole or not at all: the converted
 index is saved before any fold of the job is made on it, and a store that
 cannot be asked for a record converts nothing, with the job saying so
-(`OutputRecorded` false, `IndexNotConverted`). It reads a bounded number of
-records a tick and keeps what it has read, so a long log takes several
-ticks. An old fold with no record that can be believed has no run anywhere;
+(`OutputRecorded` false, `IndexNotConverted`). The queue reads a bounded
+number of records a tick and keeps what it has read, so a long log takes
+several ticks. A fold that already names its run is left as it is. An old fold with no record that can be believed has no run anywhere;
 a finished pod of that unit with that changeset is then folded and
 reported, once, since nothing says whether it is that fold's run or a later
 one. Nodes sign task records unless started without an issuer, so that is a

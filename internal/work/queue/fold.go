@@ -143,7 +143,7 @@ var errIndexNotConverted = errors.New("the index from before the upgrade is not 
 //
 // What was found wrong with a record is returned in says, for the job's
 // conflicts; a record that is simply not there says nothing.
-func (o *output) loadIndex(ctx context.Context, st *storeurl.Sharded, id, job string, roots *x509.CertPool, read map[string]recordRun) (says []string, err error) {
+func (o *output) loadIndex(ctx context.Context, st *storeurl.Sharded, id, job string, roots *x509.CertPool, read map[string]recordRun, asked *int) (says []string, err error) {
 	pid, err := c4.Parse(id)
 	if err != nil {
 		return nil, err
@@ -156,28 +156,26 @@ func (o *output) loadIndex(ctx context.Context, st *storeurl.Sharded, id, job st
 	if err := json.Unmarshal(data, &ix); err != nil {
 		return nil, err
 	}
-	// An index with no version in which some fold names its run was
-	// written by the first version that named them: its folds with no run
-	// are reused computations, by construction, and it needs its version
-	// and nothing else.
-	convert := ix.Version < indexVersion
-	for _, f := range ix.Folds {
-		convert = convert && f.Run == ""
-	}
-	if convert {
-		asked := 0
+	// Every fold with no run is settled, whatever the others have: an old
+	// index a run-naming manager later added to has both kinds.
+	if ix.Version < indexVersion {
 		for i := range ix.Folds {
 			f := &ix.Folds[i]
+			if f.Run != "" {
+				continue
+			}
 			// Kept by the fold, not by the record alone: two folds can
 			// name one record (a unit's run, and a reuse of it), and what
 			// the record says differs for each.
 			key := fmt.Sprintf("%d %s %s", f.Unit, f.Changeset, f.Record)
 			r, ok := read[key]
 			if !ok {
-				if asked == maxRecordReadsPerTick {
-					return nil, fmt.Errorf("%w: %d of its %d folds' task records read so far", errIndexNotConverted, i, len(ix.Folds))
+				if asked != nil && *asked >= maxRecordReadsPerTick {
+					return nil, fmt.Errorf("%w: %d of its %d folds settled so far", errIndexNotConverted, i, len(ix.Folds))
 				}
-				asked++
+				if asked != nil {
+					*asked++
+				}
 				if r, err = runOfRecord(st, roots, job, f); err != nil {
 					return nil, fmt.Errorf("%w: the task record of unit %d's fold: %v", errIndexNotConverted, f.Unit, err)
 				}
@@ -211,8 +209,10 @@ func (o *output) loadIndex(ctx context.Context, st *storeurl.Sharded, id, job st
 }
 
 // maxRecordReadsPerTick bounds the store reads one tick spends converting
-// an index. What was read is kept (loadOutput), so a long log is converted
-// over several ticks, and still saved only when every fold is settled.
+// old indexes, over all its jobs and however many folds ask (the count is
+// the queue's, reset each tick). What was read is kept (loadOutput), so a
+// long log is converted over several ticks, and still saved only when
+// every fold is settled.
 const maxRecordReadsPerTick = 64
 
 // recordRun is what a fold's task record says of its run.
@@ -235,7 +235,10 @@ type recordRun struct {
 // signer are verified. Without roots it is believed as far as the index
 // that names it, which is not signed either. A good record of another
 // unit, or of another job, is a reused computation's: the fold was made
-// from that earlier run's record and has no run of its own.
+// from that earlier run's record and has no run of its own. A record that
+// names no job or unit (the node could no longer see the pod when it
+// signed) is taken as the fold's own: the other reading would fold every
+// such pod again.
 func runOfRecord(st *storeurl.Sharded, roots *x509.CertPool, job string, f *Fold) (recordRun, error) {
 	wrong := func(format string, args ...any) (recordRun, error) {
 		return recordRun{why: fmt.Sprintf(format, args...)}, nil
@@ -591,7 +594,7 @@ func (q *Queue) loadOutput(ctx context.Context, st *storeurl.Sharded, v *view) e
 		if m.outRuns == nil {
 			m.outRuns = map[string]recordRun{}
 		}
-		says, err := m.out.loadIndex(ctx, st, m.outIndex, v.key, q.Roots, m.outRuns)
+		says, err := m.out.loadIndex(ctx, st, m.outIndex, v.key, q.Roots, m.outRuns, &q.recordReads)
 		if err != nil {
 			return err
 		}

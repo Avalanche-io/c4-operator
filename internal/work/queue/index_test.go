@@ -189,7 +189,7 @@ func TestAnIndexFromBeforeRunsTakesThemFromItsRecords(t *testing.T) {
 			old := storeOld(t, st, o)
 
 			re := restored(t, st, o)
-			says, err := re.loadIndex(ctx, st, old, "job", roots, map[string]recordRun{})
+			says, err := re.loadIndex(ctx, st, old, "job", roots, map[string]recordRun{}, nil)
 			if err != nil || len(says) != 0 {
 				t.Fatalf("loading the old index: %v, said %v", err, says)
 			}
@@ -237,7 +237,7 @@ func TestAnIndexFromBeforeRunsTakesThemFromItsRecords(t *testing.T) {
 				t.Fatal(err)
 			}
 			again := restored(t, st, re)
-			if says, err := again.loadIndex(ctx, st, re.index.String(), "job", roots, map[string]recordRun{}); err != nil || len(says) != 0 || again.dirty || again.index != re.index {
+			if says, err := again.loadIndex(ctx, st, re.index.String(), "job", roots, map[string]recordRun{}, nil); err != nil || len(says) != 0 || again.dirty || again.index != re.index {
 				t.Fatalf("an index in the new form was converted again: %v, %v, dirty %v", err, says, again.dirty)
 			}
 		})
@@ -287,7 +287,7 @@ func TestAnOldFoldWithNoRecordToSayIsFoldedAndReported(t *testing.T) {
 				func(cs string) string { return rs.record(t, st, "pod-b", cs) })
 			old := storeOld(t, st, o)
 			re := restored(t, st, o)
-			says, err := re.loadIndex(ctx, st, old, "job", rs.roots, map[string]recordRun{})
+			says, err := re.loadIndex(ctx, st, old, "job", rs.roots, map[string]recordRun{}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -387,7 +387,7 @@ func TestAnIndexIsConvertedWholeOrNotAtAll(t *testing.T) {
 		t.Fatal(err)
 	}
 	re := restored(t, st, o)
-	says, err := re.loadIndex(ctx, st, old, "job", rs.roots, map[string]recordRun{})
+	says, err := re.loadIndex(ctx, st, old, "job", rs.roots, map[string]recordRun{}, nil)
 	if !errors.Is(err, errIndexNotConverted) || len(says) != 0 {
 		t.Fatalf("with a record that cannot be read: %v, said %v", err, says)
 	}
@@ -428,7 +428,7 @@ func TestAnIndexIsConvertedWholeOrNotAtAll(t *testing.T) {
 	// A manager that starts over from the old index converts it to the
 	// same index, byte for byte.
 	re = restored(t, st, o)
-	if _, err := re.loadIndex(ctx, st, old, "ns/job", rs.roots, map[string]recordRun{}); err != nil || re.index != first {
+	if _, err := re.loadIndex(ctx, st, old, "ns/job", rs.roots, map[string]recordRun{}, nil); err != nil || re.index != first {
 		t.Fatalf("converted again: %v, index %s, was %s", err, re.index, first)
 	}
 
@@ -446,7 +446,7 @@ func TestAnIndexIsConvertedWholeOrNotAtAll(t *testing.T) {
 		os.Chmod(d, 0o555)
 	}
 	re = restored(t, st, o)
-	_, err = re.loadIndex(ctx, st, old, "another-job", rs.roots, map[string]recordRun{})
+	_, err = re.loadIndex(ctx, st, old, "another-job", rs.roots, map[string]recordRun{}, nil)
 	for _, d := range dirs {
 		os.Chmod(d, 0o755)
 	}
@@ -477,7 +477,7 @@ func TestAnIndexInTheNewFormIsNotConverted(t *testing.T) {
 		t.Fatalf("a saved index has no version: %s", data)
 	}
 	re := restored(t, st, o)
-	if says, err := re.loadIndex(ctx, st, o.index.String(), "job", rs.roots, map[string]recordRun{}); err != nil || len(says) != 0 {
+	if says, err := re.loadIndex(ctx, st, o.index.String(), "job", rs.roots, map[string]recordRun{}, nil); err != nil || len(says) != 0 {
 		t.Fatal(err, says)
 	}
 	if len(re.folds) != 1 || re.folds[0].Run != "" || re.folds[0].BeforeRuns || re.dirty || re.index != o.index {
@@ -528,28 +528,39 @@ func TestAReusedFoldInAnOldIndexKeepsNoRun(t *testing.T) {
 	}
 }
 
-// An index written by the first version that named runs has them on its
-// pods' folds and no version. It gets its version and nothing else: no
-// record is read, and a reused computation's fold keeps no run and no mark.
-func TestAnIndexWithRunsAndNoVersionGetsOnlyItsVersion(t *testing.T) {
+// An index with no version can hold both kinds of fold: an old manager's,
+// with no run, and those a run-naming manager added before the index had a
+// version. Every fold with no run is settled from its record, and one that
+// has a run is left alone and its record not read: the old pod fold gets
+// its run, and a reused computation's fold (its record names another unit)
+// keeps none.
+func TestAnIndexWithSomeRunsAndNoVersion(t *testing.T) {
 	ctx := context.Background()
 	st, _ := foldStore(t)
 	q := &Queue{}
+	rs := newRecordSigner(t)
 	in := inputView(t, st, map[string]string{"in.txt": "input"})
-	cs := unitChangeset(t, st, in, map[string]string{"f.txt": "f"})
+	csA := unitChangeset(t, st, in, map[string]string{"f.txt": "from A"})
+	csB := unitChangeset(t, st, in, map[string]string{"f.txt": "from B"})
 	gone := c4.Identify(strings.NewReader("a record the store does not hold")).String()
+	recA := rs.record(t, st, "pod-a", csA)
+	reuse := rs.recordOf(t, st, provenance.PredicateTask, provenance.Invocation{Namespace: "ns", Job: "job", Unit: "1", PodUID: "pod-b"}, csB)
 	o := newOutput()
-	folds := []Fold{{Unit: 0, Changeset: cs, Record: gone, Run: "pod-0"}, {Unit: 1, Changeset: cs, Record: gone}}
+	folds := []Fold{
+		{Unit: 0, Changeset: csA, Record: recA},               // the old manager's: pod-a, no run
+		{Unit: 1, Changeset: csB, Record: gone, Run: "pod-b"}, // named already; its record is not asked for
+		{Unit: 2, Changeset: csB, Record: reuse},              // a reuse of unit 1's run
+	}
 	for _, f := range folds {
 		if err := q.fold(ctx, st, o, f); err != nil {
 			t.Fatal(err)
 		}
 	}
-	// As that version stored it: the folds as they are, and no version.
+	// Stored as it stands: the folds, and no version.
 	b, err := json.Marshal(struct {
 		Job   string `json:"job"`
 		Folds []Fold `json:"folds"`
-	}{"job", o.folds})
+	}{"ns/job", o.folds})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -558,18 +569,24 @@ func TestAnIndexWithRunsAndNoVersionGetsOnlyItsVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	re := restored(t, st, o)
-	read := map[string]recordRun{}
-	says, err := re.loadIndex(ctx, st, id.String(), "job", nil, read)
-	if err != nil || len(says) != 0 || len(read) != 0 {
-		t.Fatalf("%v, said %v, %d records read", err, says, len(read))
+	read, asked := map[string]recordRun{}, 0
+	says, err := re.loadIndex(ctx, st, id.String(), "ns/job", rs.roots, read, &asked)
+	if err != nil || len(says) != 0 || asked != 2 {
+		t.Fatalf("%v, said %v, %d records asked for (want the two folds with no run)", err, says, asked)
 	}
-	if fmt.Sprint(re.folds) != fmt.Sprint(folds) || re.dirty || re.index == id {
-		t.Fatalf("the folds were touched, or the version not saved: %+v, dirty %v", re.folds, re.dirty)
+	var got []string
+	for _, f := range re.folds {
+		got = append(got, fmt.Sprintf("%d:%s:%v", f.Unit, f.Run, f.BeforeRuns))
 	}
-	// The reused unit's own first pod is a fold like any other, and
-	// nothing is said of an upgrade.
-	if err := q.fold(ctx, st, re, Fold{Unit: 1, Changeset: cs, Run: "pod-1"}); err != nil || len(re.folds) != 3 || len(re.conflicts) != 0 {
-		t.Fatalf("%v, %d folds, conflicts %q", err, len(re.folds), re.conflicts)
+	if want := "[0:pod-a:false 1:pod-b:false 2::false]"; fmt.Sprint(got) != want || re.dirty || re.index == id {
+		t.Fatalf("the folds are %v, want %s; dirty %v", got, want, re.dirty)
+	}
+	// Pod A, still listed, is not folded again over B's write.
+	if err := q.fold(ctx, st, re, Fold{Unit: 0, Changeset: csA, Record: recA, Run: "pod-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if files := outputFilesOf(t, st, re.view); files["f.txt"] != idOf("from B") || len(re.folds) != 3 || len(re.conflicts) != 0 {
+		t.Fatalf("pod A was folded again: %v, %d folds, conflicts %q", files, len(re.folds), re.conflicts)
 	}
 }
 
@@ -674,14 +691,19 @@ func TestALongIndexIsConvertedOverSeveralTicks(t *testing.T) {
 	m := &jobMem{out: newOutput(), outLoad: o.id.String(), outView: o.view.String(), outIndex: old, superseded: map[int]bool{0: true}}
 	q.Roots = rs.roots
 	for tick := 1; ; tick++ {
+		q.recordReads = 0 // as each tick begins
 		v := &view{key: "ns/job", project: "show", mem: m}
+		// However many folds of the tick ask, the tick reads its bound.
+		if tick == 1 && (q.foldChangeset(ctx, v, Fold{Unit: 1, Changeset: o.folds[1].Changeset, Run: "pod-001"}) || len(m.outRuns) != maxRecordReadsPerTick) {
+			t.Fatalf("a fold in the first tick: %d records kept", len(m.outRuns))
+		}
 		if q.refoldOutput(ctx, v) {
 			if tick != 3 {
 				t.Fatalf("converted in %d ticks, want 3", tick)
 			}
 			break
 		}
-		if v.foldReason != "IndexNotConverted" || !strings.Contains(v.foldWait, "read so far") || m.outIndex != old || len(m.out.folds) != 0 {
+		if v.foldReason != "IndexNotConverted" || !strings.Contains(v.foldWait, "settled so far") || m.outIndex != old || len(m.out.folds) != 0 {
 			t.Fatalf("tick %d: %q (%s), %d folds taken", tick, v.foldWait, v.foldReason, len(m.out.folds))
 		}
 		if len(m.outRuns) != tick*maxRecordReadsPerTick {

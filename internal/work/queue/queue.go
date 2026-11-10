@@ -70,15 +70,18 @@ type Queue struct {
 	// DefaultLeadIdleClose.
 	LeadIdleClose time.Duration
 
-	mu      sync.Mutex
-	folds   int
-	st      sched.State
-	jobs    map[types.UID]*jobMem
-	spentMu sync.Mutex
-	spent   map[string]float64 // burst dollars per project today
-	ledger  spendLedger        // its saved copy (burstledger.go)
-	day     int
-	last    time.Time
+	mu    sync.Mutex
+	folds int
+	// recordReads counts the task records read this tick to convert old
+	// indexes (fold.go, loadIndex), bounded by maxRecordReadsPerTick.
+	recordReads int
+	st          sched.State
+	jobs        map[types.UID]*jobMem
+	spentMu     sync.Mutex
+	spent       map[string]float64 // burst dollars per project today
+	ledger      spendLedger        // its saved copy (burstledger.go)
+	day         int
+	last        time.Time
 	// Loc is the farm's time zone, for the times in estimate messages.
 	Loc *time.Location
 	// Signer signs the queue's decisions and job records; nil signs none.
@@ -681,6 +684,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 		q.spentMu.Unlock()
 	}
 	q.folds = 0
+	q.recordReads = 0
 	now := q.Now()
 	if d := now.YearDay(); d != q.day {
 		q.spentMu.Lock()
