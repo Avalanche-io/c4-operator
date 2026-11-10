@@ -1884,8 +1884,11 @@ computed over the output, an ordinary changeset.
 Folds are kept in order and the later one stands. Where two units write one
 path differently the later fold's write is kept; where a fold removes a
 directory, or puts a file in its place, what another unit wrote under it
-goes with it. Both are reported in status, never merged silently and never
-refused.
+goes with it. Nothing is merged silently and nothing is refused: both are
+reported in the job's status, which shows the last eight. The report covers
+the folds made since the manager started, because who wrote each file is
+kept in memory and not stored; a conflict with a fold made before a restart
+is not seen, nor is a directory another unit made and left empty.
 
 A run of a unit is folded once. A unit's pod is deleted only after its fold
 is recorded, so a restart loses no fold, and it may see a finished pod

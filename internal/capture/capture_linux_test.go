@@ -312,7 +312,14 @@ func TestLayerObjectsAreSharedByInode(t *testing.T) {
 // changeset resolves to: the frames that are gone have to be stated as
 // gone. The test also logs what the overlay's upper holds for those
 // directories, since the changeset writer's fault here depends on the
-// outer directory being opaque and the inner one not.
+// outer directory being opaque and the inner one not. That is what a
+// kernel overlay leaves (CI, 2026-11-09, ext4 in a privileged container):
+//
+//	upper: shots/                            kind 1 opaque false
+//	upper: shots/sh010/                      kind 1 opaque true
+//	upper: shots/sh010/plates/               kind 1 opaque false
+//	upper: shots/sh010/plates/sh010.1002.exr kind 0 opaque false
+//	upper: shots/sh010/plates/sh010.2001.exr kind 0 opaque false
 func TestCaptureOfADirectoryMadeAgainInsideAReplacedOne(t *testing.T) {
 	privileged(t)
 	f := newFixture(t)

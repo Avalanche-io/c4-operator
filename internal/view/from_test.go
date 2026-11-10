@@ -493,9 +493,10 @@ func TestApplyPatchFromADirectoryWithNoChildrenListed(t *testing.T) {
 		patch   *c4m.Manifest
 		want    []string
 		dropped []string
+		refused bool
 	}{
 		{name: "by ID, where the target has no such directory", target: base.ID, patch: byID, want: []string{"d/b.txt", "keep.txt"}},
-		{name: "by ID, where the target holds another directory: it is replaced", target: other.ID, patch: byID, want: []string{"d/b.txt", "keep.txt"}, dropped: []string{"d/"}},
+		{name: "by ID, where the target holds another directory: refused, since neither reading is ruled", target: other.ID, patch: byID, refused: true},
 		{name: "by ID, where the target holds that directory already", target: whole.ID, patch: byID, want: []string{"d/b.txt", "keep.txt"}},
 		{name: "by ID, where the target holds a file of the name", target: isFile.ID, patch: byID, want: []string{"d/b.txt", "keep.txt"}, dropped: []string{"d"}},
 		{name: "with no ID, where the target has no such directory: an empty one", target: base.ID, patch: noID, want: []string{"keep.txt"}},
@@ -503,6 +504,12 @@ func TestApplyPatchFromADirectoryWithNoChildrenListed(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got, err := ApplyPatchFrom(ctx, c.target, base.ID, c.patch, src)
+			if c.refused {
+				if err == nil || !strings.Contains(err.Error(), "d/ is written by its C4 ID alone") {
+					t.Fatalf("it was not refused by name: %v, %v", got, err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -532,6 +539,29 @@ func TestApplyPatchFromADirectoryWithNoChildrenListed(t *testing.T) {
 		})
 	}
 
+	// Over its own base, a directory restated by ID alone: whatever the
+	// plain rule makes of it, the resolver makes the same, so a chain
+	// never verifies to one view and mounts as another.
+	for name, on := range map[string]c4.ID{"a base without the directory": base.ID, "a base holding another directory there": other.ID, "a base holding that directory": whole.ID} {
+		res, err := ApplyPatch(ctx, on, byID, src)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		storeRecords(t, ram, res)
+		cs, err := EncodeChangeset(on, byID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := FromBytes(cs, ram, Filter{})
+		if err != nil {
+			t.Fatalf("%s: the resolver: %v", name, err)
+		}
+		if r.View().ID != res.ID {
+			have, _ := filesOf(t, res.ID, src)
+			t.Errorf("%s: the plain rule gives %v (%s), the resolver gives %s", name, keys(have), res.ID, r.View().ID)
+		}
+	}
+
 	// The same entry with no ID, applied to its own base by the plain
 	// rule: the directory is in the result under its name.
 	plain, err := ApplyPatch(ctx, base.ID, noID, src)
@@ -551,4 +581,59 @@ func keys(m map[string]c4.ID) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// A directory line identical to its base's with an entry under it is the
+// directory deepened, not removed: the line is context for what follows. In
+// a view a directory whose children change has another C4 ID, so capture
+// never restates one unchanged; a patch from elsewhere may (a listing that
+// learns a directory's children after the directory).
+func TestADirectoryRestatedWithChildrenIsNotRemoved(t *testing.T) {
+	ctx := context.Background()
+	ram := store.NewRAM()
+	src := StoreRecords(ram)
+	putBytes(t, ram, EmptyID(), nil)
+	base, err := Apply(ctx, EmptyID(), []Edit{fileEdit("keep.txt", "keep"), fileEdit("d/a.txt", "a")}, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeRecords(t, ram, base)
+	// The base's own line for d/, then a new file under it.
+	added, err := Apply(ctx, base.ID, []Edit{fileEdit("d/b.txt", "b")}, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeRecords(t, ram, added)
+	ch, err := ReadChain(added.Changeset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listing, err := fetchRecord(ctx, src, base.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch := c4m.NewManifest()
+	for _, e := range listing {
+		if e.IsDir() {
+			patch.AddEntry(e)
+		}
+	}
+	for _, e := range ch.Sections[0].Patch.Entries {
+		if !e.IsDir() {
+			patch.AddEntry(e)
+		}
+	}
+	if len(patch.Entries) != 2 || !patch.Entries[0].IsDir() || patch.Entries[1].Depth != 1 {
+		t.Fatalf("the patch is not a directory line and one entry under it: %v", patch.Entries)
+	}
+	for name, target := range map[string]c4.ID{"over its own base": base.ID, "carried to a view that has the file already": added.ID} {
+		got, err := ApplyPatchFrom(ctx, target, base.ID, patch, src)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		storeRecords(t, ram, got)
+		if have, _ := filesOf(t, got.ID, src); got.ID != added.ID {
+			t.Errorf("%s: the view holds %v, want d/a.txt, d/b.txt and keep.txt", name, keys(have))
+		}
+	}
 }

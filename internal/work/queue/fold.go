@@ -276,7 +276,10 @@ func (q *Queue) fold(ctx context.Context, st *storeurl.Sharded, o *output, f Fol
 // taken reports, for the paths a fold by unit idx took out of the output
 // without naming them (view.Applied.Dropped), the ones other units wrote:
 // a file a directory replaced, and for a directory that was removed or
-// replaced, how many paths under it each other unit had written.
+// replaced, how many paths under it each other unit had written or removed
+// (the writers kept are of files, and a removal is kept like a write). It
+// knows only the folds made since this manager started, and nothing of a
+// directory another unit made and left empty.
 func (o *output) taken(idx int, dropped []string) []string {
 	var out []string
 	for _, d := range dropped {
@@ -298,7 +301,7 @@ func (o *output) taken(idx int, dropped []string) []string {
 		}
 		sort.Ints(units)
 		for _, w := range units {
-			out = append(out, fmt.Sprintf("%s removed by unit %d: unit %d wrote %d of the paths under it", d, idx, w, lost[w]))
+			out = append(out, fmt.Sprintf("%s removed by unit %d: unit %d wrote or removed %d of the paths under it", d, idx, w, lost[w]))
 		}
 	}
 	return out

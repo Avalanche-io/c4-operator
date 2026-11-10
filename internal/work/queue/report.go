@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -35,7 +36,14 @@ func (q *Queue) report(ctx context.Context, now time.Time, dec sched.Decisions, 
 	for i, v := range views {
 		if o := v.mem.out; o != nil && o.dirty && q.Stores != nil {
 			store, err := q.Stores(ctx, v.project)
-			if err == nil && store != nil {
+			switch {
+			case err != nil:
+			case store == nil:
+				// An output is only ever folded into a store, so no store
+				// now (the Project is gone, or not yet seen again) is a
+				// store that cannot take the index.
+				err = errors.New("the project has no store to save it in")
+			default:
 				err = o.saveIndex(ctx, store, v.key)
 			}
 			if err != nil {

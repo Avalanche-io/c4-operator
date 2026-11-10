@@ -259,13 +259,15 @@ func ApplyPatch(ctx context.Context, base c4.ID, patch *c4m.Manifest, src Record
 // The c4m library has the same operation, with the same name, on whole c4m
 // files. This is the form for a view loaded from records along the changed
 // paths, and it follows the library's rule that a name is one thing
-// whatever its kind. Three readings here are the ones proposed for the
-// library and not yet ruled on (2026-11-09), and are to follow the ruling:
-// a removal leaves a thing of the other kind that has taken the path since;
-// a directory written by its ID alone takes the place of the one the target
-// holds; and an empty directory written where the target holds a directory
-// says only that the directory exists, and leaves it as it is (a unit that
-// ran mkdir does not remove what another unit wrote there).
+// whatever its kind. Three questions about a patch carried to another view
+// are not yet ruled on (2026-11-09), and this is to follow the ruling. Two
+// are read here the way proposed for the library: a removal leaves a thing
+// of the other kind that has taken the path since; and an empty directory
+// written where the target holds a directory says only that the directory
+// exists, and leaves it as it is (a unit that ran mkdir does not remove
+// what another unit wrote there). The third is refused until it is ruled:
+// a directory written by its C4 ID alone where the target holds a different
+// directory. Capture never writes one.
 func ApplyPatchFrom(ctx context.Context, target, base c4.ID, patch *c4m.Manifest, src RecordSource) (*Applied, error) {
 	tt := &atree{ctx: ctx, src: src, root: &anode{base: target}}
 	tb := tt
@@ -385,15 +387,20 @@ func applyPatchFrom(tt, tb *atree, patch *c4m.Manifest) error {
 			// brings nothing the directory lacks: a directory made empty
 			// beside one that others have filled (two units both running
 			// mkdir -p) leaves what the others wrote.
+		case same:
+			// Restated by ID alone over its own base. The directory is left
+			// as it is, which is what this reader has always done and what
+			// the resolver's reader does (resolve.go): the two must agree
+			// on every changeset, or a chain would verify to one view and
+			// mount as another.
 		default:
-			// Written by ID alone where the tree holds another directory:
-			// the path now holds the listing the ID names, and what was
-			// there goes. That is so over the patch's own base too, which
-			// is what lets the changeset this writes for such a patch be
-			// read back by the plain rule. Capture never writes one (a
-			// changed directory is followed by its changes).
-			to.dirs[name] = &anode{name: name, base: pe.C4ID, entry: pe}
-			tt.dropped = append(tt.dropped, path+name)
+			// Written by ID alone where the target holds another directory.
+			// Whether that replaces what the target holds or leaves it is
+			// not ruled, and either would be done silently here: replacing
+			// takes what another unit wrote, leaving drops what this one
+			// wrote. Capture never writes such an entry (a changed directory
+			// is followed by its changes), so it is refused, and says so.
+			return fmt.Errorf("%s%s is written by its C4 ID alone, and the view the patch is applied to holds a different directory there: whether that replaces it is not decided, so the patch must list the directory's children", path, name)
 		}
 		stack = append(stack, name)
 	}

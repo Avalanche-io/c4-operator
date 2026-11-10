@@ -786,11 +786,11 @@ func TestFoldThatTakesAnotherUnitsWritesReportsThem(t *testing.T) {
 			first: map[string]string{"d/a.txt": "a", "d/sub/b.txt": "b", "e.txt": "e"}, dels: []string{"d/"},
 			second: map[string]string{"mine.txt": "mine"},
 			want:   map[string]string{"e.txt": "e", "mine.txt": "mine"}, gone: []string{"d/a.txt", "d/sub/b.txt", "d/in.txt"},
-			conflict: "d/ removed by unit 1: unit 0 wrote 2 of the paths under it"},
+			conflict: "d/ removed by unit 1: unit 0 wrote or removed 2 of the paths under it"},
 		{name: "a directory replaced by a file",
 			first: map[string]string{"d/a.txt": "a"}, second: map[string]string{"d": "now a file"},
 			want: map[string]string{"d": "now a file"}, gone: []string{"d/a.txt", "d/in.txt"},
-			conflict: "d/ removed by unit 1: unit 0 wrote 1 of the paths under it"},
+			conflict: "d/ removed by unit 1: unit 0 wrote or removed 1 of the paths under it"},
 		{name: "a file replaced by a directory",
 			first: map[string]string{"x": "a file"}, second: map[string]string{"x/y.txt": "y"},
 			want: map[string]string{"x/y.txt": "y"}, gone: []string{"x"},
@@ -1062,6 +1062,17 @@ func TestRestartDoesNotFoldAFinishedUnitAgain(t *testing.T) {
 // restart never finds a chain whose folds the log does not know. The log
 // names each fold's run by its pod.
 func TestStatusWaitsForTheFoldLogToBeSaved(t *testing.T) {
+	t.Run("the store answers with an error", func(t *testing.T) {
+		statusWaits(t, func() (*storeurl.Sharded, error) { return nil, errors.New("the store is away") }, "the store is away")
+	})
+	// What the manager's store function answers while a Project is not
+	// found: no store, and no error.
+	t.Run("there is no store", func(t *testing.T) {
+		statusWaits(t, func() (*storeurl.Sharded, error) { return nil, nil }, "no store")
+	})
+}
+
+func statusWaits(t *testing.T, refuse func() (*storeurl.Sharded, error), says string) {
 	ns, q, now, st := graphFarm(t)
 	ctx := context.Background()
 	if err := k8s.Create(ctx, job(ns, "bon", "graph", "cpu-"+ns, nil, now.Add(8*time.Hour))); err != nil {
@@ -1083,7 +1094,7 @@ func TestStatusWaitsForTheFoldLogToBeSaved(t *testing.T) {
 			f, more := frames.Next()
 			if strings.HasSuffix(f.Function, "(*Queue).report") {
 				refused++
-				return nil, errors.New("the store is away")
+				return refuse()
 			}
 			if !more {
 				break
@@ -1101,8 +1112,13 @@ func TestStatusWaitsForTheFoldLogToBeSaved(t *testing.T) {
 	}
 	// And it says why it waits, so a store that never takes the index is
 	// a condition someone can read and not a job that silently stands.
-	if c := meta.FindStatusCondition(held.Status.Conditions, ConditionOutputRecorded); c == nil || c.Status != metav1.ConditionFalse || !strings.Contains(c.Message, "the store is away") {
+	if c := meta.FindStatusCondition(held.Status.Conditions, ConditionOutputRecorded); c == nil || c.Status != metav1.ConditionFalse || !strings.Contains(c.Message, says) {
 		t.Fatalf("the waiting status does not say so: %+v", held.Status.Conditions)
+	}
+	// It is the last status with that added, not a new one: what else the
+	// status said is still said.
+	if c := meta.FindStatusCondition(held.Status.Conditions, "Planned"); c == nil || c.Status != metav1.ConditionTrue || held.Status.Phase == "" {
+		t.Fatalf("the waiting status lost what the last one said: phase %q, conditions %+v", held.Status.Phase, held.Status.Conditions)
 	}
 	if len(decode(held.Status.UnitStates["succeeded"])) != 1 {
 		t.Fatalf("the waiting status moved on without the output: units %v", held.Status.UnitStates)
@@ -1147,5 +1163,80 @@ func TestStatusWaitsForTheFoldLogToBeSaved(t *testing.T) {
 	}
 	if len(ix.Folds) != 1 || ix.Folds[0].Run != uid || ix.Folds[0].Unit != 1 {
 		t.Fatalf("the fold log is %+v, want one fold of unit 1 by pod %s", ix.Folds, uid)
+	}
+}
+
+// The index is not marked saved until it is: a save that fails leaves the
+// output dirty, so the next tick tries again and the status goes on waiting.
+func TestAFailedIndexSaveIsTriedAgain(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root writes to a read-only directory")
+	}
+	ctx := context.Background()
+	st, dir := foldStore(t)
+	q := &Queue{}
+	in := inputView(t, st, map[string]string{"in.txt": "input"})
+	o := newOutput()
+	if err := q.fold(ctx, st, o, Fold{Unit: 0, Changeset: unitChangeset(t, st, in, map[string]string{"a.txt": "a"}), Run: "pod-0"}); err != nil {
+		t.Fatal(err)
+	}
+	var dirs []string
+	filepath.Walk(dir, func(p string, fi os.FileInfo, err error) error {
+		if err == nil && fi.IsDir() {
+			dirs = append(dirs, p)
+		}
+		return nil
+	})
+	for _, d := range dirs {
+		os.Chmod(d, 0o555)
+	}
+	err := o.saveIndex(ctx, st, "job")
+	for _, d := range dirs {
+		os.Chmod(d, 0o755)
+	}
+	if err == nil {
+		t.Fatal("the index was saved in a read-only store")
+	}
+	if !o.dirty || !o.index.IsNil() {
+		t.Fatalf("after a failed save the output is marked saved: dirty %v, index %s", o.dirty, o.index)
+	}
+	if err := o.saveIndex(ctx, st, "job"); err != nil || o.dirty || o.index.IsNil() {
+		t.Fatalf("the save tried again: %v, dirty %v", err, o.dirty)
+	}
+}
+
+// Rebuilding the output without its superseded units keeps each remaining
+// fold's run in the log, so a run already folded is still not folded again.
+func TestRefoldKeepsTheRuns(t *testing.T) {
+	ctx := context.Background()
+	st, _ := foldStore(t)
+	q := &Queue{Stores: func(context.Context, string) (*storeurl.Sharded, error) { return st, nil }}
+	in := inputView(t, st, map[string]string{"in.txt": "input"})
+	m := &jobMem{out: newOutput(), superseded: map[int]bool{0: true}}
+	kept := Fold{Unit: 1, Changeset: unitChangeset(t, st, in, map[string]string{"out.txt": "from unit 1"}), Run: "pod-1"}
+	for _, f := range []Fold{{Unit: 0, Changeset: unitChangeset(t, st, in, map[string]string{"gone.txt": "superseded"}), Run: "pod-0"}, kept} {
+		if err := q.fold(ctx, st, m.out, f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !q.refoldOutput(ctx, &view{key: "ns/job", project: "show", mem: m}) {
+		t.Fatal("the refold asked to be tried again")
+	}
+	o := m.out
+	if len(o.folds) != 1 || o.folds[0] != kept {
+		t.Fatalf("the rebuilt log is %+v, want the one fold kept, with its run", o.folds)
+	}
+	if files := outputFilesOf(t, st, o.view); len(files) != 2 || files["out.txt"] != idOf("from unit 1") {
+		t.Fatalf("the rebuilt output holds %v", files)
+	}
+	// Another unit writes the path; the kept run, seen again, stays out.
+	if err := q.fold(ctx, st, o, Fold{Unit: 2, Changeset: unitChangeset(t, st, in, map[string]string{"out.txt": "from unit 2"}), Run: "pod-2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.fold(ctx, st, o, kept); err != nil {
+		t.Fatal(err)
+	}
+	if files := outputFilesOf(t, st, o.view); files["out.txt"] != idOf("from unit 2") || len(o.folds) != 2 {
+		t.Fatalf("a run kept through a refold was folded again: %v, %d folds", files, len(o.folds))
 	}
 }
