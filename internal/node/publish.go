@@ -46,7 +46,8 @@ type Volume struct {
 	Published       time.Time `json:"published"`
 	// Detached says the volume's mount was busy when it was unmounted and
 	// was only detached: something may still write its upper, so capture
-	// copies its files and never links them. Kept across kubelet's retries.
+	// copies its files and never links them. Kept across kubelet's retries,
+	// and across a publish of the same volume again (upperMayBeWritten).
 	Detached bool `json:"detached,omitempty"`
 }
 
@@ -194,6 +195,10 @@ func (d *Daemon) Publish(ctx context.Context, req PublishRequest) (err error) {
 		Layers: st.Layers, ReadOnly: req.ReadOnly, Class: class, Published: time.Now(),
 		Capture: !req.ReadOnly && req.Context[c4v1.VolumeAttrCapture] != "false",
 	}
+	// Published again, the volume takes over the upper its earlier record
+	// names, and this record replaces that one. What the earlier one knew
+	// about the upper is carried over, or it would be lost here.
+	vol.Detached = d.upperMayBeWritten(vol.ID, vol.Partition)
 	var upper, work string
 	if !req.ReadOnly {
 		upper, work = d.volumeDirs(pc.part, req.VolumeID)
@@ -412,6 +417,31 @@ func (d *Daemon) unmountBusy(target string) (clean, busy bool, err error) {
 		return d.unmount(target)
 	}
 	return overlay.UnmountBusy(target)
+}
+
+// upperMayBeWritten reports whether the upper a volume is about to be
+// published on may still be written by an earlier mount of it: the record
+// the new one replaces is marked detached and names the same upper (the
+// same volume in the same partition), or is there and cannot be read, in
+// which case nothing is known and the upper is not taken for dead.
+//
+// Publish mounts all the same and keeps the mark. It does not refuse: the
+// daemon cannot see when a detached mount finally goes, so a refusal would
+// hold the pod on a condition that may never be seen to clear, and what
+// the mark costs is a copy at capture instead of a link. Whether a second
+// overlay may be mounted on an upper still in use is the kernel's to say,
+// and its refusal is returned as it is. The mark then stays for the life
+// of the record: unmountVolume clears only a mark it set itself, since the
+// earlier mount may outlive this one.
+func (d *Daemon) upperMayBeWritten(id, partition string) bool {
+	prev, err := d.loadVolume(id)
+	if errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	if err != nil {
+		return true
+	}
+	return prev.Detached && prev.Partition == partition
 }
 
 // consumable reports whether a capture may link the volume's upper into

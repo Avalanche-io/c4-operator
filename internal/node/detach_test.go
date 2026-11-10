@@ -174,3 +174,71 @@ func TestOverlappingUnmountsKeepTheMark(t *testing.T) {
 		t.Error("consumable after the second order")
 	}
 }
+
+// A volume is published again while its record says the upper may still
+// be written (its earlier mount was busy and only detached). The new
+// record replaces the old one, and must not lose that.
+func TestAVolumePublishedAgainKeepsTheDetachedMark(t *testing.T) {
+	record := func(t *testing.T, vol *Volume) *Daemon {
+		t.Helper()
+		d := &Daemon{Cfg: Config{Root: t.TempDir()}, unmount: (&unmounts{answers: []unmountAnswer{unmountedOutright}}).do}
+		if err := os.MkdirAll(d.volDir(), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if vol != nil {
+			if err := d.saveVolume(vol); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return d
+	}
+	for _, c := range []struct {
+		name string
+		prev *Volume
+		want bool
+	}{
+		{name: "no earlier record", want: false},
+		{name: "an earlier record, unmounted outright", prev: &Volume{ID: "vol-1", Partition: "p1"}, want: false},
+		{name: "an earlier record, detached", prev: &Volume{ID: "vol-1", Partition: "p1", Detached: true}, want: true},
+		{name: "detached, but its upper is in another partition", prev: &Volume{ID: "vol-1", Partition: "p0", Detached: true}, want: false},
+		{name: "another volume's record is detached", prev: &Volume{ID: "vol-2", Partition: "p1", Detached: true}, want: false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := record(t, c.prev)
+			if got := d.upperMayBeWritten("vol-1", "p1"); got != c.want {
+				t.Errorf("the upper may still be written: %v, want %v", got, c.want)
+			}
+		})
+	}
+
+	t.Run("an earlier record that cannot be read", func(t *testing.T) {
+		d := record(t, nil)
+		if err := os.WriteFile(d.volumePath("vol-1"), []byte("{not a record"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if !d.upperMayBeWritten("vol-1", "p1") {
+			t.Error("an unreadable record was taken to mean the upper is dead")
+		}
+	})
+
+	// What Publish then does with it: the new record carries the mark, and
+	// the mark outlives this mount's own clean unmount, because the earlier
+	// mount may outlive it too. The capture is told to copy.
+	t.Run("the mark stays through the new mount's clean unmount", func(t *testing.T) {
+		d := record(t, &Volume{ID: "vol-1", Partition: "p1", Detached: true})
+		vol := &Volume{ID: "vol-1", Partition: "p1", Target: "/var/lib/kubelet/pods/x/volumes/vol-1/mount", Capture: true}
+		vol.Detached = d.upperMayBeWritten(vol.ID, vol.Partition)
+		if err := d.saveVolume(vol); err != nil {
+			t.Fatal(err)
+		}
+		if saved(t, d).consumable() {
+			t.Fatal("the record written by a second publish lost the mark")
+		}
+		if err := d.unmountVolume(vol); err != nil {
+			t.Fatal(err)
+		}
+		if vol.consumable() || saved(t, d).consumable() {
+			t.Error("a clean unmount of the second mount cleared a mark the first mount set")
+		}
+	})
+}
