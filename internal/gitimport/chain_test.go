@@ -389,14 +389,20 @@ func TestAChainFileIsSyncedBeforeItTakesItsName(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := []byte(h.views[0].String() + "\n")
-	if len(syncs) != 1 || !bytes.Equal(syncs[0].synced, base) || len(syncs[0].named) != 0 {
-		t.Fatalf("the re-base: %d syncs, %q synced while the name held %q", len(syncs), syncs[0].synced, syncs[0].named)
+	if len(syncs) != 1 {
+		t.Fatalf("the re-base made %d syncs, want one", len(syncs))
+	}
+	if !bytes.Equal(syncs[0].synced, base) || len(syncs[0].named) != 0 {
+		t.Fatalf("the re-base: %q synced while the name held %q", syncs[0].synced, syncs[0].named)
 	}
 	if err := ch.Append(h.changesets[0], h.views[0], h.views[1]); err != nil {
 		t.Fatal(err)
 	}
-	if len(syncs) != 2 || !bytes.Equal(syncs[1].synced, h.changesets[0]) || !bytes.Equal(syncs[1].named, base) {
-		t.Fatalf("the first changeset: %d syncs; the name held %q when the new bytes were synced", len(syncs), syncs[1].named)
+	if len(syncs) != 2 {
+		t.Fatalf("the first changeset made %d syncs, want one", len(syncs)-1)
+	}
+	if !bytes.Equal(syncs[1].synced, h.changesets[0]) || !bytes.Equal(syncs[1].named, base) {
+		t.Fatalf("the first changeset: the name held %q when the new bytes were synced", syncs[1].named)
 	}
 	if data, _ := os.ReadFile(p); !bytes.Equal(data, h.changesets[0]) {
 		t.Fatalf("after the first changeset the file holds %q", data)
