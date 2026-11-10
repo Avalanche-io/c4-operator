@@ -124,9 +124,14 @@ func withoutEstimate(st c4v1.WorkJobStatus) c4v1.WorkJobStatus {
 	return st
 }
 
-// ConditionOutputRecorded is on a job, False, while its output has been
-// folded and the provenance index holding the fold log could not be saved.
-// The job's status is then the last one written, and waits.
+// ConditionOutputRecorded is on a job, False, while its output is behind
+// what its units have done, with the reason:
+//   - IndexNotSaved: the output is folded and the provenance index holding
+//     the fold log could not be saved. The job's status is then the last
+//     one written, and waits.
+//   - FoldFailed: a finished unit's changes could not be folded in, and the
+//     fold is tried again every tick. The message carries the error, which
+//     is how a fold that can never succeed is told from one that is late.
 const ConditionOutputRecorded = "OutputRecorded"
 
 // status computes a job's status from the queue's memory and the latest
@@ -147,6 +152,16 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 		return st
 	}
 	meta.RemoveStatusCondition(&st.Conditions, ConditionOutputRecorded)
+	if v.foldWait != "" {
+		// A finished unit's changes could not be folded into the output
+		// (queue.go, foldChangeset). The rest of the status goes on as
+		// usual; this says why that unit stays finishing. It is written
+		// with the change that comes with it (the unit goes to finishing,
+		// or the output moves), or at the next status otherwise.
+		meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: ConditionOutputRecorded, Status: metav1.ConditionFalse,
+			Reason: "FoldFailed", ObservedGeneration: v.job.Generation,
+			Message: "a finished unit's changes are not in the job's output, and the fold is tried again every tick: " + v.foldWait})
+	}
 	if v.planWait != "" && m.plan == nil {
 		// The unit table waits on the store (graph.go): keep the last
 		// status, and say so.

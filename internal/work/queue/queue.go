@@ -643,6 +643,9 @@ type view struct {
 	// folded and the index holding the fold log could not be saved
 	// (report.go).
 	outWait string
+	// foldWait is why a finished unit's changes are not in the job's
+	// output this tick: the fold failed, and is tried again next tick.
+	foldWait string
 	// locked are units waiting for a holder of what they claim (holds.go)
 	// or for a gate, and gates the job's units at gates (gates.go).
 	locked map[int]lockInfo
@@ -2414,22 +2417,30 @@ func (q *Queue) foldChangeset(ctx context.Context, v *view, f Fold) bool {
 		return false
 	}
 	q.folds++
+	// A fold that fails is tried again every tick, for as long as it
+	// fails. One that can never succeed (a changeset the fold refuses)
+	// would otherwise show only as a unit that stays finishing, so the
+	// reason goes to the job's status (report.go, OutputRecorded).
+	failed := func(what string, err error) bool {
+		q.Log.Error(err, what, "job", v.key, "unit", f.Unit)
+		if v.foldWait == "" {
+			v.foldWait = fmt.Sprintf("unit %d, %s: %v", f.Unit, what, err)
+		}
+		return false
+	}
 	st, err := q.Stores(ctx, v.project)
 	if err != nil {
-		q.Log.Error(err, "open store for fold", "job", v.key)
-		return false
+		return failed("open store for fold", err)
 	}
 	if st == nil {
 		// A namespace without a Project has no store to fold into.
 		return true
 	}
 	if err := q.loadOutput(st, v); err != nil {
-		q.Log.Error(err, "load output", "job", v.key)
-		return false
+		return failed("load output", err)
 	}
 	if err := q.fold(ctx, st, m.out, f); err != nil {
-		q.Log.Error(err, "fold", "job", v.key, "unit", f.Unit)
-		return false
+		return failed("fold", err)
 	}
 	return true
 }

@@ -1893,8 +1893,13 @@ is not seen, nor is a directory another unit made and left empty.
 One changeset is refused: one that writes a directory by its C4 ID alone
 where a different directory already is. Whether that replaces what is there
 is not yet ruled, capture never writes it, and the fold will not choose
-silently. Such a fold fails on every tick and is logged; the unit stays
-finishing, and nothing in the job's status says why.
+silently. Such a fold fails on every tick, and the unit stays finishing.
+
+A fold that fails, for that reason or because the store is away, is tried
+again every tick, and the job's status says so for as long as it does:
+condition `OutputRecorded` false, reason `FoldFailed`, with the unit and the
+error. That is how a fold that can never succeed is told from one that is
+only late.
 
 A run of a unit is folded once. A unit's pod is deleted only after its fold
 is recorded, so a restart loses no fold, and it may see a finished pod
@@ -1905,7 +1910,7 @@ index, names each fold's run (its pod), and a run in the log is not folded
 again; a unit that runs again is another run, and its write is the later
 one. The status names the chain and that index together or not at all: when
 the index cannot be saved, the job's status stays as last written, with the
-condition `OutputRecorded` false and the reason. That is tried again every
+condition `OutputRecorded` false and the reason `IndexNotSaved`. That is tried again every
 tick for as long as the store refuses, and no finished pod is deleted
 meanwhile.
 

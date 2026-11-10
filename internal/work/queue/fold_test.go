@@ -1302,3 +1302,101 @@ func TestFoldRefusesADirectoryByIDAloneOverAnother(t *testing.T) {
 		t.Fatalf("a refused fold moved the output: count %d, %d folds, conflicts %v", o.count, len(o.folds), o.conflicts)
 	}
 }
+
+// A fold that can never succeed is seen where an operator looks: the job's
+// status says a finished unit's changes are not in its output, and why,
+// for as long as that is so. Here the changeset is the one the fold
+// refuses. The unit's pod stays and the other unit's work stays in the
+// output. A fold that is only late says so too, and stops when it is made.
+func TestAFoldThatFailsIsACondition(t *testing.T) {
+	ns, q, now, st := graphFarm(t)
+	ctx := context.Background()
+	if err := k8s.Create(ctx, job(ns, "bon", "graph", "cpu-"+ns, nil, now.Add(8*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	doc := putDoc(t, st, `{"version": 1, "units": [{"name": "a1"}, {"name": "b"}]}`)
+	finishUnit(t, now, ns, "bon", 0, map[string]string{c4v1.AnnotationOutputExpand: doc})
+	tick(t, q)
+
+	// Unit 1 writes d/a.txt. Unit 2's changeset names d/ by the C4 ID of
+	// another listing and lists nothing under it.
+	wrote := unitChangeset(t, st, c4view.EmptyID(), map[string]string{"d/a.txt": "a"})
+	id, _ := c4.Parse(unitChangeset(t, st, c4view.EmptyID(), map[string]string{"d/b.txt": "b"}))
+	_, ch := readChain(t, st, id)
+	m := c4m.NewManifest()
+	for _, e := range ch.Sections[0].Patch.Entries {
+		if e.IsDir() {
+			m.AddEntry(e)
+		}
+	}
+	cs, err := c4view.EncodeChangeset(c4view.EmptyID(), m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID, err := st.PutBytes(ctx, cs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := string(podOfUnit(t, ns, "bon", 2).UID)
+	finishUnit(t, now, ns, "bon", 1, map[string]string{c4v1.AnnotationOutputChangeset: wrote})
+
+	// First a fold that is only late: the store is away for one tick. The
+	// status says so, and stops saying so once the fold is made.
+	away := true
+	q.Stores = func(context.Context, string) (*storeurl.Sharded, error) {
+		pc := make([]uintptr, 32)
+		frames := runtime.CallersFrames(pc[:runtime.Callers(2, pc)])
+		for away {
+			f, more := frames.Next()
+			if strings.HasSuffix(f.Function, "(*Queue).foldChangeset") {
+				return nil, errors.New("the store is away")
+			}
+			if !more {
+				break
+			}
+		}
+		return st, nil
+	}
+	tick(t, q)
+	late := get(t, ns, "bon")
+	if c := meta.FindStatusCondition(late.Status.Conditions, ConditionOutputRecorded); c == nil || c.Reason != "FoldFailed" || !strings.Contains(c.Message, "unit 1") || !strings.Contains(c.Message, "the store is away") || late.Status.Output != nil {
+		t.Fatalf("with the store away for the fold: output %+v, conditions %+v", late.Status.Output, late.Status.Conditions)
+	}
+	away = false
+	tick(t, q)
+	if got := get(t, ns, "bon"); got.Status.Output == nil || got.Status.Output.Changesets != 1 || meta.FindStatusCondition(got.Status.Conditions, ConditionOutputRecorded) != nil {
+		t.Fatalf("once the fold is made: output %+v, conditions %+v", got.Status.Output, got.Status.Conditions)
+	}
+
+	finishUnit(t, now, ns, "bon", 2, map[string]string{c4v1.AnnotationOutputChangeset: byID.String()})
+	for range 3 {
+		tick(t, q)
+		got := get(t, ns, "bon")
+		c := meta.FindStatusCondition(got.Status.Conditions, ConditionOutputRecorded)
+		if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "FoldFailed" || !strings.Contains(c.Message, "unit 2") || !strings.Contains(c.Message, "by its C4 ID alone") {
+			t.Fatalf("the status does not say the fold fails, or why: %+v", got.Status.Conditions)
+		}
+		if got.Status.Output == nil || got.Status.Output.Changesets != 1 {
+			t.Fatalf("the output moved, or lost the other unit's fold: %+v", got.Status.Output)
+		}
+		out, _ := c4.Parse(got.Status.Output.View)
+		if files := outputFilesOf(t, st, out); len(files) != 1 || files["d/a.txt"] != idOf("a") {
+			t.Fatalf("the output holds %v", files)
+		}
+		if len(decode(got.Status.UnitStates["succeeded"])) != 2 {
+			t.Fatalf("the unit whose fold fails is recorded as done: %v", got.Status.UnitStates)
+		}
+	}
+	var pods corev1.PodList
+	if err := k8s.List(ctx, &pods, client.InNamespace(ns), client.MatchingLabels{c4v1.LabelJob: "bon"}); err != nil {
+		t.Fatal(err)
+	}
+	kept := false
+	for _, p := range pods.Items {
+		kept = kept || (string(p.UID) == refused && p.DeletionTimestamp == nil)
+	}
+	if !kept {
+		t.Fatal("the pod whose changes are not folded was deleted")
+	}
+}

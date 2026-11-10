@@ -171,7 +171,8 @@ func (o *output) load(st *storeurl.Sharded, chainID, viewID string) error {
 // One thing is refused: a changeset that writes a directory by its C4 ID
 // alone where a different directory already is, whose meaning is not ruled
 // (view.ApplyPatchFrom). Capture never writes one. Such a fold fails every
-// tick, is logged, and leaves the unit finishing.
+// tick and leaves the unit finishing, and the job's status says why
+// (foldChangeset).
 //
 // A run is folded once. Its pod can be seen again (after a restart the
 // queue has no memory, and a finished pod may still be there), and folding
