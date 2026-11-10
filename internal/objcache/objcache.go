@@ -2,10 +2,17 @@
 // regional replica: one directory of objects per partition (a project in
 // Strict isolation, a sharing group in Shared), under one byte budget.
 //
-// Objects are named by C4 ID and are never rehashed: bytes are verified
-// once, where they enter the system. An object is written to a temporary
-// file in the partition and renamed into place when complete, so a
-// reader sees a whole object or none. On a node, layers hardlink objects;
+// Objects are named by C4 ID and are never rehashed here: whoever fills
+// the cache checks the bytes against the ID before committing them. An
+// object is written to a temporary file in the partition, synced, and only
+// then given its name, so a reader sees a whole object or none, and after
+// a crash a name is never left over bytes that did not reach the disk.
+// That holds for a crash of the process or of the operating system on
+// every platform, and for a power cut on Linux, where the sync flushes the
+// device. On macOS the sync is fsync(2), not a full flush: after a power
+// cut on a drive that reorders its writes, the cache can hold a wrong
+// object under a C4 ID, and nothing here finds it. A lost name only loses
+// a cache entry, so directories are not synced. On a node, layers hardlink objects;
 // an object's link count above one means a layer uses it, and such an
 // object is never evicted until the layer goes.
 package objcache
@@ -264,12 +271,34 @@ func (c *Cache) Commit(tmp string, id c4.ID) (err error) {
 	if err := os.Chtimes(tmp, time.Now(), time.Unix(0, 0)); err != nil {
 		return err
 	}
+	// The bytes first, then the name.
+	if err := synced(tmp); err != nil {
+		return err
+	}
 	if err := os.Rename(tmp, final); err != nil {
 		return err
 	}
 	c.set.add(st.Size())
 	c.touch(id)
 	return nil
+}
+
+// syncFile makes a file's bytes durable. A variable so a test can see
+// that it ran, on what, and before which name existed.
+var syncFile = syncData
+
+// synced syncs the file at name. Every route by which a file gets a name
+// under objects or xobjects calls it first.
+func synced(name string) error {
+	f, err := os.Open(name)
+	if err != nil {
+		return err
+	}
+	err = syncFile(f)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // Adopt makes a file of a dead upper directory the cache's object for
@@ -354,8 +383,12 @@ func (c *Cache) linkInto(src, final string, mode os.FileMode, id c4.ID) error {
 	if err != nil {
 		return err
 	}
-	// Published with a link, which fails if another adopter got there
-	// first: then the variant is there and was counted once.
+	// The bytes first, then the name. Published with a link, which fails
+	// if another adopter got there first: then the variant is there and
+	// was counted once.
+	if err := synced(name); err != nil {
+		return err
+	}
 	if err := os.Link(name, final); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return nil
@@ -496,6 +529,10 @@ func (c *Cache) ExecPath(id c4.ID) (string, error) {
 	}
 	os.Chtimes(tmp.Name(), time.Now(), time.Unix(0, 0))
 	st, _ := os.Stat(tmp.Name())
+	if err := synced(tmp.Name()); err != nil {
+		os.Remove(tmp.Name())
+		return "", err
+	}
 	if err := os.Rename(tmp.Name(), p); err != nil {
 		return "", err
 	}
