@@ -11,141 +11,202 @@ import (
 	"github.com/Avalanche-io/c4/c4m"
 )
 
-// A Chain is c4m's append-only patch chain: a base, then patch sections,
-// each sealed by a bare C4 ID line that must equal the ID of the
-// accumulated state above it. Every checkpoint is therefore a view ID, and
-// every sealed prefix of a chain is a view that can be verified by applying
-// the sections along changed paths. A changeset is the one-section case.
+// A changeset is a c4m patch over a view: the parent view's ID on the first
+// line, then the changed entries, exactly as the c4m library's EncodePatch
+// writes it. Nothing follows the entries. A c4m file never ends with a bare
+// C4 ID (it could not be the ID of the file that holds it), so the view a
+// changeset produces is not written in it: whoever makes the changeset
+// carries that view's ID beside it, and anyone can recompute it by applying
+// the patch.
+//
+// A Chain is changesets one after another, which is c4m's append-only patch
+// chain read from an external base. Every bare C4 ID line in it names the
+// view before the section that follows: the base on the first line, and
+// after that the view the sections so far produce. So appending a changeset
+// to a chain is concatenation, each bare ID can be checked by applying the
+// sections above it along changed paths, and the head, the view the last
+// section produces, is recomputed, never read.
 type Chain struct {
 	// Base is the view the chain starts from (an external base on the
 	// chain's first line).
 	Base     c4.ID
 	Sections []Section
+	// Seal is set only for a chain written before 2026-11-09. Those ended
+	// with the bare ID of the view they resolve to, which the format now
+	// forbids. They are stored objects, named by ID in signed records, so
+	// they are still read: Verify checks the line like any other bare ID,
+	// and nothing here writes one.
+	Seal c4.ID
 }
 
-// Section is one patch and the checkpoint that seals it. An unsealed
-// trailing section (still being written) has a nil Checkpoint.
+// Section is one patch of a chain.
 type Section struct {
-	Patch      *c4m.Manifest
-	Checkpoint c4.ID
+	// Base is the bare C4 ID line before the section: the view it applies
+	// to. The first section's is the chain's.
+	Base  c4.ID
+	Patch *c4m.Manifest
 }
 
-// ErrUnsealed reports a section without a checkpoint.
-var ErrUnsealed = errors.New("chain section is not sealed")
-
-// ReadChain decodes a chain that starts from an external base: the form
-// every changeset and every stream in this system has.
-func ReadChain(data []byte) (*Chain, error) {
-	lines := bytes.Split(data, []byte("\n"))
-	ch := &Chain{}
-	var cur []byte
-	sawBase := false
-	flush := func(seal c4.ID) error {
-		if len(bytes.TrimSpace(cur)) == 0 {
-			// Consecutive checkpoints (a segment boundary repeats the
-			// previous checkpoint): the later one stands.
-			if len(ch.Sections) > 0 && !seal.IsNil() && ch.Sections[len(ch.Sections)-1].Checkpoint != seal {
-				return fmt.Errorf("checkpoint %s follows %s with no patch between them", seal, ch.Sections[len(ch.Sections)-1].Checkpoint)
-			}
-			return nil
-		}
-		m, err := c4m.NewDecoder(bytes.NewReader(cur)).Decode()
-		if err != nil {
-			return err
-		}
-		ch.Sections = append(ch.Sections, Section{Patch: m, Checkpoint: seal})
-		cur = cur[:0]
-		return nil
-	}
-	for _, line := range lines {
-		t := strings.TrimSpace(string(line))
-		if t == "" {
-			continue
-		}
-		if len(t) == 90 && strings.HasPrefix(t, "c4") && !strings.ContainsAny(t, " \t") {
-			id, err := c4.Parse(t)
-			if err != nil {
-				return nil, err
-			}
-			if !sawBase {
-				ch.Base, sawBase = id, true
-				continue
-			}
-			if err := flush(id); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		if !sawBase {
-			return nil, errors.New("chain has no base: its first line must name a view")
-		}
-		cur = append(cur, line...)
-		cur = append(cur, '\n')
-	}
-	if err := flush(c4.ID{}); err != nil {
+// EncodeChangeset writes patch as a changeset over parent.
+func EncodeChangeset(parent c4.ID, patch *c4m.Manifest) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := c4m.NewEncoder(&buf).EncodePatch(&c4m.PatchResult{Patch: patch, OldID: parent}); err != nil {
 		return nil, err
 	}
-	if !sawBase {
-		return nil, errors.New("empty chain")
+	return buf.Bytes(), nil
+}
+
+// ReadChain decodes a changeset or a chain that starts from an external
+// base: the form every changeset and every stream in this system has. The
+// c4m library finds the sections.
+func ReadChain(data []byte) (*Chain, error) {
+	body, seal := splitSeal(data)
+	sections, err := c4m.DecodePatchChain(bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	ch := &Chain{Seal: seal}
+	if len(sections) == 0 {
+		// No entries at all: a chain with no sections is its base alone.
+		line := strings.TrimSpace(string(body))
+		if line == "" {
+			return nil, errors.New("empty chain")
+		}
+		if ch.Base, err = c4.Parse(line); err != nil {
+			return nil, errors.New("chain has no base: its first line must name a view")
+		}
+		return ch, nil
+	}
+	if sections[0].BaseID.IsNil() {
+		return nil, errors.New("chain has no base: its first line must name a view")
+	}
+	ch.Base = sections[0].BaseID
+	for _, s := range sections {
+		m := &c4m.Manifest{Version: "1.0", Entries: s.Entries}
+		m.SortEntries()
+		ch.Sections = append(ch.Sections, Section{Base: s.BaseID, Patch: m})
 	}
 	return ch, nil
 }
 
-// Head is the last sealed checkpoint, or the base.
-func (ch *Chain) Head() c4.ID {
-	for i := len(ch.Sections) - 1; i >= 0; i-- {
-		if !ch.Sections[i].Checkpoint.IsNil() {
-			return ch.Sections[i].Checkpoint
-		}
+// Encode writes the chain as it is stored and served: its changesets one
+// after another. A chain with no sections is its base's ID alone. A Seal is
+// never written, so reading a chain in the old form and encoding it gives
+// the same chain in the form the format allows.
+func (ch *Chain) Encode() ([]byte, error) {
+	if len(ch.Sections) == 0 {
+		return []byte(ch.Base.String() + "\n"), nil
 	}
-	return ch.Base
+	var out bytes.Buffer
+	for _, sec := range ch.Sections {
+		cs, err := EncodeChangeset(sec.Base, sec.Patch)
+		if err != nil {
+			return nil, err
+		}
+		out.Write(cs)
+	}
+	return out.Bytes(), nil
 }
 
-// Verify applies each sealed section to the view before it, along changed
-// paths only, and checks that the result is the section's checkpoint. It
-// returns the verified checkpoints in order. A subscriber can trust any
-// prefix this accepts; an unsealed trailing section is ignored.
+// Verify applies each section to the view before it, along changed paths
+// only, and returns the view after each section, in order. Every bare ID in
+// the chain is checked against them: a section's Base must be the view the
+// sections before it produce, and so must the Seal of a chain that has one.
+// The last view is the chain's head. Nothing in the chain names it, so a
+// reader that was told the head compares the two. On an error, the views
+// returned are the ones the chain's own bare IDs confirmed.
 func (ch *Chain) Verify(ctx context.Context, src RecordSource) ([]c4.ID, error) {
+	if len(ch.Sections) == 0 && !ch.Seal.IsNil() && ch.Seal != ch.Base {
+		return nil, fmt.Errorf("the chain has no sections and ends with %s, which is not its base %s", ch.Seal, ch.Base)
+	}
 	cur := ch.Base
 	var out []c4.ID
 	for i, sec := range ch.Sections {
-		if sec.Checkpoint.IsNil() {
-			if i == len(ch.Sections)-1 {
-				break
-			}
-			return out, fmt.Errorf("section %d: %w", i+1, ErrUnsealed)
-		}
 		res, err := ApplyPatch(ctx, cur, sec.Patch, src)
 		if err != nil {
 			return out, fmt.Errorf("section %d: %w", i+1, err)
 		}
-		if res.ID != sec.Checkpoint {
-			return out, fmt.Errorf("section %d: patch produces %s, checkpoint says %s", i+1, res.ID, sec.Checkpoint)
+		// The bare ID after the section, when the chain has one: the next
+		// section's base, or the seal of a chain in the old form.
+		named := ch.Seal
+		if i+1 < len(ch.Sections) {
+			named = ch.Sections[i+1].Base
 		}
-		cur = sec.Checkpoint
+		if !named.IsNil() && res.ID != named {
+			return out, fmt.Errorf("section %d: the patch produces %s, the chain says %s", i+1, res.ID, named)
+		}
+		cur = res.ID
 		out = append(out, cur)
 	}
 	return out, nil
 }
 
-// AppendSection appends one sealed section (a changeset's body) to chain
-// bytes. A changeset is "parent\npatch\ncheckpoint\n"; appending it to a
-// chain whose head is parent drops the repeated parent line.
-func AppendSection(chain, changeset []byte) ([]byte, error) {
-	head, err := ReadChain(chain)
-	if err != nil {
-		return nil, err
+// splitSeal separates a chain over an external base from the bare C4 ID
+// that ended it when it was written before 2026-11-09 (the view it resolves
+// to, appended by hand). It returns that chain without the line, and the ID.
+// Anything else comes back unchanged with a nil ID: a chain in the current
+// form, a base alone, and a description with no external base, whose
+// trailing ID is the c4m library's to judge.
+//
+// The line is recognised without reading entries: it is the last line that
+// is not blank, it is a C4 ID and nothing else, and the first such line of
+// the data is one too. The c4m library reads everything that remains.
+func splitSeal(data []byte) ([]byte, c4.ID) {
+	start, last := lastLine(data)
+	seal, ok := bareID(last)
+	if !ok {
+		return data, c4.ID{}
 	}
-	cs, err := ReadChain(changeset)
-	if err != nil {
-		return nil, err
+	first := firstLine(data[:start])
+	if first == "" {
+		return data, c4.ID{} // the only line: a base, not a seal
 	}
-	if cs.Base != head.Head() {
-		return nil, fmt.Errorf("changeset applies to %s, the chain's head is %s", cs.Base, head.Head())
+	if _, ok := bareID(first); !ok {
+		return data, c4.ID{} // no external base: not one of ours
 	}
-	body := changeset[bytes.IndexByte(changeset, '\n')+1:]
-	out := append(append([]byte(nil), chain...), body...)
-	return out, nil
+	return data[:start], seal
+}
+
+// firstLine returns the first line of data that is not blank, trimmed.
+func firstLine(data []byte) string {
+	for len(data) > 0 {
+		line, rest, _ := bytes.Cut(data, []byte("\n"))
+		if t := strings.TrimSpace(string(line)); t != "" {
+			return t
+		}
+		data = rest
+	}
+	return ""
+}
+
+// lastLine returns the last line of data that is not blank, trimmed, and
+// where it starts. The line is "" when every line is blank.
+func lastLine(data []byte) (start int, line string) {
+	end := len(data)
+	for end > 0 {
+		stop := end
+		if data[stop-1] == '\n' {
+			stop--
+		}
+		begin := bytes.LastIndexByte(data[:stop], '\n') + 1
+		if t := strings.TrimSpace(string(data[begin:stop])); t != "" {
+			return begin, t
+		}
+		end = begin
+	}
+	return 0, ""
+}
+
+// bareID reports whether a trimmed line is a C4 ID and nothing else.
+func bareID(line string) (c4.ID, bool) {
+	if len(line) != 90 {
+		return c4.ID{}, false
+	}
+	id, err := c4.Parse(line)
+	if err != nil || id.String() != line {
+		return c4.ID{}, false
+	}
+	return id, true
 }
 
 // ApplyPatch applies a c4m patch to the view base with c4m's patch
@@ -218,8 +279,9 @@ func ApplyPatch(ctx context.Context, base c4.ID, patch *c4m.Manifest, src Record
 
 // ExportChain writes a chain with its base listing in full instead of an
 // external base reference, so tools that read only the chain text (the c4
-// CLI's log) see every version as a whole tree, and each version's ID is
-// the checkpoint.
+// CLI's log) see every version as a whole tree. The base's ID follows the
+// listing as the boundary before the first section; a chain with no
+// sections is the listing alone.
 func ExportChain(ctx context.Context, chain []byte, src RecordSource) ([]byte, error) {
 	ch, err := ReadChain(chain)
 	if err != nil {
@@ -233,9 +295,12 @@ func ExportChain(ctx context.Context, chain []byte, src RecordSource) ([]byte, e
 	if err != nil {
 		return nil, err
 	}
-	var out bytes.Buffer
-	out.Write(listing)
-	out.WriteString(ch.Base.String() + "\n")
-	out.Write(chain[bytes.IndexByte(chain, '\n')+1:])
-	return out.Bytes(), nil
+	if len(ch.Sections) == 0 {
+		return listing, nil
+	}
+	sections, err := ch.Encode()
+	if err != nil {
+		return nil, err
+	}
+	return append(listing, sections...), nil
 }

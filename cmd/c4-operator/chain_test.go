@@ -16,7 +16,7 @@ import (
 )
 
 // importedViews returns the views of the mapping's commit lines that
-// changed their view, in order: the checkpoints a ref's chain must hold.
+// changed their view, in order: the views a ref's chain must resolve to.
 func importedViews(t *testing.T, mapping string) ([]gitimport.Commit, []c4.ID) {
 	t.Helper()
 	m, err := gitimport.ReadMapping(mapping)
@@ -75,11 +75,16 @@ func TestBranchChainFollowsPushes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !equalIDs(got, views) || ch.Base != view.EmptyID() {
-		t.Fatalf("chain checkpoints %d, imported views %d", len(got), len(views))
+	if !equalIDs(got, views) || ch.Base != view.EmptyID() || !ch.Seal.IsNil() {
+		t.Fatalf("the chain resolves to %d views, imported views %d", len(got), len(views))
+	}
+	// A c4m file never ends with a bare C4 ID: the chain ends on an entry,
+	// and its head is the last commit's view, kept in the mapping.
+	if _, err := c4.Parse(lastLine(data)); err == nil {
+		t.Fatalf("the chain file ends with a bare C4 ID\n%s", data)
 	}
 	// The index: each commit's chain position, and the stored changesets
-	// concatenate into the same chain.
+	// joined end to end are the chain, byte for byte.
 	var segs []byte
 	for i, c := range commits {
 		if c.ChainSeq != i+1 || c.ChainBase != ch.Base {
@@ -91,12 +96,8 @@ func TestBranchChainFollowsPushes(t *testing.T) {
 		}
 		segs = append(segs, cs...)
 	}
-	fromSegs, err := view.ReadChain(segs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := fromSegs.Verify(ctx, view.StoreRecords(r.st)); !equalIDs(got, views) {
-		t.Fatal("stored changesets do not concatenate into the chain")
+	if !bytes.Equal(segs, data) {
+		t.Fatalf("stored changesets do not concatenate into the chain\n%s\n---\n%s", segs, data)
 	}
 
 	// A force push off the chain's head seals the chain (stored whole and
@@ -119,7 +120,10 @@ func TestBranchChainFollowsPushes(t *testing.T) {
 	if err != nil || !bytes.Equal(stored, data) {
 		t.Fatalf("sealed chain object: %v", err)
 	}
-	now, _ := gitimport.OpenChainFile(r.svc.chainPath("refs/heads/main"))
+	now, err := gitimport.OpenChainFile(ctx, r.svc.chainPath("refs/heads/main"), view.StoreRecords(r.st))
+	if err != nil {
+		t.Fatal(err)
+	}
 	last := m[len(m)-1]
 	if now.Sections != 1 || now.Head != last.View || now.Base != last.ParentView || now.Base == ch.Base {
 		t.Fatalf("new chain: %+v, last commit %+v", now, last)
@@ -202,18 +206,11 @@ func TestChainsReadByC4CLI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// c4 1.0.18's split drops the closing checkpoint of the last section,
-	// so the tail's sealed sections verify and its last patch, unsealed,
-	// still produces the head view.
-	src := view.StoreRecords(r.st)
-	got, err := tch.Verify(context.Background(), src)
-	if err != nil || !equalIDs(got, views[2:len(views)-1]) {
+	// The tail ends on its last section's entries, as every chain does, and
+	// resolves to the views after version 2, the head last.
+	got, err := tch.Verify(context.Background(), view.StoreRecords(r.st))
+	if err != nil || !equalIDs(got, views[2:]) || !tch.Seal.IsNil() {
 		t.Fatalf("c4 split: tail verifies to %d views: %v", len(got), err)
-	}
-	lastSec := tch.Sections[len(tch.Sections)-1]
-	applied, err := view.ApplyPatch(context.Background(), views[len(views)-2], lastSec.Patch, src)
-	if err != nil || applied.ID != views[len(views)-1] {
-		t.Fatalf("c4 split: tail's last patch does not produce the head view: %v", err)
 	}
 
 	// A chain over an external base (a branch from an imported commit)
@@ -260,6 +257,12 @@ func run(t *testing.T, bin string, args ...string) string {
 		t.Fatalf("%s %s: %v: %s", bin, strings.Join(args, " "), err, out)
 	}
 	return string(out)
+}
+
+// lastLine is the last line of b that is not blank.
+func lastLine(b []byte) string {
+	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
 }
 
 func firstLine(b []byte) string {

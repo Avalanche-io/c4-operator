@@ -180,28 +180,39 @@ means 5,000 nodes resolving the same view hit their caches for records too.
 ### 2.3 Changesets and chains
 
 A **changeset** is a c4m patch: a bare C4 ID on the first line naming the
-parent view, then the changed entries, then a bare C4 ID naming the view the
-patch produces. Additions and modifications are emitted with their new IDs,
-removals as exact duplicates of the parent's entries, and directories along
-changed paths with their new IDs. `c4m.ApplyPatch`, `c4m.ResolveBase` and
-`c4 cat` read it unchanged, and the closing ID lets any reader check the
-result.
+parent view, then the changed entries, exactly as the c4m library's
+`EncodePatch` writes it. Nothing follows the entries. Additions and
+modifications are emitted with their new IDs, removals as exact duplicates
+of the parent's entries, and directories along changed paths with their new
+IDs. `c4m.ApplyPatch`, `c4m.ResolveBase` and `c4 cat` read it unchanged.
+The view the patch produces is not written in it: a c4m file never ends
+with a bare C4 ID, since it could not be the ID of the file that holds it.
+Whoever makes a changeset keeps the new view's ID beside it (a pod's
+`output-tree` annotation, a job's `status.output.view`, a commit's line in
+the import mapping), and anyone can recompute it by applying the patch.
 
-A changeset is the one-section case of a **chain**: c4m's append-only patch
-chain, in which a base is followed by patch sections, each sealed by a bare
-C4 ID line that must equal the ID of the accumulated state above it (the c4m
-whitepaper's "Version History"). The ID of a full c4m manifest is the ID of
-its root listing, so every checkpoint in a chain is a view ID. A chain is
-therefore a write-ahead log of views: appending a section and its checkpoint
-is a commit, and every sealed prefix is a view that can be verified by
-applying the sections along changed paths and comparing IDs, at a cost
-proportional to the change. Section 2.5 makes chains the system's streaming
-primitive.
+A **chain** is changesets one after another: c4m's append-only patch chain
+(the c4m whitepaper's "Version History"). Every bare C4 ID line in it names
+the view before the section that follows, and must equal the ID of the
+accumulated state above it. The ID of a full c4m manifest is the ID of its
+root listing, so every such boundary is a view ID. A chain is therefore a
+write-ahead log of views: appending a changeset is a commit, and every
+prefix is a view that can be verified by applying the sections along
+changed paths and comparing IDs, at a cost proportional to the change. The
+head, the view the last section produces, is recomputed the same way and
+compared with the ID its keeper holds. Section 2.5 makes chains the
+system's streaming primitive.
+
+Changesets and chains stored before 2026-11-09 end with the bare ID of the
+view they resolve to. They are objects named by ID in signed records, so
+they are still read, with that line checked wherever the head is
+recomputed; nothing writes the form any more, and a chain read in it is
+stored and served in the current one.
 
 The c4 CLI reads these chains as they are. `c4 split` works on a stored
 chain unchanged. `c4 log` computes each version's ID from the chain text
 alone, so a chain exported with its base listing written out in full lists
-exactly the checkpoint view IDs (checked with c4 1.0.18); a chain stored with
+exactly the view IDs (checked with c4 1.0.18); a chain stored with
 an external base needs `c4 log` to resolve that base from the store, a
 proposed c4 change (PROGRESS.md).
 
@@ -229,7 +240,10 @@ are likely to be close (section 4.3).
 ### 2.5 Chains as streams
 
 A chain grows while work runs, and anything that follows its tail sees each
-sealed checkpoint as it lands. One mechanism serves five uses:
+sealed checkpoint as it lands. A checkpoint here is a view the chain has
+reached: every one but the newest is named by the bare ID before the next
+section, and the newest is the head its keeper holds beside the chain
+(section 2.3). One mechanism serves five uses:
 
 1. **Live capture.** With `capture: live`, the node daemon seals a
    checkpoint of a running pod's upper on an interval and when the task
@@ -250,9 +264,9 @@ sealed checkpoint as it lands. One mechanism serves five uses:
    long-poll the tail (`GET /chains/{id}?after=<checkpoint>&wait=30s`) rather
    than poll. Nodes pre-warm downstream inputs, the HUD updates job views
    and the preview player, and agents watch jobs, all from the same stream.
-   A subscriber needs to trust nothing but the checkpoints: it verifies each
-   sealed prefix by applying the section to the previous view and comparing
-   IDs.
+   A subscriber needs to trust nothing it can't recompute: it applies each
+   section to the previous view and compares the result with the next
+   boundary, or for the newest section with the head the service reports.
 4. **Git import.** Each branch is one chain, appended per commit, with the
    commit's view as the checkpoint: Scion's write-ahead log of changesets,
    expressed natively in c4m, readable by `c4 log` and `c4 split` (section
@@ -263,10 +277,10 @@ sealed checkpoint as it lands. One mechanism serves five uses:
    audit log.
 
 **Storage.** A chain is stored as segments: each segment is a changeset
-whose first line is the previous checkpoint, so segments concatenate into
-one valid c4m chain (a repeated boundary ID is read as one), and a chain
-grows without rewriting any object. The chain's index (segment IDs in order,
-and the head checkpoint) is append-only and kept by the chain service.
+whose first line is the view the segments before it produce, so segments
+concatenate into one valid c4m chain, byte for byte, and a chain grows
+without rewriting any object. The chain's index (segment IDs in order, and
+the head view) is append-only and kept by the chain service.
 
 **Compaction by re-basing.** A chain is never cut off at a length. When a
 chain grows long, the service starts a new chain whose base is the last
@@ -1804,10 +1818,10 @@ project store, referenced from status, so etcd never holds it.
 **Data flows between jobs as views.** Each unit's captured changeset has the
 job's input view as parent. As each unit finishes, the queue folds its
 changeset into the job's output view and appends the fold to the job's
-output chain: the input view on the first line, then one section per fold,
-each sealed by the output view it produced, so every intermediate output is
-a checkpoint that can be verified and mounted. The chain is stored in the
-project's store and named in the job's status with the current output view
+output chain: one changeset per fold, each over the output before it, so
+every intermediate output is named in the chain and can be verified and
+mounted. The chain is stored in the project's store and named in the job's
+status beside the current output view, which the chain does not hold
 (`status.output`). Writes by two units to the same path are reported in
 status, not merged silently. A unit's pod is deleted only after its fold is
 recorded, so a restart repeats no fold and loses none. A downstream job's `fromJob` input
@@ -2374,7 +2388,7 @@ and a sweep planner that spawns trials are all generators.
     `superseded`): nothing waits on it, it costs no more, and its
     changesets leave the job's output. The output is refolded from its
     fold log, kept in the provenance index, without them: a new chain,
-    each section again sealed by the view it makes. The superseded
+    each fold again a changeset over the output before it. The superseded
     output's chain stays in the store. Pricing what early superseding
     saves, per key, is not built: a superseded unit's remaining work
     simply leaves the estimate.

@@ -102,8 +102,8 @@ type Commit struct {
 	View       c4.ID `json:"view"`
 	ParentView c4.ID `json:"parentView"`
 	// Changeset is the ID of the stored changeset (ParentView on its first
-	// line, View on its last). Nil when the commit changes nothing the view
-	// records.
+	// line; View, which it produces, is kept here beside it). Nil when the
+	// commit changes nothing the view records.
 	Changeset c4.ID `json:"changeset,omitempty"`
 	// Patch is the changeset's text, for appending to the branch's chain.
 	Patch []byte `json:"-"`

@@ -109,6 +109,9 @@ type resolver struct {
 	st   Store
 	f    Filter
 	seen map[c4.ID]bool // descriptions on the current resolution path
+	// seal is the bare ID that ended the description being resolved, when
+	// it is a changeset or chain in the old form (splitSeal).
+	seal c4.ID
 }
 
 func newResolver(st Store, f Filter) *resolver {
@@ -129,6 +132,12 @@ func (r *resolver) finish(levels [][]item) (*Resolved, error) {
 		res.Chain = append(res.Chain, FromNode(root))
 	}
 	res.RootID = rootID(levels[len(levels)-1])
+	// A changeset or chain in the old form says which view it resolves to.
+	// Resolved whole, that can be checked. Under a filter the view is
+	// partial and its ID is another, so the line is only dropped.
+	if got := res.View().ID; !r.seal.IsNil() && r.f.All() && got != r.seal {
+		return nil, fmt.Errorf("the description ends with %s and resolves to %s", r.seal, got)
+	}
 	return res, nil
 }
 
@@ -196,8 +205,16 @@ func (r *resolver) resolveData(data []byte, depth int) ([][]item, error) {
 	if c4m.IsJournal(data) {
 		return nil, fmt.Errorf("this is a c4 store journal, not a description")
 	}
-	// A chain of several sealed sections from an external base resolves to
-	// one view per checkpoint.
+	// A changeset or chain stored before 2026-11-09 ends with the bare ID
+	// of the view it resolves to, which the c4m library refuses. It is a
+	// stored object named by ID in signed records, so it is still read,
+	// without that line.
+	data, seal := splitSeal(data)
+	if depth == 0 {
+		r.seal = seal
+	}
+	// A chain of several sections from an external base resolves to one
+	// view per section.
 	if sections, err := c4m.DecodePatchChain(bytes.NewReader(data)); err == nil && len(sections) > 1 && !sections[0].BaseID.IsNil() {
 		return r.resolveSections(sections, depth)
 	}

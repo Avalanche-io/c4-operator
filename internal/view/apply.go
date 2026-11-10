@@ -32,7 +32,8 @@ type Applied struct {
 	// first. Every other record is the parent's.
 	Records []Record
 	// Changeset is the c4m patch: Parent on the first line, then the
-	// changed entries. Empty when nothing changed.
+	// changed entries, and nothing after them. The view it produces is ID,
+	// beside it. Empty when nothing changed.
 	Changeset   []byte
 	ChangesetID c4.ID
 
@@ -79,15 +80,10 @@ func Apply(ctx context.Context, parent c4.ID, edits []Edit, src RecordSource) (*
 	}
 	m := c4m.NewManifest()
 	m.Entries = patch
-	var buf bytes.Buffer
-	if err := c4m.NewEncoder(&buf).EncodePatch(&c4m.PatchResult{Patch: m, OldID: parent, NewID: res.ID}); err != nil {
+	var err error
+	if res.Changeset, err = EncodeChangeset(parent, m); err != nil {
 		return nil, err
 	}
-	// The closing checkpoint seals the patch: the changeset is a one-section
-	// c4m chain, verifiable and appendable to a stream.
-	buf.WriteString(res.ID.String())
-	buf.WriteByte('\n')
-	res.Changeset = buf.Bytes()
 	res.ChangesetID = c4.Identify(bytes.NewReader(res.Changeset))
 	return res, nil
 }

@@ -320,6 +320,7 @@ type jobMem struct {
 	causes        map[string]*causeRec
 	causesDropped int
 	outLoad       string // the stored chain to load before the next fold
+	outView       string // the view that chain resolves to, as the status keeps it
 	outIndex      string // the stored provenance index to load before the next fold
 	launched      map[int]time.Time
 	nodeFails     map[string]int
@@ -484,6 +485,7 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 	}
 	if o := st.Output; o != nil {
 		m.outLoad = o.Chain
+		m.outView = o.View
 		m.outIndex = o.Provenance
 		m.out.count = int(o.Changesets)
 	}

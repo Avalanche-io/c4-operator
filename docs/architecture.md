@@ -65,8 +65,8 @@ C4 is the short form of The Cinema Content Creation Cloud
 - **Views and records** (`internal/view`). A view's ID is the C4 ID of its
   root record; directory records are stored like any object, so a node loads
   only the parts of a tree its filter reaches. A changeset is a c4m patch
-  sealed by the view it produces, and changesets append into chains that the
-  c4 CLI reads (`c4 log`, `c4 split`).
+  over its parent view, as the c4m library writes it, and changesets joined
+  end to end are chains that the c4 CLI reads (`c4 log`, `c4 split`).
 - **Tiers** (`internal/tier`, `internal/fill`). One content API at every
   tier. Fills are coalesced (one upstream fetch per object, however many
   waiters), streamed to waiters while they arrive, shed with `503` and

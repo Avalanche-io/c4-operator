@@ -65,7 +65,7 @@ type refResult struct {
 	Deleted bool               `json:"deleted,omitempty"`
 	Commits []gitimport.Commit `json:"commits"`
 	Skipped int                `json:"skipped"`
-	// Chain is the ref's chain: base, head checkpoint and sections, and
+	// Chain is the ref's chain: base, head view and sections, and
 	// the stored chain object when this run stored one.
 	ChainBase     string  `json:"chainBase,omitempty"`
 	ChainHead     string  `json:"chainHead,omitempty"`
@@ -130,7 +130,7 @@ func (s *importService) importRef(ctx context.Context, ref, rev string, sinceLas
 		if err := os.MkdirAll(s.out+".chains", 0o755); err != nil {
 			return nil, err
 		}
-		if chain, err = gitimport.OpenChainFile(s.chainPath(ref)); err != nil {
+		if chain, err = gitimport.OpenChainFile(ctx, s.chainPath(ref), s.base.Records); err != nil {
 			return nil, err
 		}
 	}
@@ -214,7 +214,7 @@ func (s *importService) chainAppend(ctx context.Context, chain *gitimport.ChainF
 			return false, err
 		}
 	}
-	if err := chain.Append(c.Patch); err != nil {
+	if err := chain.Append(c.Patch, c.ParentView, c.View); err != nil {
 		return false, fmt.Errorf("chain %s: %w", ref, err)
 	}
 	c.ChainBase, c.ChainSeq = chain.Base, chain.Sections
@@ -368,9 +368,13 @@ func (s *importService) handler(secret string) http.Handler {
 	// The chain of a ref, as c4 split reads it; with ?full=1 its base is
 	// written out in full, as c4 log needs (DESIGN.md section 2.3).
 	mux.HandleFunc("GET /chains/{ref...}", func(w http.ResponseWriter, r *http.Request) {
-		data, err := os.ReadFile(s.chainPath(r.PathValue("ref")))
-		if err != nil {
+		data, err := gitimport.ReadChainFile(s.chainPath(r.PathValue("ref")))
+		if errors.Is(err, os.ErrNotExist) {
 			http.NotFound(w, r)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		if r.URL.Query().Get("full") != "" {

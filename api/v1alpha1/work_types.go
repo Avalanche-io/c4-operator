@@ -797,8 +797,8 @@ type WorkSuggestionRevision struct {
 type WorkOutput struct {
 	// View is the output after the latest fold.
 	View string `json:"view"`
-	// Chain is the stored c4m chain: the job's input view, then one
-	// section per fold, each sealed by the output view it produced.
+	// Chain is the stored c4m chain: one changeset per fold, each over the
+	// output before it. View is the output after the last.
 	Chain string `json:"chain"`
 	// Changesets folded so far.
 	Changesets int32 `json:"changesets"`
