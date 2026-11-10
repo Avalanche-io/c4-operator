@@ -487,6 +487,24 @@ func TestApplyPatchFromADirectoryWithNoChildrenListed(t *testing.T) {
 	other := apply(base.ID, fileEdit("d/a.txt", "a"))
 	isFile := apply(base.ID, fileEdit("d", "a file"))
 
+	// The same one level down, under a directory the base does not have:
+	// new/ as context, then new/d/ by its ID alone.
+	deep := apply(base.ID, fileEdit("new/d/b.txt", "b"))
+	dch, err := ReadChain(deep.Changeset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nested := c4m.NewManifest()
+	for _, e := range dch.Sections[0].Patch.Entries {
+		if e.IsDir() {
+			nested.AddEntry(e)
+		}
+	}
+	if len(nested.Entries) != 2 || nested.Entries[1].Depth != 1 {
+		t.Fatalf("the nested patch is not a directory and one directory under it: %v", nested.Entries)
+	}
+	nestedOther := apply(base.ID, fileEdit("new/d/a.txt", "a"))
+
 	for _, c := range []struct {
 		name    string
 		target  c4.ID
@@ -497,6 +515,8 @@ func TestApplyPatchFromADirectoryWithNoChildrenListed(t *testing.T) {
 	}{
 		{name: "by ID, where the target has no such directory", target: base.ID, patch: byID, want: []string{"d/b.txt", "keep.txt"}},
 		{name: "by ID, where the target holds another directory: refused, since neither reading is ruled", target: other.ID, patch: byID, refused: true},
+		{name: "by ID under a directory the base lacks, where the target has neither", target: base.ID, patch: nested, want: []string{"keep.txt", "new/d/b.txt"}},
+		{name: "by ID under a directory the base lacks, where the target holds another directory there: refused", target: nestedOther.ID, patch: nested, refused: true},
 		{name: "by ID, where the target holds that directory already", target: whole.ID, patch: byID, want: []string{"d/b.txt", "keep.txt"}},
 		{name: "by ID, where the target holds a file of the name", target: isFile.ID, patch: byID, want: []string{"d/b.txt", "keep.txt"}, dropped: []string{"d"}},
 		{name: "with no ID, where the target has no such directory: an empty one", target: base.ID, patch: noID, want: []string{"keep.txt"}},
@@ -519,8 +539,8 @@ func TestApplyPatchFromADirectoryWithNoChildrenListed(t *testing.T) {
 			if fmt.Sprint(names) != fmt.Sprint(c.want) {
 				t.Errorf("the result holds %v, want %v", names, c.want)
 			}
-			if v.Root.Lookup("d/") == nil {
-				t.Error("d/ is not a directory of the result")
+			if v.Root.Lookup("d/") == nil && v.Root.Lookup("new/d/") == nil {
+				t.Error("the directory is not in the result")
 			}
 			if fmt.Sprint(got.Dropped) != fmt.Sprint(c.dropped) {
 				t.Errorf("dropped %v, want %v", got.Dropped, c.dropped)
@@ -537,6 +557,20 @@ func TestApplyPatchFromADirectoryWithNoChildrenListed(t *testing.T) {
 				t.Errorf("its changeset over the target does not give the result: %v\n%s", err, got.Changeset)
 			}
 		})
+	}
+
+	// One patch, one answer. Where the patch's own base holds a different
+	// directory at the path, the entry is refused wherever the patch is
+	// carried: to its own base, to that base with another file added, to
+	// that base with the directory gone. (Left to depend on the target, it
+	// was nothing on the first, refused on the second and a write on the
+	// third.)
+	gone := apply(other.ID, Edit{Path: "d/"})
+	beside := apply(other.ID, fileEdit("unrelated.txt", "u"))
+	for name, target := range map[string]c4.ID{"its own base": other.ID, "its base and another file": beside.ID, "its base with the directory gone": gone.ID} {
+		if got, err := ApplyPatchFrom(ctx, target, other.ID, byID, src); err == nil || !strings.Contains(err.Error(), "d/ is written by its C4 ID alone") {
+			t.Errorf("carried to %s it was not refused: %v, %v", name, got, err)
+		}
 	}
 
 	// Over its own base, a directory restated by ID alone: whatever the

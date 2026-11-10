@@ -224,7 +224,7 @@ func bareID(line string) (c4.ID, bool) {
 // paths.
 func ApplyPatch(ctx context.Context, base c4.ID, patch *c4m.Manifest, src RecordSource) (*Applied, error) {
 	t := &atree{ctx: ctx, src: src, root: &anode{base: base}}
-	if err := applyPatchFrom(t, t, patch); err != nil {
+	if err := applyPatchFrom(t, t, patch, false); err != nil {
 		return nil, err
 	}
 	res := &Applied{Parent: base}
@@ -250,8 +250,9 @@ func ApplyPatch(ctx context.Context, base c4.ID, patch *c4m.Manifest, src Record
 // the target has a directory takes the directory and all under it, and the
 // result's Dropped names what went that way.
 //
-// With target equal to base this is ApplyPatch. It is idempotent: applied
-// again to its own result it changes nothing. The result carries the
+// With target equal to base this is ApplyPatch, but for the one shape it
+// refuses (below). It is idempotent: applied again to its own result it
+// changes nothing. The result carries the
 // changeset over target that describes it, empty when nothing changed, and
 // that changeset is an ordinary one: a chain it is appended to verifies by
 // ApplyPatch alone.
@@ -266,15 +267,16 @@ func ApplyPatch(ctx context.Context, base c4.ID, patch *c4m.Manifest, src Record
 // written where the target holds a directory says only that the directory
 // exists, and leaves it as it is (a unit that ran mkdir does not remove
 // what another unit wrote there). The third is refused until it is ruled:
-// a directory written by its C4 ID alone where the target holds a different
-// directory. Capture never writes one.
+// a directory written by its C4 ID alone where a different directory
+// already is, in the patch's base or in the target. Capture never writes
+// one.
 func ApplyPatchFrom(ctx context.Context, target, base c4.ID, patch *c4m.Manifest, src RecordSource) (*Applied, error) {
 	tt := &atree{ctx: ctx, src: src, root: &anode{base: target}}
 	tb := tt
 	if base != target {
 		tb = &atree{ctx: ctx, src: src, root: &anode{base: base}}
 	}
-	if err := applyPatchFrom(tt, tb, patch); err != nil {
+	if err := applyPatchFrom(tt, tb, patch, true); err != nil {
 		return nil, err
 	}
 	res, err := tt.applied(target)
@@ -288,8 +290,10 @@ func ApplyPatchFrom(ctx context.Context, target, base c4.ID, patch *c4m.Manifest
 // applyPatchFrom walks a patch once. What each entry means is read from
 // tb, the tree the patch was made over; the edit is made in tt. They are
 // one tree when a patch is applied to its own base, and tb is never edited
-// otherwise.
-func applyPatchFrom(tt, tb *atree, patch *c4m.Manifest) error {
+// otherwise. carried says the patch is being taken to a view by
+// ApplyPatchFrom, which refuses the one shape whose meaning there is not
+// ruled; ApplyPatch reads that shape as it always has.
+func applyPatchFrom(tt, tb *atree, patch *c4m.Manifest, carried bool) error {
 	same := tt == tb
 	var stack []string
 	entries := patch.Entries
@@ -367,6 +371,21 @@ func applyPatchFrom(tt, tb *atree, patch *c4m.Manifest) error {
 			to.files[name] = pe
 			continue
 		}
+		// A directory written by its C4 ID alone where a different directory
+		// already is, in the patch's own base or in the target. Whether it
+		// replaces what is there or leaves it is not ruled, and either would
+		// be done silently here: replacing takes what another unit wrote,
+		// leaving drops what this one wrote. Capture never writes such an
+		// entry (a changed directory is followed by its changes). Carried
+		// to a view it is refused, whatever the view holds, so one patch
+		// has one answer.
+		byID := !hasChildren && !pe.C4ID.IsNil() && pe.C4ID != emptyID
+		unruled := func() error {
+			return fmt.Errorf("%s%s is written by its C4 ID alone where a different directory already is: whether that replaces it is not decided, so the patch must list the directory's children", path, name)
+		}
+		if carried && byID && had && existing.IsDir() {
+			return unruled()
+		}
 		if f := strings.TrimSuffix(name, "/"); to.files[f] != nil {
 			delete(to.files, f)
 			tt.dropped = append(tt.dropped, path+f)
@@ -387,20 +406,14 @@ func applyPatchFrom(tt, tb *atree, patch *c4m.Manifest) error {
 			// brings nothing the directory lacks: a directory made empty
 			// beside one that others have filled (two units both running
 			// mkdir -p) leaves what the others wrote.
-		case same:
-			// Restated by ID alone over its own base. The directory is left
-			// as it is, which is what this reader has always done and what
-			// the resolver's reader does (resolve.go): the two must agree
-			// on every changeset, or a chain would verify to one view and
-			// mount as another.
+		case !carried:
+			// Restated by ID alone over its own base, by the plain rule.
+			// The directory is left as it is, which is what this reader has
+			// always done and what the resolver's reader does (resolve.go):
+			// for every changeset the operator writes the two must agree,
+			// or a chain would verify to one view and mount as another.
 		default:
-			// Written by ID alone where the target holds another directory.
-			// Whether that replaces what the target holds or leaves it is
-			// not ruled, and either would be done silently here: replacing
-			// takes what another unit wrote, leaving drops what this one
-			// wrote. Capture never writes such an entry (a changed directory
-			// is followed by its changes), so it is refused, and says so.
-			return fmt.Errorf("%s%s is written by its C4 ID alone, and the view the patch is applied to holds a different directory there: whether that replaces it is not decided, so the patch must list the directory's children", path, name)
+			return unruled()
 		}
 		stack = append(stack, name)
 	}

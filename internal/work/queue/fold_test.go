@@ -1213,8 +1213,11 @@ func TestRefoldKeepsTheRuns(t *testing.T) {
 	q := &Queue{Stores: func(context.Context, string) (*storeurl.Sharded, error) { return st, nil }}
 	in := inputView(t, st, map[string]string{"in.txt": "input"})
 	m := &jobMem{out: newOutput(), superseded: map[int]bool{0: true}}
+	// Two folds are kept, and they wrote one path: rebuilt in the order
+	// they were folded, the later one still stands.
+	earlier := Fold{Unit: 3, Changeset: unitChangeset(t, st, in, map[string]string{"out.txt": "from unit 3, earlier"}), Run: "pod-3"}
 	kept := Fold{Unit: 1, Changeset: unitChangeset(t, st, in, map[string]string{"out.txt": "from unit 1"}), Run: "pod-1"}
-	for _, f := range []Fold{{Unit: 0, Changeset: unitChangeset(t, st, in, map[string]string{"gone.txt": "superseded"}), Run: "pod-0"}, kept} {
+	for _, f := range []Fold{earlier, {Unit: 0, Changeset: unitChangeset(t, st, in, map[string]string{"gone.txt": "superseded"}), Run: "pod-0"}, kept} {
 		if err := q.fold(ctx, st, m.out, f); err != nil {
 			t.Fatal(err)
 		}
@@ -1223,8 +1226,8 @@ func TestRefoldKeepsTheRuns(t *testing.T) {
 		t.Fatal("the refold asked to be tried again")
 	}
 	o := m.out
-	if len(o.folds) != 1 || o.folds[0] != kept {
-		t.Fatalf("the rebuilt log is %+v, want the one fold kept, with its run", o.folds)
+	if len(o.folds) != 2 || o.folds[0] != earlier || o.folds[1] != kept {
+		t.Fatalf("the rebuilt log is %+v, want the two folds kept, in order, with their runs", o.folds)
 	}
 	if files := outputFilesOf(t, st, o.view); len(files) != 2 || files["out.txt"] != idOf("from unit 1") {
 		t.Fatalf("the rebuilt output holds %v", files)
@@ -1236,7 +1239,66 @@ func TestRefoldKeepsTheRuns(t *testing.T) {
 	if err := q.fold(ctx, st, o, kept); err != nil {
 		t.Fatal(err)
 	}
-	if files := outputFilesOf(t, st, o.view); files["out.txt"] != idOf("from unit 2") || len(o.folds) != 2 {
+	if files := outputFilesOf(t, st, o.view); files["out.txt"] != idOf("from unit 2") || len(o.folds) != 3 {
 		t.Fatalf("a run kept through a refold was folded again: %v, %d folds", files, len(o.folds))
+	}
+}
+
+// The one changeset the fold refuses: a directory written by its C4 ID
+// alone where a different directory already is, whose meaning is not ruled.
+// Capture never writes it. It is refused by name whether it is the job's
+// first fold or a later one, and leaves the output as it was.
+func TestFoldRefusesADirectoryByIDAloneOverAnother(t *testing.T) {
+	ctx := context.Background()
+	st, _ := foldStore(t)
+	q := &Queue{}
+	// byID is a changeset over base that names d/ by the ID of the listing
+	// {b.txt} and lists nothing under it.
+	byID := func(base c4.ID) string {
+		t.Helper()
+		id, _ := c4.Parse(unitChangeset(t, st, base, map[string]string{"d/b.txt": "b"}, "d/a.txt"))
+		_, ch := readChain(t, st, id)
+		m := c4m.NewManifest()
+		for _, e := range ch.Sections[0].Patch.Entries {
+			if e.IsDir() {
+				m.AddEntry(e)
+			}
+		}
+		if len(m.Entries) != 1 {
+			t.Fatalf("not one directory entry: %v", m.Entries)
+		}
+		cs, err := c4view.EncodeChangeset(base, m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stored, err := st.PutBytes(ctx, cs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return stored.String()
+	}
+	withDir := inputView(t, st, map[string]string{"in.txt": "input", "d/a.txt": "a"})
+
+	// As a job's first fold, over the base that holds the other directory.
+	o := newOutput()
+	err := q.fold(ctx, st, o, Fold{Unit: 0, Changeset: byID(withDir), Run: "pod-0"})
+	if err == nil || !strings.Contains(err.Error(), "by its C4 ID alone") {
+		t.Fatalf("as the first fold it was not refused by name: %v", err)
+	}
+	if !o.view.IsNil() || o.count != 0 || len(o.folds) != 0 {
+		t.Fatalf("a refused fold moved the output: %+v", o)
+	}
+
+	// As a later fold, after another unit's.
+	if err := q.fold(ctx, st, o, Fold{Unit: 1, Changeset: unitChangeset(t, st, withDir, map[string]string{"other.txt": "other"}), Run: "pod-1"}); err != nil {
+		t.Fatal(err)
+	}
+	view, chain := o.view, o.id
+	err = q.fold(ctx, st, o, Fold{Unit: 0, Changeset: byID(withDir), Run: "pod-0"})
+	if err == nil || !strings.Contains(err.Error(), "by its C4 ID alone") {
+		t.Fatalf("as a later fold it was not refused by name: %v", err)
+	}
+	if o.view != view || o.id != chain || o.count != 1 || len(o.folds) != 1 || len(o.conflicts) != 0 {
+		t.Fatalf("a refused fold moved the output: count %d, %d folds, conflicts %v", o.count, len(o.folds), o.conflicts)
 	}
 }
