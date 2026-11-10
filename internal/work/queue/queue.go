@@ -646,6 +646,8 @@ type view struct {
 	// foldWait is why a finished unit's changes are not in the job's
 	// output this tick: the fold failed, and is tried again next tick.
 	foldWait string
+	// foldReason is the condition's reason for foldWait.
+	foldReason string
 	// locked are units waiting for a holder of what they claim (holds.go)
 	// or for a gate, and gates the job's units at gates (gates.go).
 	locked map[int]lockInfo
@@ -2425,6 +2427,11 @@ func (q *Queue) foldChangeset(ctx context.Context, v *view, f Fold) bool {
 		q.Log.Error(err, what, "job", v.key, "unit", f.Unit)
 		if v.foldWait == "" {
 			v.foldWait = fmt.Sprintf("unit %d, %s: %v", f.Unit, what, err)
+			if errors.Is(err, errIndexNotConverted) {
+				// Not this unit's fold failing: the whole job waits on its
+				// index from before the upgrade (fold.go, loadIndex).
+				v.foldReason = "IndexNotConverted"
+			}
 		}
 		return false
 	}
@@ -2436,7 +2443,7 @@ func (q *Queue) foldChangeset(ctx context.Context, v *view, f Fold) bool {
 		// A namespace without a Project has no store to fold into.
 		return true
 	}
-	if err := q.loadOutput(st, v); err != nil {
+	if err := q.loadOutput(ctx, st, v); err != nil {
 		return failed("load output", err)
 	}
 	if err := q.fold(ctx, st, m.out, f); err != nil {

@@ -1895,6 +1895,21 @@ where a different directory already is. Whether that replaces what is there
 is not yet ruled, capture never writes it, and the fold will not choose
 silently. Such a fold fails on every tick, and the unit stays finishing.
 
+The index carries a version. One written before folds named their runs has
+none, and is converted when it is loaded: each of its folds has the task
+record of its run, and the record names the pod, so each fold is given its
+run from its own record. A record is checked before it is believed (its
+bytes against its C4 ID, its changeset against the fold's, and its signature
+and signer where the queue has the farm's roots). The conversion is whole or
+not at all: the converted index is saved before any fold of the job is made
+on it, and a store that cannot be asked for a record converts nothing, with
+the job saying so (`OutputRecorded` false, `IndexNotConverted`). An old fold
+with no record that can be believed has no run anywhere; a finished pod of
+that unit with that changeset is then folded and reported, once, since
+nothing says whether it is that fold's run or a later one. Nodes sign task
+records unless started without an issuer, so that is a capture whose
+signing failed.
+
 A fold that fails, for that reason or because the store is away, is tried
 again every tick, and the job's status says so for as long as it does:
 condition `OutputRecorded` false, reason `FoldFailed`, with the unit and the

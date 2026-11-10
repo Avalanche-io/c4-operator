@@ -132,6 +132,9 @@ func withoutEstimate(st c4v1.WorkJobStatus) c4v1.WorkJobStatus {
 //   - FoldFailed: a finished unit's changes could not be folded in, and the
 //     fold is tried again every tick. The message carries the error, which
 //     is how a fold that can never succeed is told from one that is late.
+//   - IndexNotConverted: the job's index is from before folds named their
+//     runs, and the store could not be asked for a fold's task record. No
+//     fold of the job is made until it can.
 const ConditionOutputRecorded = "OutputRecorded"
 
 // status computes a job's status from the queue's memory and the latest
@@ -163,8 +166,12 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 		// output moves), or at the next status otherwise. Set over the
 		// condition already there, never removed and set again, so the
 		// time it carries is when the output first fell behind.
+		reason := v.foldReason
+		if reason == "" {
+			reason = "FoldFailed"
+		}
 		meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: ConditionOutputRecorded, Status: metav1.ConditionFalse,
-			Reason: "FoldFailed", ObservedGeneration: v.job.Generation,
+			Reason: reason, ObservedGeneration: v.job.Generation,
 			Message: "a unit's changes are not in the job's output, and the fold is tried again every tick: " + v.foldWait})
 	} else {
 		meta.RemoveStatusCondition(&st.Conditions, ConditionOutputRecorded)
