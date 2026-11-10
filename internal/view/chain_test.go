@@ -567,6 +567,14 @@ func everyReader(t *testing.T, name string, ram *store.RAM, parent c4.ID, edits 
 	if r, err := FromBytes(applied.Changeset, ram, Filter{}); err != nil || r.View().ID != applied.ID {
 		t.Errorf("%s: the resolver disagrees with Apply (%v)\n%s", name, err, applied.Changeset)
 	}
+	// The c4m library's rule, on the parent as a whole c4m file.
+	pv, err := Load(ctx, parent, StoreRecords(ram), 4)
+	if err != nil {
+		t.Fatalf("%s: %v", name, err)
+	}
+	if root, err := nodeFromManifest(c4m.ApplyPatch(pv.Manifest(), ch.Sections[0].Patch)); err != nil || root.Identify() != applied.ID {
+		t.Errorf("%s: the c4m library's ApplyPatch disagrees with Apply (%v)\n%s", name, err, applied.Changeset)
+	}
 	return applied
 }
 

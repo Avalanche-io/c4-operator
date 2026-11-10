@@ -3,6 +3,7 @@ package gitimport
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -358,5 +359,91 @@ func TestAnEmptyChainFileIsAnEmptyChain(t *testing.T) {
 		if _, err := os.Stat(p + ".tmp"); err == nil {
 			t.Fatal("the first append left its temporary file")
 		}
+	}
+}
+
+// The two writes that replace a chain file whole (the first changeset over
+// a base line, and a re-base) sync the new bytes before they take the
+// file's name. The test watches the sync call: when it is made, the bytes
+// synced are the whole new content and the name still holds the old. It
+// shows the order, not what a device kept.
+func TestAChainFileIsSyncedBeforeItTakesItsName(t *testing.T) {
+	ctx := context.Background()
+	h := newHistory(t, 2)
+	p := filepath.Join(t.TempDir(), "main.c4m")
+	type seen struct{ synced, named []byte }
+	var syncs []seen
+	old := syncFile
+	t.Cleanup(func() { syncFile = old })
+	syncFile = func(f *os.File) error {
+		synced, err := os.ReadFile(f.Name())
+		if err != nil {
+			t.Errorf("sync: %v", err)
+		}
+		named, _ := os.ReadFile(p)
+		syncs = append(syncs, seen{synced: synced, named: named})
+		return old(f)
+	}
+	ch, _ := OpenChainFile(ctx, p, h.src)
+	if err := ch.Rebase(h.views[0]); err != nil {
+		t.Fatal(err)
+	}
+	base := []byte(h.views[0].String() + "\n")
+	if len(syncs) != 1 || !bytes.Equal(syncs[0].synced, base) || len(syncs[0].named) != 0 {
+		t.Fatalf("the re-base: %d syncs, %q synced while the name held %q", len(syncs), syncs[0].synced, syncs[0].named)
+	}
+	if err := ch.Append(h.changesets[0], h.views[0], h.views[1]); err != nil {
+		t.Fatal(err)
+	}
+	if len(syncs) != 2 || !bytes.Equal(syncs[1].synced, h.changesets[0]) || !bytes.Equal(syncs[1].named, base) {
+		t.Fatalf("the first changeset: %d syncs; the name held %q when the new bytes were synced", len(syncs), syncs[1].named)
+	}
+	if data, _ := os.ReadFile(p); !bytes.Equal(data, h.changesets[0]) {
+		t.Fatalf("after the first changeset the file holds %q", data)
+	}
+	// A later changeset is appended in place: no file is replaced.
+	if err := ch.Append(h.changesets[1], h.views[1], h.views[2]); err != nil {
+		t.Fatal(err)
+	}
+	if len(syncs) != 2 {
+		t.Fatalf("an append in place made %d more syncs", len(syncs)-2)
+	}
+}
+
+// A sync that fails names nothing: the chain file and the chain in memory
+// are as they were, and nothing is left beside the file.
+func TestAFailedSyncLeavesTheChainFileAsItWas(t *testing.T) {
+	ctx := context.Background()
+	h := newHistory(t, 1)
+	dir := t.TempDir()
+	p := filepath.Join(dir, "main.c4m")
+	ch, _ := OpenChainFile(ctx, p, h.src)
+	if err := ch.Rebase(h.views[0]); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(p)
+	old := syncFile
+	t.Cleanup(func() { syncFile = old })
+	boom := errors.New("the disk refused the sync")
+	syncFile = func(*os.File) error { return boom }
+
+	if err := ch.Append(h.changesets[0], h.views[0], h.views[1]); !errors.Is(err, boom) {
+		t.Fatalf("the append returned %v", err)
+	}
+	if ch.Sections != 0 || ch.Head != h.views[0] {
+		t.Fatalf("a failed append moved the chain: %+v", ch)
+	}
+	if err := ch.Rebase(h.views[1]); !errors.Is(err, boom) {
+		t.Fatalf("the re-base returned %v", err)
+	}
+	if ch.Base != h.views[0] {
+		t.Fatalf("a failed re-base moved the chain: %+v", ch)
+	}
+	if after, _ := os.ReadFile(p); !bytes.Equal(after, before) {
+		t.Fatalf("the chain file changed: %q", after)
+	}
+	names, _ := os.ReadDir(dir)
+	if len(names) != 1 {
+		t.Fatalf("something was left beside the chain file: %v", names)
 	}
 }

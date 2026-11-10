@@ -95,12 +95,7 @@ func (ch *ChainFile) Append(changeset []byte, parent, produced c4.ID) error {
 	if ch.Sections == 0 {
 		// In one step, so no reader, and no crash, finds the file empty
 		// between the base line going and the changeset arriving.
-		tmp := ch.Path + ".tmp"
-		if err := os.WriteFile(tmp, changeset, 0o644); err != nil {
-			return err
-		}
-		if err := os.Rename(tmp, ch.Path); err != nil {
-			os.Remove(tmp)
+		if err := replaceFile(ch.Path, changeset); err != nil {
 			return err
 		}
 	} else {
@@ -132,16 +127,42 @@ func (ch *ChainFile) Rebase(base c4.ID) error {
 	if err != nil {
 		return err
 	}
-	tmp := ch.Path + ".tmp"
-	if err := os.WriteFile(tmp, alone, 0o644); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, ch.Path); err != nil {
-		os.Remove(tmp)
+	if err := replaceFile(ch.Path, alone); err != nil {
 		return err
 	}
 	ch.Base, ch.Head, ch.Sections = base, base, 0
 	return nil
+}
+
+// syncFile is how a file's bytes are made durable before it takes a name.
+// A test puts its own here to watch the order.
+var syncFile = func(f *os.File) error { return f.Sync() }
+
+// replaceFile puts data at path in one step: written beside it, synced,
+// then renamed over it. The rename replaces a file that was whole, so the
+// bytes are synced before they take its name; renamed first, a crash could
+// leave the name over a file whose bytes never reached the disk, and the
+// chain that was there gone. On an error the file at path is as it was.
+func replaceFile(path string, data []byte) error {
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if err == nil {
+		err = syncFile(f)
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp, path)
+	}
+	if err != nil {
+		os.Remove(tmp)
+	}
+	return err
 }
 
 // Bytes returns the chain's text.

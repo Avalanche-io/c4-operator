@@ -20,6 +20,7 @@ import (
 
 	"github.com/Avalanche-io/c4"
 	"github.com/Avalanche-io/c4/c4m"
+	"github.com/go-logr/logr"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
@@ -1503,4 +1504,61 @@ func TestAStatusDoesNotEditTheJobItIsComputedFrom(t *testing.T) {
 	if on := j.Status.Conditions[0]; on.Reason != "IndexNotSaved" || on.Message != was.Message {
 		t.Fatalf("computing the status edited the job's own condition to %+v", on)
 	}
+}
+
+// Every fold of a job is superseded. Its output is then the job's input
+// view, and its chain that view alone: a stored object that reads, and
+// that the next fold builds on after a restart. The second half is the
+// state the rebuild once left with no view at all: an output restored from
+// such a chain (a view, and no sections) whose fold log still lists the
+// superseded folds.
+func TestRefoldWithEveryFoldSuperseded(t *testing.T) {
+	ctx := context.Background()
+	st, _ := foldStore(t)
+	q := &Queue{Stores: func(context.Context, string) (*storeurl.Sharded, error) { return st, nil }, Log: logr.Discard()}
+	in := inputView(t, st, map[string]string{"in.txt": "input"})
+	m := &jobMem{out: newOutput(), superseded: map[int]bool{0: true}}
+	v := &view{key: "ns/job", project: "show", mem: m}
+	cs := unitChangeset(t, st, in, map[string]string{"a.txt": "a"})
+	if err := q.fold(ctx, st, m.out, Fold{Unit: 0, Changeset: cs, Run: "pod-0"}); err != nil {
+		t.Fatal(err)
+	}
+	if !q.refoldOutput(ctx, v) {
+		t.Fatal("the refold asked to be tried again")
+	}
+	o := m.out
+	if o.view != in || len(o.folds) != 0 {
+		t.Fatalf("with every fold superseded the output is %s with %d folds, want the input %s and none", o.view, len(o.folds), in)
+	}
+	checkChain(t, st, o, 0)
+
+	// A restart, then another unit's fold: the chain is that changeset.
+	re := newOutput()
+	if err := re.load(st, o.id.String(), o.view.String()); err != nil {
+		t.Fatalf("a chain that is its base alone does not load: %v", err)
+	}
+	next := unitChangeset(t, st, in, map[string]string{"b.txt": "b"})
+	if err := q.fold(ctx, st, re, Fold{Unit: 1, Changeset: next, Run: "pod-1"}); err != nil {
+		t.Fatal(err)
+	}
+	nextID, _ := c4.Parse(next)
+	want, _ := readChain(t, st, nextID)
+	if stored, _ := readChain(t, st, re.id); !bytes.Equal(stored, want) {
+		t.Fatalf("the chain after a fold onto a base alone is not that changeset:\n%s", stored)
+	}
+
+	// Restored with no sections, and a log that still lists the superseded
+	// fold: rebuilt, the output keeps its view.
+	m2 := &jobMem{out: newOutput(), superseded: map[int]bool{0: true}}
+	if err := m2.out.load(st, o.id.String(), o.view.String()); err != nil {
+		t.Fatal(err)
+	}
+	m2.out.folds = []Fold{{Unit: 0, Changeset: cs, Run: "pod-0"}}
+	if !q.refoldOutput(ctx, &view{key: "ns/job2", project: "show", mem: m2}) {
+		t.Fatal("the refold asked to be tried again")
+	}
+	if m2.out.view != in || len(m2.out.folds) != 0 {
+		t.Fatalf("rebuilt from a chain with no sections, the output is %s with %d folds, want %s and none", m2.out.view, len(m2.out.folds), in)
+	}
+	checkChain(t, st, m2.out, 0)
 }
