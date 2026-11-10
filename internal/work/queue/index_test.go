@@ -823,6 +823,10 @@ func TestARestartWhileAnOldIndexWaits(t *testing.T) {
 				t.Fatal(err)
 			}
 			restart()
+			// As if the tick before had spent the whole bound on record
+			// reads: each tick starts its count again, or a conversion
+			// would stop for good after its first 64.
+			q.recordReads = maxRecordReadsPerTick
 			tick(t, q)
 			tick(t, q)
 			end := get(t, ns, "bon")
