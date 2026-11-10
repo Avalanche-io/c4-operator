@@ -784,16 +784,5 @@ func TestADirectoryMadeAgainInsideAReplacedOne(t *testing.T) {
 	if a.ID != want.ID {
 		t.Fatalf("Apply gives %s, the filesystem %s", a.ID, want.ID)
 	}
-	// And by the c4m library's own rule, over the base as a whole c4m file.
-	pm, err := c4m.NewDecoder(bytes.NewReader(a.Changeset)).Decode()
-	if err != nil {
-		t.Fatal(err)
-	}
-	root, err := nodeFromManifest(c4m.ApplyPatch(base.Manifest(), pm))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if id := root.Identify(); id != want.ID {
-		t.Fatalf("by the c4m library the changeset gives %s, the filesystem %s\n%s", id, want.ID, a.Changeset)
-	}
+	// everyReader has checked the c4m library's own rule against Apply.
 }

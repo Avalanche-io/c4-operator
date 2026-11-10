@@ -466,7 +466,7 @@ func (q *Queue) fold(ctx context.Context, st *storeurl.Sharded, o *output, f Fol
 		for i := range o.folds {
 			if d := &o.folds[i]; d.BeforeRuns && d.Unit == idx && d.Changeset == f.Changeset {
 				d.BeforeRuns = false
-				conflicts = append(conflicts, fmt.Sprintf("unit %d may have been folded a second time after an upgrade: a fold of it from before names no run and has no task record that can be believed, so this pod may be that same run or a later one; if it is the same, and another unit wrote the same paths in between, this unit's older write now stands", idx))
+				conflicts = append(conflicts, fmt.Sprintf("a run of unit %d may have been folded twice after an upgrade: a fold of it from before names no run and has no task record that can be believed, so this pod may be that same run or a later one; if it is the same, and another unit wrote the same paths in between, this unit's older write now stands", idx))
 			}
 		}
 	}

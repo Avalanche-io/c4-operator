@@ -453,3 +453,37 @@ func TestAFailedSyncLeavesTheChainFileAsItWas(t *testing.T) {
 		t.Fatalf("something was left beside the chain file: %v", names)
 	}
 }
+
+// Whatever stops a chain file being replaced, the file is as it was and
+// nothing is left beside it; and what is written is the new bytes alone,
+// whatever an earlier attempt left in the temporary file.
+func TestReplacingAChainFileLeavesNoTrace(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "main.c4m")
+	// A longer temporary file left by an attempt that stopped.
+	if err := os.WriteFile(p+".tmp", bytes.Repeat([]byte("left over\n"), 50), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaceFile(p, []byte("short\n")); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(p); string(data) != "short\n" {
+		t.Fatalf("the file holds %q, want the new bytes alone", data)
+	}
+	// The rename fails: the path is a directory that is not empty.
+	blocked := filepath.Join(dir, "blocked.c4m")
+	if err := os.MkdirAll(filepath.Join(blocked, "inside"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaceFile(blocked, []byte("new\n")); err == nil {
+		t.Fatal("replacing a directory succeeded")
+	}
+	names, _ := os.ReadDir(dir)
+	var got []string
+	for _, n := range names {
+		got = append(got, n.Name())
+	}
+	if fmt.Sprint(got) != "[blocked.c4m main.c4m]" {
+		t.Fatalf("after a failed rename the folder holds %v", got)
+	}
+}
