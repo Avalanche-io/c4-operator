@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/Avalanche-io/c4"
@@ -51,11 +52,15 @@ type output struct {
 }
 
 // Fold is one fold of a job's output: the unit, its changeset and its task
-// record.
+// record, and the run that produced them.
 type Fold struct {
 	Unit      int    `json:"unit"`
 	Changeset string `json:"changeset"`
 	Record    string `json:"record,omitempty"`
+	// Run names the run of the unit: its pod's UID. A run in the log is
+	// never folded again. Empty for a reused computation, which has no run
+	// of its own and is folded as its unit is marked succeeded.
+	Run string `json:"run,omitempty"`
 }
 
 func newOutput() *output {
@@ -147,10 +152,42 @@ func (o *output) load(st *storeurl.Sharded, chainID, viewID string) error {
 	return nil
 }
 
-// fold applies the changeset csID, which unit idx's capture produced, to
+// fold brings one run of a unit, the changeset its capture produced, into
 // the job's output.
-func (q *Queue) fold(ctx context.Context, st *storeurl.Sharded, o *output, idx int, csID, record string) error {
-	id, err := c4.Parse(csID)
+//
+// The changeset is a patch over the unit's own input, and the output is
+// another view: other units have been folded into it, and so may this one
+// have been. A patch entry means a write or a removal by what its own base
+// holds, so each section is read against the view it was made over and what
+// it means is done to the output (view.ApplyPatchFrom). Applied to the
+// output as it stands, a file two units wrote alike, or one unit wrote
+// twice, would be removed.
+//
+// Folds are kept in order, and the later one wins: where two units wrote
+// one path differently the later fold's write is kept, and where a fold
+// removes or replaces a directory that holds another unit's writes they go
+// with it. Both are reported as conflicts, never refused.
+//
+// A run is folded once. Its pod can be seen again (after a restart the
+// queue has no memory, and a finished pod may still be there), and folding
+// it a second time would not always be nothing: if another unit wrote the
+// same path in between, the second fold would put this unit's write back
+// over it. So the fold log carries the run, and a run in the log is not
+// folded again. A unit that runs again is another run, and is folded: its
+// write is the later one.
+//
+// Nothing of the output changes unless the whole fold is stored: not the
+// chain, and not the writers, records or conflicts kept beside it.
+func (q *Queue) fold(ctx context.Context, st *storeurl.Sharded, o *output, f Fold) error {
+	idx := f.Unit
+	if f.Run != "" {
+		for _, done := range o.folds {
+			if done.Run == f.Run {
+				return nil
+			}
+		}
+	}
+	id, err := c4.Parse(f.Changeset)
 	if err != nil {
 		return err
 	}
@@ -160,7 +197,7 @@ func (q *Queue) fold(ctx context.Context, st *storeurl.Sharded, o *output, idx i
 	}
 	cs, err := c4view.ReadChain(data)
 	if err != nil {
-		return fmt.Errorf("changeset %s: %w", csID, err)
+		return fmt.Errorf("changeset %s: %w", f.Changeset, err)
 	}
 	if len(cs.Sections) == 0 {
 		return nil
@@ -174,19 +211,22 @@ func (q *Queue) fold(ctx context.Context, st *storeurl.Sharded, o *output, idx i
 	// whole fold is stored, so a fold that fails and is tried again never
 	// leaves a section in the chain twice.
 	chain := o.chain[:len(o.chain):len(o.chain)]
+	var paths, conflicts []string
+	named := map[string]bool{}
 	for _, sec := range cs.Sections {
 		for _, p := range patchPaths(sec.Patch) {
-			if w, ok := o.writer[p]; ok && w != idx {
-				o.conflicts = append(o.conflicts, fmt.Sprintf("%s written by units %d and %d", p, w, idx))
+			if named[p] {
+				continue
 			}
-			o.writer[p] = idx
-			o.fresh = append(o.fresh, freshPath{unit: idx, path: p})
-			if record != "" {
-				o.records[p] = record
-				o.dirty = true
+			named[p] = true
+			paths = append(paths, p)
+			if w, ok := o.writer[p]; ok && w != idx {
+				conflicts = append(conflicts, fmt.Sprintf("%s written by units %d and %d", p, w, idx))
 			}
 		}
-		res, err := c4view.ApplyPatch(ctx, cur, sec.Patch, src)
+		// Each section against its own base: the first's is the unit's
+		// input, and a later one's is the view the sections before it made.
+		res, err := c4view.ApplyPatchFrom(ctx, cur, sec.Base, sec.Patch, src)
 		if err != nil {
 			return fmt.Errorf("fold unit %d: %w", idx, err)
 		}
@@ -195,29 +235,73 @@ func (q *Queue) fold(ctx context.Context, st *storeurl.Sharded, o *output, idx i
 				return err
 			}
 		}
-		// The section as a changeset over the output it applies to: its
-		// first line is the boundary the chain needs before it.
-		text, err := c4view.EncodeChangeset(cur, sec.Patch)
-		if err != nil {
-			return fmt.Errorf("fold unit %d: %w", idx, err)
-		}
-		chain = append(chain, text...)
+		conflicts = append(conflicts, o.taken(idx, res.Dropped)...)
+		// What the section did to the output, as a changeset over the
+		// output, which is an ordinary changeset: the chain is read and
+		// verified like any other. A section that changed nothing adds
+		// nothing.
+		chain = append(chain, res.Changeset...)
 		cur = res.ID
 	}
-	if record != "" {
-		o.units[idx] = record
-		o.dirty = true
+	stored := chain
+	if len(stored) == 0 {
+		// Nothing has changed the job's input yet: the chain is that view alone.
+		if stored, err = (&c4view.Chain{Base: cur}).Encode(); err != nil {
+			return err
+		}
 	}
-	chainID, err := st.PutBytes(ctx, chain)
+	chainID, err := st.PutBytes(ctx, stored)
 	if err != nil {
 		return err
 	}
 	o.view, o.chain, o.id = cur, chain, chainID
+	for _, p := range paths {
+		o.writer[p] = idx
+		o.fresh = append(o.fresh, freshPath{unit: idx, path: p})
+		if f.Record != "" {
+			o.records[p] = f.Record
+		}
+	}
+	if f.Record != "" {
+		o.units[idx] = f.Record
+	}
+	o.conflicts = append(o.conflicts, conflicts...)
 	o.folded[idx]++
 	o.count++
-	o.folds = append(o.folds, Fold{Unit: idx, Changeset: csID, Record: record})
+	o.folds = append(o.folds, f)
 	o.dirty = true
 	return nil
+}
+
+// taken reports, for the paths a fold by unit idx took out of the output
+// without naming them (view.Applied.Dropped), the ones other units wrote:
+// a file a directory replaced, and for a directory that was removed or
+// replaced, how many paths under it each other unit had written.
+func (o *output) taken(idx int, dropped []string) []string {
+	var out []string
+	for _, d := range dropped {
+		if !strings.HasSuffix(d, "/") {
+			if w, ok := o.writer[d]; ok && w != idx {
+				out = append(out, fmt.Sprintf("%s written by unit %d, replaced by a directory by unit %d", d, w, idx))
+			}
+			continue
+		}
+		lost := map[int]int{}
+		for p, w := range o.writer {
+			if w != idx && strings.HasPrefix(p, d) {
+				lost[w]++
+			}
+		}
+		units := make([]int, 0, len(lost))
+		for w := range lost {
+			units = append(units, w)
+		}
+		sort.Ints(units)
+		for _, w := range units {
+			out = append(out, fmt.Sprintf("%s removed by unit %d: unit %d wrote %d of the paths under it", d, idx, w, lost[w]))
+		}
+	}
+	return out
 }
 
 // refoldOutput rebuilds the job's output from its fold log without the
@@ -253,7 +337,7 @@ func (q *Queue) refoldOutput(ctx context.Context, v *view) bool {
 		if m.superseded[f.Unit] {
 			continue
 		}
-		if err := q.fold(ctx, st, o, f.Unit, f.Changeset, f.Record); err != nil {
+		if err := q.fold(ctx, st, o, f); err != nil {
 			q.Log.Error(err, "refold", "job", v.key, "unit", f.Unit)
 			return false
 		}

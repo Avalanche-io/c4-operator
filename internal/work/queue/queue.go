@@ -2392,18 +2392,18 @@ func (q *Queue) foldPod(ctx context.Context, v *view, p *corev1.Pod, idx int) bo
 	if cs == "" || m.foldedPod[p.UID] || q.Stores == nil {
 		return true
 	}
-	if !q.foldChangeset(ctx, v, idx, cs, p.Annotations[c4v1.AnnotationOutputProvenance]) {
+	if !q.foldChangeset(ctx, v, Fold{Unit: idx, Changeset: cs, Record: p.Annotations[c4v1.AnnotationOutputProvenance], Run: string(p.UID)}) {
 		return false
 	}
 	m.foldedPod[p.UID] = true
 	return true
 }
 
-// foldChangeset folds one changeset of unit idx, with its task record,
-// into the job's output. It reports false when it must be tried again.
-func (q *Queue) foldChangeset(ctx context.Context, v *view, idx int, cs, record string) bool {
+// foldChangeset folds one changeset of a unit, with its task record, into
+// the job's output. It reports false when it must be tried again.
+func (q *Queue) foldChangeset(ctx context.Context, v *view, f Fold) bool {
 	m := v.mem
-	if cs == "" || q.Stores == nil {
+	if f.Changeset == "" || q.Stores == nil {
 		return true
 	}
 	if q.folds >= maxFoldsPerTick {
@@ -2423,8 +2423,8 @@ func (q *Queue) foldChangeset(ctx context.Context, v *view, idx int, cs, record 
 		q.Log.Error(err, "load output", "job", v.key)
 		return false
 	}
-	if err := q.fold(ctx, st, m.out, idx, cs, record); err != nil {
-		q.Log.Error(err, "fold", "job", v.key, "unit", idx)
+	if err := q.fold(ctx, st, m.out, f); err != nil {
+		q.Log.Error(err, "fold", "job", v.key, "unit", f.Unit)
 		return false
 	}
 	return true

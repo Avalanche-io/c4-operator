@@ -36,6 +36,12 @@ type Applied struct {
 	// beside it. Empty when nothing changed.
 	Changeset   []byte
 	ChangesetID c4.ID
+	// Dropped, from ApplyPatchFrom only, are the paths the patch took out
+	// of the target without an entry of their own: a directory removed or
+	// replaced whole (ending in "/", and everything under it went), and a
+	// file a directory took the place of. A caller with a conflict rule
+	// looks under them for what someone else wrote.
+	Dropped []string
 
 	Added, Modified, Deleted int
 	Bytes                    int64 // size of added and modified files
@@ -67,6 +73,12 @@ func Apply(ctx context.Context, parent c4.ID, edits []Edit, src RecordSource) (*
 			return nil, err
 		}
 	}
+	return t.applied(parent)
+}
+
+// applied identifies the edited tree and writes the changeset over parent
+// that describes the edits.
+func (t *atree) applied(parent c4.ID) (*Applied, error) {
 	res := &Applied{Parent: parent}
 	rootEntry := t.identify(t.root, &res.Records)
 	res.ID = rootEntry.C4ID
@@ -126,6 +138,10 @@ type atree struct {
 	ctx  context.Context
 	src  RecordSource
 	root *anode
+	// dropped are the paths taken out of the tree by an edit that did not
+	// name them: a directory removed or replaced whole (ending in "/"),
+	// and a file a directory took the place of.
+	dropped []string
 }
 
 func (t *atree) load(n *anode) error {
@@ -161,7 +177,7 @@ func (t *atree) load(n *anode) error {
 func (t *atree) walkTo(dirs []string, create bool) (*anode, error) {
 	cur := t.root
 	path := []*anode{cur}
-	for _, c := range dirs {
+	for i, c := range dirs {
 		if err := t.load(cur); err != nil {
 			return nil, err
 		}
@@ -170,7 +186,10 @@ func (t *atree) walkTo(dirs []string, create bool) (*anode, error) {
 			if !create {
 				return nil, nil
 			}
-			delete(cur.files, strings.TrimSuffix(c, "/"))
+			if f := strings.TrimSuffix(c, "/"); cur.files[f] != nil {
+				delete(cur.files, f)
+				t.dropped = append(t.dropped, strings.Join(dirs[:i], "")+f)
+			}
 			next = &anode{name: c, loaded: true, files: map[string]*c4m.Entry{}, dirs: map[string]*anode{}}
 			cur.dirs[c] = next
 		}

@@ -216,74 +216,188 @@ func bareID(line string) (c4.ID, bool) {
 	return id, true
 }
 
-// ApplyPatch applies a c4m patch to the view base with c4m's patch
-// semantics, matched by path: an entry identical to the base's, with no
-// children under it, removes that path; a differing entry replaces it; a
-// new path is added; a directory entry followed by children merges them.
-// It reads only the base's records along the patch's paths.
+// ApplyPatch applies a c4m patch to the view base, the view it was made
+// over, with c4m's patch semantics, matched by path: an entry identical to
+// the base's, with no children under it, removes that path; a differing
+// entry replaces it; a new path is added; a directory entry followed by
+// children merges them. It reads only the base's records along the patch's
+// paths.
 func ApplyPatch(ctx context.Context, base c4.ID, patch *c4m.Manifest, src RecordSource) (*Applied, error) {
 	t := &atree{ctx: ctx, src: src, root: &anode{base: base}}
-	var stack []string
-	entries := patch.Entries
-	for i, e := range entries {
-		if e.Depth > len(stack) {
-			return nil, fmt.Errorf("malformed patch: %q at depth %d has no parent", e.Name, e.Depth)
-		}
-		stack = stack[:e.Depth]
-		if err := CheckName(e.Name); err != nil {
-			return nil, err
-		}
-		dir := strings.Join(stack, "")
-		pe := Project(e)
-		hasChildren := i+1 < len(entries) && entries[i+1].Depth > e.Depth
-		parent, err := t.walkTo(splitDir(dir), true)
-		if err != nil {
-			return nil, err
-		}
-		name := pe.Name
-		// What the base holds here decides what the entry means, whatever
-		// an earlier entry of this patch has done since. A directory
-		// replaced by a file is written as the file, then the directory
-		// restated (files sort first): by then the file's entry has taken
-		// the directory out, and the restatement still means its removal.
-		// Read against the tree as edited so far, it looked like a new
-		// directory and put the old one back over the file.
-		existing, had := parent.orig[name]
-		if had && !hasChildren && sameEntry(existing, pe) && existing.C4ID == pe.C4ID {
-			// An exact restatement removes the path.
-			delete(parent.files, name)
-			delete(parent.dirs, name)
-			if pe.IsDir() {
-				stack = append(stack, name)
-			}
-			continue
-		}
-		if !pe.IsDir() {
-			delete(parent.dirs, strings.TrimSuffix(name, "/")+"/")
-			pe.Depth = 0
-			parent.files[name] = pe
-			continue
-		}
-		delete(parent.files, strings.TrimSuffix(name, "/"))
-		child, ok := parent.dirs[name]
-		switch {
-		case !ok:
-			// A new directory: by ID alone (expand from its record) or
-			// with its children following.
-			child = &anode{name: name, base: pe.C4ID, entry: pe}
-			if hasChildren || pe.C4ID.IsNil() {
-				child = &anode{name: name, loaded: true, files: map[string]*c4m.Entry{}, dirs: map[string]*anode{}}
-			}
-			parent.dirs[name] = child
-		case !hasChildren && child.base != pe.C4ID:
-			// Clobbered by ID alone: c4m keeps the existing children.
-		}
-		stack = append(stack, name)
+	if err := applyPatchFrom(t, t, patch); err != nil {
+		return nil, err
 	}
 	res := &Applied{Parent: base}
 	root := t.identify(t.root, &res.Records)
 	res.ID = root.C4ID
 	return res, nil
+}
+
+// ApplyPatchFrom applies to the view target a patch that was made over the
+// view base. A patch entry says what it means only against its own base:
+// identical to what the base holds, it removes the path; anything else, it
+// is the entry now at that path. Applied to another view as it stands, a
+// write of something that view already holds would read as a removal. So
+// each entry is read against base, and what it means is done to target: a
+// path the patch removes is removed from target, and an entry the patch
+// writes is written to target, over whatever target holds there. There is
+// no conflict rule in this; a caller that wants one compares the paths.
+//
+// A directory entry with children under it is context for them and writes
+// nothing itself: a write below it makes the directory where the target has
+// none, and a removal below it does not. A write takes the place of what
+// the target holds at its path whatever its kind, so a file written where
+// the target has a directory takes the directory and all under it, and the
+// result's Dropped names what went that way.
+//
+// With target equal to base this is ApplyPatch. It is idempotent: applied
+// again to its own result it changes nothing. The result carries the
+// changeset over target that describes it, empty when nothing changed, and
+// that changeset is an ordinary one: a chain it is appended to verifies by
+// ApplyPatch alone.
+//
+// The c4m library has the same operation, with the same name, on whole c4m
+// files. This is the form for a view loaded from records along the changed
+// paths, and it follows the library's rule that a name is one thing
+// whatever its kind. Three readings here are the ones proposed for the
+// library and not yet ruled on (2026-11-09), and are to follow the ruling:
+// a removal leaves a thing of the other kind that has taken the path since;
+// a directory written by its ID alone takes the place of the one the target
+// holds; and an empty directory written where the target holds a directory
+// says only that the directory exists, and leaves it as it is (a unit that
+// ran mkdir does not remove what another unit wrote there).
+func ApplyPatchFrom(ctx context.Context, target, base c4.ID, patch *c4m.Manifest, src RecordSource) (*Applied, error) {
+	tt := &atree{ctx: ctx, src: src, root: &anode{base: target}}
+	tb := tt
+	if base != target {
+		tb = &atree{ctx: ctx, src: src, root: &anode{base: base}}
+	}
+	if err := applyPatchFrom(tt, tb, patch); err != nil {
+		return nil, err
+	}
+	res, err := tt.applied(target)
+	if err != nil {
+		return nil, err
+	}
+	res.Dropped = tt.dropped
+	return res, nil
+}
+
+// applyPatchFrom walks a patch once. What each entry means is read from
+// tb, the tree the patch was made over; the edit is made in tt. They are
+// one tree when a patch is applied to its own base, and tb is never edited
+// otherwise.
+func applyPatchFrom(tt, tb *atree, patch *c4m.Manifest) error {
+	same := tt == tb
+	var stack []string
+	entries := patch.Entries
+	for i, e := range entries {
+		if e.Depth > len(stack) {
+			return fmt.Errorf("malformed patch: %q at depth %d has no parent", e.Name, e.Depth)
+		}
+		stack = stack[:e.Depth]
+		if err := CheckName(e.Name); err != nil {
+			return err
+		}
+		dirs := splitDir(strings.Join(stack, ""))
+		pe := Project(e)
+		name := pe.Name
+		hasChildren := i+1 < len(entries) && entries[i+1].Depth > e.Depth
+
+		// What the patch's own base holds at this path decides what the
+		// entry means, whatever an earlier entry of this patch has done
+		// since: a directory replaced by a file is written as the file,
+		// then the directory restated (files sort first), and by then the
+		// file's entry has taken the directory out. Applied in place, the
+		// directories on the way are made, as a write below them needs.
+		from, err := tb.walkTo(dirs, same)
+		if err != nil {
+			return err
+		}
+		var existing *c4m.Entry
+		had := false
+		if from != nil {
+			existing, had = from.orig[name]
+		}
+		path := strings.Join(stack, "")
+		if had && !hasChildren && sameEntry(existing, pe) {
+			// An exact restatement: the patch removes the path. In another
+			// tree there may be nothing there to remove.
+			to := from
+			if !same {
+				if to, err = tt.walkTo(dirs, false); err != nil {
+					return err
+				}
+			}
+			if to != nil {
+				delete(to.files, name)
+				if to.dirs[name] != nil {
+					delete(to.dirs, name)
+					tt.dropped = append(tt.dropped, path+name)
+				}
+			}
+			if pe.IsDir() {
+				stack = append(stack, name)
+			}
+			continue
+		}
+		if !same && pe.IsDir() && hasChildren {
+			// A directory restated for what follows under it: the patch
+			// changes those paths, not the directory. A write under it
+			// makes it where the target has none; a removal under it must
+			// not, or a directory the target no longer has would come back
+			// empty.
+			stack = append(stack, name)
+			continue
+		}
+		to := from
+		if !same {
+			if to, err = tt.walkTo(dirs, true); err != nil {
+				return err
+			}
+		}
+		if !pe.IsDir() {
+			if to.dirs[name+"/"] != nil {
+				delete(to.dirs, name+"/")
+				tt.dropped = append(tt.dropped, path+name+"/")
+			}
+			pe.Depth = 0
+			to.files[name] = pe
+			continue
+		}
+		if f := strings.TrimSuffix(name, "/"); to.files[f] != nil {
+			delete(to.files, f)
+			tt.dropped = append(tt.dropped, path+f)
+		}
+		child, ok := to.dirs[name]
+		switch {
+		case !ok && !hasChildren && !pe.C4ID.IsNil():
+			// A new directory by ID alone: its record says what it holds.
+			to.dirs[name] = &anode{name: name, base: pe.C4ID, entry: pe}
+		case !ok:
+			// A new directory with its children following, or one that
+			// names no contents at all, which is taken as empty. It is
+			// dirty from the start, so it is identified from what it holds
+			// even when no entry follows under it.
+			to.dirs[name] = &anode{name: name, loaded: true, dirty: true, files: map[string]*c4m.Entry{}, dirs: map[string]*anode{}}
+		case hasChildren, pe.C4ID.IsNil(), pe.C4ID == emptyID, pe.C4ID == child.base && !child.dirty:
+			// The directory is there. Its children follow, or the entry
+			// brings nothing the directory lacks: a directory made empty
+			// beside one that others have filled (two units both running
+			// mkdir -p) leaves what the others wrote.
+		default:
+			// Written by ID alone where the tree holds another directory:
+			// the path now holds the listing the ID names, and what was
+			// there goes. That is so over the patch's own base too, which
+			// is what lets the changeset this writes for such a patch be
+			// read back by the plain rule. Capture never writes one (a
+			// changed directory is followed by its changes).
+			to.dirs[name] = &anode{name: name, base: pe.C4ID, entry: pe}
+			tt.dropped = append(tt.dropped, path+name)
+		}
+		stack = append(stack, name)
+	}
+	return nil
 }
 
 // ExportChain writes a chain with its base listing in full instead of an

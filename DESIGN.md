@@ -1870,10 +1870,33 @@ output chain: one changeset per fold, each over the output before it, so
 every intermediate output is named in the chain and can be verified and
 mounted. The chain is stored in the project's store and named in the job's
 status beside the current output view, which the chain does not hold
-(`status.output`). Writes by two units to the same path are reported in
-status, not merged silently. A unit's pod is deleted only after its fold is
-recorded, so a restart repeats no fold and loses none. A downstream job's `fromJob` input
-mounts that view. The dependency graph (sim to render to comp to transcode to
+(`status.output`).
+
+A unit's changeset is a patch over the unit's own input, and a patch entry
+means a write or a removal by what its own base holds; the output is
+another view. So a fold reads each entry against the changeset's base and
+does what it means to the output (`view.ApplyPatchFrom`): a path the unit
+removed is removed, an entry the unit wrote is written. Applied to the
+output as it stood, a file two units wrote alike, or one unit wrote twice,
+read as a removal. The changeset each fold appends to the chain is the one
+computed over the output, an ordinary changeset.
+
+Folds are kept in order and the later one stands. Where two units write one
+path differently the later fold's write is kept; where a fold removes a
+directory, or puts a file in its place, what another unit wrote under it
+goes with it. Both are reported in status, never merged silently and never
+refused.
+
+A run of a unit is folded once. A unit's pod is deleted only after its fold
+is recorded, so a restart loses no fold, and it may see a finished pod
+again. Folding that pod a second time would not always be harmless: if
+another unit wrote the same path in between, the second fold would put the
+first unit's write back over it. So the fold log, kept in the provenance
+index, names each fold's run (its pod), and a run in the log is not folded
+again; a unit that runs again is another run, and its write is the later
+one.
+
+A downstream job's `fromJob` input mounts that view. The dependency graph (sim to render to comp to transcode to
 delivery) is therefore also a data-flow graph of content-addressed trees, and
 each output is already cached on the nodes and regional replicas that
 produced it.

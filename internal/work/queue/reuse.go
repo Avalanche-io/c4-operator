@@ -81,7 +81,7 @@ func (q *Queue) reuseUnits(ctx context.Context, v *view, now time.Time) bool {
 		if !ok || b.NeedsVerification(program, draw(unitID(v.key, idx), m.attempts[idx])) {
 			continue
 		}
-		if !q.foldChangeset(ctx, v, idx, ru.Changeset, ru.Record) {
+		if !q.foldChangeset(ctx, v, Fold{Unit: idx, Changeset: ru.Changeset, Record: ru.Record}) {
 			continue
 		}
 		m.succeeded[idx] = true
