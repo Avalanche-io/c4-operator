@@ -1089,6 +1089,21 @@ import step, so import must be fast and push-driven.
   push-to-view latency as well as per-commit cost. Each branch is one chain
   (section 2.5), appended per commit, so `c4 log` lists a branch's commits
   as views.
+- **The mapping is the record, and a branch's chain file is made from it.**
+  Each commit's mapping line carries its changeset's C4 ID, its view and
+  its place in the branch's chain, and is written after the changeset is in
+  the store. The chain file is those changesets joined, kept so an append
+  costs one changeset. Both are appended to in place and neither is synced.
+  A cut mapping line cannot pass for a whole one (a JSON object without its
+  end does not parse): a reader leaves it out, the next writer takes it
+  off, and that commit is imported again. A cut c4m entry can: cut anywhere
+  from its name to one byte into its C4 ID it is still an entry, with no
+  C4 ID, since a missing ID is a null the format allows. So the chain file
+  is never taken at its own word. It is opened as the mapping records it:
+  if it does not read, or does not resolve to the view the mapping records
+  for the branch's last commit, it is made again from the stored
+  changesets, each checked against its C4 ID and the whole against that
+  view. A reader of a branch's chain is served the same way.
 - **c4git files** are 90-byte C4 IDs in git. The importer uses the ID
   directly, copies the object from the c4git store without rehashing (c4git
   verified it at `git add`), and takes its size from the store.

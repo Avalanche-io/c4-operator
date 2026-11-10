@@ -2,6 +2,7 @@ package gitimport
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,21 +31,44 @@ func ReadMapping(p string) ([]Commit, error) {
 }
 
 // DecodeMapping reads mapping lines.
+//
+// A line is appended in one write and ends with a newline. Text at the end
+// of the file with no newline after it is an append a crash cut short, or
+// one a reader caught half written: if it is not a whole line it is left
+// out, and that commit is as if not imported yet. A cut line cannot be
+// taken for a whole one, since a JSON object that lacks its end does not
+// parse. A line that does end with a newline and does not parse is damage,
+// and an error.
 func DecodeMapping(r io.Reader) ([]Commit, error) {
-	var out []Commit
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 1<<16), 64<<20)
-	for n := 1; sc.Scan(); n++ {
-		if len(sc.Bytes()) == 0 {
-			continue
+	out, _, err := decodeMapping(r)
+	return out, err
+}
+
+// decodeMapping also returns how many bytes of r are whole lines.
+func decodeMapping(r io.Reader) (out []Commit, whole int64, err error) {
+	br := bufio.NewReaderSize(r, 1<<16)
+	for n := 1; ; n++ {
+		line, rerr := br.ReadBytes('\n')
+		if rerr != nil && rerr != io.EOF {
+			return nil, 0, rerr
 		}
-		var c Commit
-		if err := json.Unmarshal(sc.Bytes(), &c); err != nil {
-			return nil, fmt.Errorf("mapping line %d: %w", n, err)
+		ended := rerr == nil
+		if text := bytes.TrimSpace(line); len(text) > 0 {
+			var c Commit
+			switch err := json.Unmarshal(text, &c); {
+			case err == nil:
+				out = append(out, c)
+			case ended:
+				return nil, 0, fmt.Errorf("mapping line %d: %w", n, err)
+			default:
+				return out, whole, nil // a cut append: not a line yet
+			}
 		}
-		out = append(out, c)
+		whole += int64(len(line))
+		if !ended {
+			return out, whole, nil
+		}
 	}
-	return out, sc.Err()
 }
 
 // KnownViews returns commit to view ID for a mapping.
@@ -102,7 +126,46 @@ func AppendMapping(p string) (*MappingWriter, error) {
 		f.Close()
 		return nil, fmt.Errorf("lock %s: %w", p, err)
 	}
+	if err := mendTail(p, f); err != nil {
+		f.Close()
+		return nil, err
+	}
 	return &MappingWriter{f: f, enc: json.NewEncoder(f)}, nil
+}
+
+// mendTail leaves the mapping ending at the end of a line before anything
+// is appended to it, under the writer's lock: a cut append is taken off,
+// and a whole last line that lost only its newline is given one. Appended
+// to as it was, the cut text and the next line would make one line that
+// does not parse, in the middle of the file, for good.
+func mendTail(p string, f *os.File) error {
+	r, err := os.Open(p)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	st, err := r.Stat()
+	if err != nil {
+		return err
+	}
+	_, whole, err := decodeMapping(r)
+	if err != nil {
+		return err
+	}
+	if whole < st.Size() {
+		return f.Truncate(whole)
+	}
+	if whole == 0 {
+		return nil
+	}
+	last := make([]byte, 1)
+	if _, err := r.ReadAt(last, whole-1); err != nil {
+		return err
+	}
+	if last[0] != '\n' {
+		_, err = f.Write([]byte("\n"))
+	}
+	return err
 }
 
 // Write appends one commit.

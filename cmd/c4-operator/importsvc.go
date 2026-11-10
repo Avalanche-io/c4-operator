@@ -130,8 +130,15 @@ func (s *importService) importRef(ctx context.Context, ref, rev string, sinceLas
 		if err := os.MkdirAll(s.out+".chains", 0o755); err != nil {
 			return nil, err
 		}
-		if chain, err = gitimport.OpenChainFile(ctx, s.chainPath(ref), s.base.Records); err != nil {
+		// Opened as the mapping records it, never at the file's own word:
+		// a file torn by a crash, or ahead of or behind the mapping, is
+		// made again from the stored changesets first.
+		var repaired string
+		if chain, repaired, err = gitimport.OpenRecordedChain(ctx, s.chainPath(ref), s.base.Records, prior, ref); err != nil {
 			return nil, err
+		}
+		if repaired != "" {
+			fmt.Fprintf(s.log, "chain file for %s made again from the mapping: %s\n", ref, repaired)
 		}
 	}
 	var writeErr error
@@ -368,13 +375,31 @@ func (s *importService) handler(secret string) http.Handler {
 	// The chain of a ref, as c4 split reads it; with ?full=1 its base is
 	// written out in full, as c4 log needs (DESIGN.md section 2.3).
 	mux.HandleFunc("GET /chains/{ref...}", func(w http.ResponseWriter, r *http.Request) {
-		data, err := gitimport.ReadChainFile(s.chainPath(r.PathValue("ref")))
-		if errors.Is(err, os.ErrNotExist) {
-			http.NotFound(w, r)
-			return
+		// Served as the mapping records it: the file when it is that chain,
+		// and otherwise the chain made from the stored changesets. A reader
+		// never gets a file a crash tore, or one an import is half way
+		// through appending to.
+		ref := r.PathValue("ref")
+		m, err := gitimport.ReadMapping(s.out)
+		var data []byte
+		if err == nil {
+			// The ref as the mapping spells it: a chain file's name does
+			// not tell a slash from an underscore, and the request was
+			// always matched by file name.
+			for name := range gitimport.LastByRef(m) {
+				if gitimport.ChainFileName(name) == gitimport.ChainFileName(ref) {
+					ref = name
+					break
+				}
+			}
+			data, err = gitimport.RecordedChainBytes(r.Context(), s.chainPath(ref), s.base.Records, m, ref)
 		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if data == nil {
+			http.NotFound(w, r)
 			return
 		}
 		if r.URL.Query().Get("full") != "" {

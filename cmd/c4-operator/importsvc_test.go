@@ -216,3 +216,96 @@ func TestPostReceive(t *testing.T) {
 		t.Fatalf("mapping: %+v", m)
 	}
 }
+
+// A crash can cut the chain file's last changeset or the mapping's last
+// line. Through the service, with real pushes: after each kind of damage
+// the next push imports, the mapping reads, the chain served is the chain
+// of the commits imported, and the ref's view is the head commit's. Before,
+// a chain file cut in an entry's name opened as a chain to a view no
+// commit made, and most other cuts stopped the ref's imports for good.
+func TestTheNextPushAfterATornFile(t *testing.T) {
+	r := newPushRig(t)
+	h := r.svc.handler("")
+	chains := func() []byte {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/chains/refs/heads/main", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /chains: %d %s", rec.Code, rec.Body)
+		}
+		return rec.Body.Bytes()
+	}
+	push := func(files map[string]string) (string, refResult) {
+		t.Helper()
+		c := r.commit(files)
+		r.git(r.work, "push", "-q", "origin", "main")
+		rec, res := r.post(h, `{"ref":"refs/heads/main","after":"`+c+`"}`, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("push: %d %s", rec.Code, rec.Body)
+		}
+		return c, res
+	}
+	// The chain a reader is served must resolve to the view of head.
+	headIs := func(what string, res refResult) {
+		t.Helper()
+		c, err := view.ReadChain(chains())
+		if err != nil {
+			t.Fatalf("%s: the chain served does not read: %v", what, err)
+		}
+		views, err := c.Verify(context.Background(), r.svc.base.Records)
+		if err != nil || len(views) == 0 || views[len(views)-1].String() != res.View {
+			t.Fatalf("%s: the chain served resolves to %v (%v), the ref's view is %s", what, views, err, res.View)
+		}
+	}
+	r.commit(map[string]string{"a.txt": "a\n", "dir/same.txt": "one\n"})
+	push(map[string]string{"dir/same.txt": "two\n"})
+	_, res := push(map[string]string{"dir/more.txt": "more\n"})
+	headIs("before any damage", res)
+	chainPath := r.svc.chainPath("refs/heads/main")
+	whole, err := os.ReadFile(chainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The chain file cut in its last entry's name: it still parses.
+	cut := bytes.LastIndex(whole, []byte("more.txt")) + len("mo")
+	if err := os.WriteFile(chainPath, whole[:cut], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := chains(); !bytes.Equal(got, whole) {
+		t.Fatalf("a reader was served the torn chain:\n%s", got)
+	}
+	_, res = push(map[string]string{"b.txt": "b\n"})
+	if len(res.Commits) != 1 {
+		t.Fatalf("after a torn chain file the push imported %d commits", len(res.Commits))
+	}
+	headIs("after a torn chain file", res)
+
+	// The chain file cut where it no longer parses.
+	whole, _ = os.ReadFile(chainPath)
+	if err := os.WriteFile(chainPath, whole[:len(whole)-30], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, res = push(map[string]string{"c.txt": "c\n"})
+	headIs("after a chain file that does not parse", res)
+
+	// The mapping's last line cut: that commit is imported again, onto
+	// the chain as the shorter mapping records it.
+	m, err := os.ReadFile(r.svc.out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := gitimport.ReadMapping(r.svc.out)
+	if err := os.WriteFile(r.svc.out, m[:len(m)-25], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, res := push(map[string]string{"d.txt": "d\n"})
+	after, err := gitimport.ReadMapping(r.svc.out)
+	if err != nil {
+		t.Fatalf("the mapping does not read after a cut line: %v", err)
+	}
+	if gitimport.LastByRef(after)["refs/heads/main"] != c || len(after) < len(before) {
+		t.Fatalf("after a cut mapping line: %d lines (were %d), main at %s", len(after), len(before), gitimport.LastByRef(after)["refs/heads/main"])
+	}
+	headIs("after a cut mapping line", res)
+}
