@@ -348,6 +348,9 @@ func (q *Queue) refoldOutput(ctx context.Context, v *view) bool {
 		}
 		if err := q.fold(ctx, st, o, f); err != nil {
 			q.Log.Error(err, "refold", "job", v.key, "unit", f.Unit)
+			if v.foldWait == "" {
+				v.foldWait = fmt.Sprintf("unit %d, rebuilding the output without superseded units: %v", f.Unit, err)
+			}
 			return false
 		}
 	}

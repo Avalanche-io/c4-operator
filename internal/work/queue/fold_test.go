@@ -1370,12 +1370,24 @@ func TestAFoldThatFailsIsACondition(t *testing.T) {
 	}
 
 	finishUnit(t, now, ns, "bon", 2, map[string]string{c4v1.AnnotationOutputChangeset: byID.String()})
-	for range 3 {
+	var since metav1.Time
+	for i := range 3 {
+		// Long enough, by the queue's clock and the wall's, for a status
+		// to be written again and for a condition made anew to show it.
+		*now = now.Add(11 * time.Second)
+		time.Sleep(1100 * time.Millisecond)
 		tick(t, q)
 		got := get(t, ns, "bon")
 		c := meta.FindStatusCondition(got.Status.Conditions, ConditionOutputRecorded)
 		if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "FoldFailed" || !strings.Contains(c.Message, "unit 2") || !strings.Contains(c.Message, "by its C4 ID alone") {
 			t.Fatalf("the status does not say the fold fails, or why: %+v", got.Status.Conditions)
+		}
+		// The condition says since when: a fold that has failed for an
+		// hour must not read as one that has just begun to.
+		if i == 0 {
+			since = c.LastTransitionTime
+		} else if !c.LastTransitionTime.Equal(&since) {
+			t.Fatalf("the condition's time moved from %s to %s while the fold went on failing", since.Time, c.LastTransitionTime.Time)
 		}
 		if got.Status.Output == nil || got.Status.Output.Changesets != 1 {
 			t.Fatalf("the output moved, or lost the other unit's fold: %+v", got.Status.Output)
@@ -1398,5 +1410,37 @@ func TestAFoldThatFailsIsACondition(t *testing.T) {
 	}
 	if !kept {
 		t.Fatal("the pod whose changes are not folded was deleted")
+	}
+}
+
+// What is and is not a failed fold, at the call that makes one: a fold
+// held over to the next tick by the per-tick limit is not; an output that
+// cannot be loaded is, and the first failure of a tick is the one kept.
+func TestWhatCountsAsAFoldThatFailed(t *testing.T) {
+	ctx := context.Background()
+	st, _ := foldStore(t)
+	q := &Queue{Stores: func(context.Context, string) (*storeurl.Sharded, error) { return st, nil }}
+	in := inputView(t, st, map[string]string{"in.txt": "input"})
+	cs := unitChangeset(t, st, in, map[string]string{"a.txt": "a"})
+
+	v := &view{key: "ns/job", project: "show", mem: &jobMem{out: newOutput()}}
+	q.folds = maxFoldsPerTick
+	if q.foldChangeset(ctx, v, Fold{Unit: 1, Changeset: cs}) || v.foldWait != "" {
+		t.Fatalf("a fold held over by the limit: said %q", v.foldWait)
+	}
+	q.folds = 0
+
+	// The status names a chain that is not in the store.
+	missing := c4.Identify(strings.NewReader("no such chain")).String()
+	v = &view{key: "ns/job", project: "show", mem: &jobMem{out: newOutput(), outLoad: missing, outView: in.String()}}
+	if q.foldChangeset(ctx, v, Fold{Unit: 3, Changeset: cs}) {
+		t.Fatal("a fold onto an output that cannot be loaded succeeded")
+	}
+	if !strings.Contains(v.foldWait, "unit 3, load output") {
+		t.Fatalf("an output that cannot be loaded: said %q", v.foldWait)
+	}
+	first := v.foldWait
+	if q.foldChangeset(ctx, v, Fold{Unit: 4, Changeset: cs}) || v.foldWait != first {
+		t.Fatalf("a second failure in the tick replaced the first: %q", v.foldWait)
 	}
 }

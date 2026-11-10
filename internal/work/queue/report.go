@@ -151,16 +151,19 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 			Message: "the job's output is folded and its provenance index could not be saved, so this status is the last one written and waits until it is: " + v.outWait})
 		return st
 	}
-	meta.RemoveStatusCondition(&st.Conditions, ConditionOutputRecorded)
 	if v.foldWait != "" {
-		// A finished unit's changes could not be folded into the output
-		// (queue.go, foldChangeset). The rest of the status goes on as
-		// usual; this says why that unit stays finishing. It is written
-		// with the change that comes with it (the unit goes to finishing,
-		// or the output moves), or at the next status otherwise.
+		// A unit's changes could not be folded into the output (queue.go,
+		// foldChangeset). The rest of the status goes on as usual; this
+		// says why that unit stays finishing. It is written with the
+		// change that comes with it (the unit goes to finishing, or the
+		// output moves), or at the next status otherwise. Set over the
+		// condition already there, never removed and set again, so the
+		// time it carries is when the output first fell behind.
 		meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: ConditionOutputRecorded, Status: metav1.ConditionFalse,
 			Reason: "FoldFailed", ObservedGeneration: v.job.Generation,
-			Message: "a finished unit's changes are not in the job's output, and the fold is tried again every tick: " + v.foldWait})
+			Message: "a unit's changes are not in the job's output, and the fold is tried again every tick: " + v.foldWait})
+	} else {
+		meta.RemoveStatusCondition(&st.Conditions, ConditionOutputRecorded)
 	}
 	if v.planWait != "" && m.plan == nil {
 		// The unit table waits on the store (graph.go): keep the last
