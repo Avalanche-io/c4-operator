@@ -15,7 +15,10 @@ import (
 
 func proj(name string, verify bool, group string) *c4v1.Project {
 	p := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: name}}
-	p.Spec.Store.VerifyFill = verify
+	if !verify {
+		no := false
+		p.Spec.Store.VerifyFill = &no // the stated opt-out; absent verifies
+	}
 	if group != "" {
 		p.Spec.Isolation = c4v1.IsolationShared
 		p.Spec.SharingGroup = group

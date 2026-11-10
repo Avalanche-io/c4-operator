@@ -217,9 +217,12 @@ spec:
                     minItems: 1
                     type: array
                   verifyFill:
+                    default: true
                     description: |-
-                      VerifyFill rehashes objects as node caches fill. Off by default:
-                      bytes are verified once, when they enter the store.
+                      VerifyFill checks every object against its C4 ID as a cache fills
+                      from another machine: a tier, a peer or the store. On by default.
+                      False says this project trusts whatever its sources send under an
+                      ID, and takes the bytes unchecked.
                     type: boolean
                 required:
                 - shards

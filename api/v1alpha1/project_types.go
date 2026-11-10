@@ -59,11 +59,19 @@ type ProjectStore struct {
 	// +optional
 	Access StoreAccess `json:"access,omitempty"`
 
-	// VerifyFill rehashes objects as node caches fill. Off by default:
-	// bytes are verified once, when they enter the store.
+	// VerifyFill checks every object against its C4 ID as a cache fills
+	// from another machine: a tier, a peer or the store. On by default.
+	// False says this project trusts whatever its sources send under an
+	// ID, and takes the bytes unchecked.
+	// +kubebuilder:default=true
 	// +optional
-	VerifyFill bool `json:"verifyFill,omitempty"`
+	VerifyFill *bool `json:"verifyFill,omitempty"`
 }
+
+// VerifiesFills reports whether fills check bytes against their C4 ID:
+// true unless the project says false. A project stored before the field
+// had a default has none, and verifies.
+func (s *ProjectStore) VerifiesFills() bool { return s.VerifyFill == nil || *s.VerifyFill }
 
 // StoreShard is one shard of a project's store.
 type StoreShard struct {

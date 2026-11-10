@@ -88,13 +88,14 @@ func (r *Registry) List(ctx context.Context) ([]c4v1.Project, error) {
 	return list.Items, nil
 }
 
-// VerifiesFills reports whether fills for p hash what they fetch: p asks
-// (spec.store.verifyFill), or p shares its partition (Shared isolation)
-// with a project that does. Projects of one partition share their fills,
-// so a project that verifies must not join a fill one that doesn't
-// started. When the projects can't be listed, it says yes.
+// VerifiesFills reports whether fills for p hash what they fetch. They do
+// unless p says not to (spec.store.verifyFill: false), and then still do
+// when p shares its partition (Shared isolation) with a project that
+// verifies: projects of one partition share their fills, so a project that
+// verifies must not join a fill one that doesn't started. When the
+// projects can't be listed, it says yes.
 func (r *Registry) VerifiesFills(ctx context.Context, p *c4v1.Project) bool {
-	if p.Spec.Store.VerifyFill {
+	if p.Spec.Store.VerifiesFills() {
 		return true
 	}
 	if p.Spec.Isolation != c4v1.IsolationShared || p.Spec.SharingGroup == "" {
@@ -106,7 +107,7 @@ func (r *Registry) VerifiesFills(ctx context.Context, p *c4v1.Project) bool {
 		return true
 	}
 	for i := range all {
-		if all[i].Partition() == part && all[i].Spec.Store.VerifyFill {
+		if all[i].Partition() == part && all[i].Spec.Store.VerifiesFills() {
 			return true
 		}
 	}

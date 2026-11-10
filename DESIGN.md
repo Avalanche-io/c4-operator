@@ -14,9 +14,10 @@ are all addressed by those identifiers.
 
 ## Goals
 
-1. **Grab objects, do not re-check them.** As in a c4 store, a reader asks
-   for an ID and uses the bytes it gets. Bytes are verified once, when they
-   enter the system.
+1. **Grab objects, do not re-check them on a read.** A reader asks for an
+   ID and uses the bytes it gets. Bytes are checked when they enter the
+   system and when a cache takes them from another machine (section 1.1),
+   never per read.
 2. **Track what a job changes.** A job's writes become a changeset against
    the tree it was given: a c4m patch over a parent, with content-addressed
    pointers to new objects. Cost is proportional to the change.
@@ -83,7 +84,7 @@ its neighbours before the regional tier.
 
 ## 1. Trust model
 
-### 1.1 Verified once, where bytes enter
+### 1.1 Checked where bytes enter, and wherever they cross a machine
 
 Bytes enter the system at exactly three places, and each computes the IDs
 of what it writes:
@@ -96,15 +97,45 @@ of what it writes:
 - **Capture.** When a container's writes are captured (section 4.4), each
   new file is hashed once.
 
-Everything after that trusts the ID-to-bytes binding. Node daemons, peers
-and regional caches do not rehash on fill or on read. The c4 store works the
-same way: `TreeStore.Create(id)` writes under a caller-supplied ID.
+After that, the rule is one sentence: **bytes are checked against their C4
+ID every time they cross a machine boundary into a cache, unless the
+Project says not to, and are trusted from the local cache from then on.**
+
+- **A fill is checked.** A node cache filling from a peer or the regional
+  tier, and the regional tier filling from the store, hash what arrives and
+  refuse bytes that are not the ID asked for. `spec.store.verifyFill`
+  defaults to true; false is a Project's stated choice to take its sources'
+  word, and a Project that shares a partition with one that verifies is
+  verified too, since they share fills. (Until 2026-11 this was off unless
+  asked for, and the regional tier never checked.) Hashing while writing
+  costs about 1.5 GiB/s on one core, above any network a fill uses.
+- **A PUT is hashed** by the tier that receives it (section 1.2).
+- **What a capture adopts was hashed by that capture**, from the bytes it
+  then keeps: a private copy for a workspace still in use, the file itself
+  for an upper nothing can write any more (section 4.4).
+- **Local trust is made honest by an order, not by a check.** A file is
+  synced before it gets its name in the cache, on every route in, so after
+  a crash a name is never left over bytes that did not reach the disk. That
+  holds for a crash of the process or of the operating system on every
+  platform, and for a power cut on Linux, where the sync flushes the
+  device. On macOS the sync is fsync(2), not a full flush (about 20 µs an
+  object against 6 ms): it survives a crash, not a power cut on a drive
+  that reorders writes. Directories are not synced; a lost name is a miss.
+  Layers are links and directories, which a journaling filesystem replays
+  in order.
+- **Not built: a scrub.** After a power cut on macOS, or a disk fault
+  anywhere, a cache can hold wrong bytes under a C4 ID and nothing finds
+  them. The rule this breaks is that IDs are checked, never trusted. What
+  restores it is a rehash of what was committed since the last full flush,
+  run after an unclean start, and a slow background rehash of the rest.
+  Section 1.3 described a scrubber as existing; it does not.
 
 ### 1.2 Writers never choose the key
 
-Verify-once has a weak point that the MVP did not have: if a component that
-holds store write credentials is compromised, it can write wrong bytes under
-an existing ID, and readers that do not rehash will serve them. The design
+A store has a weak point that checking fills narrows and does not close: if
+a component that holds store write credentials is compromised, it can write
+wrong bytes under an existing ID, and a Project that has turned
+verification off will serve them. The design
 therefore keeps write credentials away from the large, exposed population of
 node daemons:
 
@@ -130,18 +161,12 @@ node daemons:
 2. **Transport integrity.** Tier-to-tier traffic is TLS in production.
    Length is checked on every fill. A short read is resumed with a ranged
    request, never accepted.
-3. **Scrub.** An optional background scrubber on each tier rehashes cached
-   objects at a configured byte rate, oldest first, and evicts any that do
-   not match. A mismatch is a disk or software fault, reported as a metric
-   and an event. It is off by default on nodes and on by default on the
-   regional tier, whose objects are served many times.
+3. **The fill check.** What a cache holds was hashed as it arrived (section
+   1.1), so an object that was wrong upstream never gets a name here.
 
-What this gives up: a corrupt object in a regional cache is served to every
-node that asks for it until a scrub finds it. The mitigations are TLS,
-scrub, and the fact that any cache entry can be dropped and refetched.
-`spec.store.verifyFill: true` on a Project restores hash-on-fill at the node.
-Hashing while writing costs about 1 to 2 GB/s per core, which is free when
-the network is slower than that.
+What this gives up: an object that goes wrong on a cache's own disk after it
+was committed is served until something rehashes it, and nothing does yet
+(the scrub of section 1.1). Any cache entry can be dropped and refetched.
 
 ## 2. Data model
 
