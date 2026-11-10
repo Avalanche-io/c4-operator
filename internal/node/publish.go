@@ -358,30 +358,8 @@ func (d *Daemon) Unpublish(ctx context.Context, volumeID, target string) error {
 	if err != nil {
 		return err
 	}
-	// Whether the mount was busy, and so only detached, is saved before the
-	// unmount is tried: were the daemon to die between a detach and the
-	// save, a retry would find nothing mounted and take a still-writable
-	// upper for a dead one. Saved first, the worst a crash, or a volume
-	// that was never mounted, leaves is an upper copied that could have
-	// been linked.
-	marked := !vol.Detached
-	if marked {
-		vol.Detached = true
-		if err := d.saveVolume(vol); err != nil {
-			return err
-		}
-	}
-	clean, _, err := overlay.UnmountBusy(vol.Target)
-	if err != nil {
+	if err := d.unmountVolume(vol); err != nil {
 		return err
-	}
-	// Cleared only by the call that set it and then unmounted outright:
-	// a call that finds nothing mounted knows nothing about the upper.
-	if marked && clean {
-		vol.Detached = false
-		if err := d.saveVolume(vol); err != nil {
-			return err
-		}
 	}
 	metrics.NodeMounts.WithLabelValues(vol.Project).Dec()
 	if vol.Capture {
@@ -395,6 +373,51 @@ func (d *Daemon) Unpublish(ctx context.Context, volumeID, target string) error {
 	os.Remove(vol.Target)
 	return nil
 }
+
+// unmountVolume unmounts the volume's overlay and settles vol.Detached, in
+// memory and on disk: false only when this call knows nothing can write
+// the upper any more.
+//
+// Whether the mount was busy, and so only detached, is saved before the
+// unmount is tried: were the daemon to die between a detach and the save,
+// a retry would find nothing mounted and take a still-writable upper for a
+// dead one. Saved first, the worst a crash, or a volume that was never
+// mounted, leaves is an upper copied that could have been linked.
+func (d *Daemon) unmountVolume(vol *Volume) error {
+	marked := !vol.Detached
+	if marked {
+		vol.Detached = true
+		if err := d.saveVolume(vol); err != nil {
+			return err
+		}
+	}
+	clean, _, err := d.unmountBusy(vol.Target)
+	if err != nil {
+		return err
+	}
+	// Cleared only by the call that set it and then unmounted outright:
+	// a call that finds nothing mounted knows nothing about the upper.
+	if marked && clean {
+		vol.Detached = false
+		if err := d.saveVolume(vol); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// unmountBusy is overlay.UnmountBusy, or what a test puts in its place.
+func (d *Daemon) unmountBusy(target string) (clean, busy bool, err error) {
+	if d.unmount != nil {
+		return d.unmount(target)
+	}
+	return overlay.UnmountBusy(target)
+}
+
+// consumable reports whether a capture may link the volume's upper into
+// the cache: only when its mount is known to be gone, so nothing can write
+// the files after they are linked.
+func (v *Volume) consumable() bool { return !v.Detached }
 
 // capture runs once per volume, detached from kubelet's call.
 func (d *Daemon) capture(ctx context.Context, vol *Volume) error {
@@ -435,7 +458,7 @@ func (d *Daemon) runCapture(ctx context.Context, vol *Volume) error {
 		// succeeds: its files may be linked into the cache. Unless the
 		// mount was busy and only detached: then something can still
 		// write the upper, and its files are copied.
-		Consume:  !vol.Detached,
+		Consume:  vol.consumable(),
 		Progress: func(done, of int64) { egress.set(ctx, Egress{Bytes: done, Of: of}, false) },
 	})
 	if err != nil {

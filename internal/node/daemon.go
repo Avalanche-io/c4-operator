@@ -87,6 +87,9 @@ type Daemon struct {
 	stacks   singleflight.Group
 	captures singleflight.Group
 
+	// unmount stands in for overlay.UnmountBusy in tests; nil outside them.
+	unmount func(target string) (clean, busy bool, err error)
+
 	// units is what the running units last reported (GET /units).
 	unitsMu sync.Mutex
 	units   []UnitReport
