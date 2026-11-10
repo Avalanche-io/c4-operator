@@ -221,6 +221,17 @@ func TestAVolumePublishedAgainKeepsTheDetachedMark(t *testing.T) {
 		}
 	})
 
+	// A record that is there and cannot even be read as a file.
+	t.Run("an earlier record that is not a file", func(t *testing.T) {
+		d := record(t, nil)
+		if err := os.Mkdir(d.volumePath("vol-1"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if !d.upperMayBeWritten("vol-1", "p1") {
+			t.Error("a record that could not be read was taken to mean there is none")
+		}
+	})
+
 	// What Publish then does with it: the new record carries the mark, and
 	// the mark outlives this mount's own clean unmount, because the earlier
 	// mount may outlive it too. The capture is told to copy.

@@ -428,11 +428,13 @@ func (d *Daemon) unmountBusy(target string) (clean, busy bool, err error) {
 // Publish mounts all the same and keeps the mark. It does not refuse: the
 // daemon cannot see when a detached mount finally goes, so a refusal would
 // hold the pod on a condition that may never be seen to clear, and what
-// the mark costs is a copy at capture instead of a link. Whether a second
-// overlay may be mounted on an upper still in use is the kernel's to say,
-// and its refusal is returned as it is. The mark then stays for the life
-// of the record: unmountVolume clears only a mark it set itself, since the
-// earlier mount may outlive this one.
+// the mark costs is a copy at capture instead of a link. Mounting is not
+// changed here, and the kernel does not stop it: overlays are mounted with
+// index=off (overlay_linux.go), under which a second mount on an upper
+// still in use is allowed and what the two then see of each other is
+// undefined (read from the kernel's documentation, not measured). The mark
+// then stays for the life of the record: unmountVolume clears only a mark
+// it set itself, since the earlier mount may outlive this one.
 func (d *Daemon) upperMayBeWritten(id, partition string) bool {
 	prev, err := d.loadVolume(id)
 	if errors.Is(err, os.ErrNotExist) {
