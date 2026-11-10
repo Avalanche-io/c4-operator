@@ -367,6 +367,12 @@ func TestAChainMadeAgainFromOldChangesets(t *testing.T) {
 	if data, _ := os.ReadFile(p); !bytes.Equal(data, want) || isBareID(lastLineOf(data)) {
 		t.Fatalf("the chain made again is not the changesets in the form the format allows:\n%s", data)
 	}
+	// And it is the chain those lines record: each section is the text
+	// its line's C4 ID names once the view's C4 ID is put after it, so the
+	// file is taken at the next open and not made again each time.
+	if ch, repaired, err := OpenRecordedChain(ctx, p, h.src, m, "main"); err != nil || repaired != "" || ch.Sections != 3 {
+		t.Fatalf("the chain made again from old changesets, opened again: %+v, %q, %v", ch, repaired, err)
+	}
 }
 
 // Torn in the order the service writes: the changeset is appended to the
@@ -428,7 +434,7 @@ func TestWhatTheMappingRecordsOfAChain(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ch, err := openChain(ctx, gp, data, h.src)
+		ch, _, err := openChain(ctx, gp, data, h.src)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -620,5 +626,62 @@ func TestWhereAChainFileEnds(t *testing.T) {
 	// And the next changeset goes on from it.
 	if err := ch.Append(h.changesets[3], h.views[3], h.views[4]); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Every section of the file is compared with the changeset the mapping
+// records for it, not only the last one, which is the one applied. A file
+// changed before its last section can still parse, keep its count and
+// resolve to the recorded view: with a line taken out of an earlier
+// section, and with an earlier section that is another changeset. Each is
+// made again.
+func TestEverySectionIsTheChangesetRecorded(t *testing.T) {
+	ctx := context.Background()
+	h := newHistory(t, 4)
+	m := h.recorded(t, "main", 4)
+	p := filepath.Join(t.TempDir(), "main.c4m")
+	recorded := h.chainFile(t, p, 4)
+	check := func(what string, file []byte) (taken bool) {
+		t.Helper()
+		if ch, _, err := openChain(ctx, p, file, h.src); err != nil || ch.Head != h.views[4] || ch.Base != h.views[0] || ch.Sections != 4 {
+			return false // not a file that passes for the chain
+		}
+		os.WriteFile(p, file, 0o644)
+		ch, repaired, err := OpenRecordedChain(ctx, p, h.src, m, "main")
+		now, _ := os.ReadFile(p)
+		if err != nil || repaired == "" || ch.Sections != 4 || !bytes.Equal(now, recorded) {
+			t.Errorf("%s: taken as the recorded chain (%+v, %q, %v)", what, ch, repaired, err)
+		}
+		if !strings.Contains(repaired, "is not the changeset") || !strings.Contains(repaired, "the mapping records for it at line") {
+			t.Errorf("%s: made again for the reason %q", what, repaired)
+		}
+		os.WriteFile(p, file, 0o644)
+		if served, err := RecordedChainBytes(ctx, p, h.src, m, "main"); err != nil || !bytes.Equal(served, recorded) {
+			t.Errorf("%s: a reader is served %d bytes (%v), want the recorded chain", what, len(served), err)
+		}
+		return true
+	}
+	// Each line before the last section taken out, where what is left
+	// still passes for the chain.
+	last := len(recorded) - len(h.changesets[3])
+	lines := bytes.SplitAfter(recorded[:last], []byte("\n"))
+	passed := 0
+	for i := range lines {
+		if len(lines[i]) == 0 {
+			continue
+		}
+		file := append(bytes.Join(append(append([][]byte(nil), lines[:i]...), lines[i+1:]...), nil), recorded[last:]...)
+		if check(fmt.Sprintf("line %d of %d taken out", i+1, len(lines)), file) {
+			passed++
+		}
+	}
+	if passed == 0 {
+		t.Fatal("no file with a line taken out passed for the chain; the test tells nothing")
+	}
+	t.Logf("%d of %d files with a line taken out before the last section pass for the chain by its head, base and count; each is made again", passed, len(lines))
+	// An earlier section that is another changeset.
+	swapped := bytes.Join([][]byte{h.changesets[0], h.changesets[0], h.changesets[2], h.changesets[3]}, nil)
+	if !check("the second section another changeset", swapped) {
+		t.Fatal("the file with another changeset in it does not pass for the chain; the test tells nothing")
 	}
 }

@@ -44,35 +44,37 @@ func OpenChainFile(ctx context.Context, p string, src view.RecordSource) (*Chain
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	return openChain(ctx, p, data, src)
+	ch, _, err := openChain(ctx, p, data, src)
+	return ch, err
 }
 
 // openChain is OpenChainFile on the file's bytes; none is an empty chain.
-func openChain(ctx context.Context, p string, data []byte, src view.RecordSource) (*ChainFile, error) {
+// It returns the chain as read as well, nil for an empty one.
+func openChain(ctx context.Context, p string, data []byte, src view.RecordSource) (*ChainFile, *view.Chain, error) {
 	ch := &ChainFile{Path: p}
 	if len(bytes.TrimSpace(data)) == 0 {
-		return ch, nil
+		return ch, nil, nil
 	}
 	c, err := view.ReadChain(data)
 	if err != nil {
-		return nil, fmt.Errorf("chain file %s: %w", p, err)
+		return nil, nil, fmt.Errorf("chain file %s: %w", p, err)
 	}
 	ch.Base, ch.Head, ch.Sections = c.Base, c.Base, len(c.Sections)
 	if n := len(c.Sections); n > 0 {
 		if src == nil {
-			return nil, fmt.Errorf("chain file %s: its head is recomputed from the store's records, and there is no store to read", p)
+			return nil, nil, fmt.Errorf("chain file %s: its head is recomputed from the store's records, and there is no store to read", p)
 		}
 		last := c.Sections[n-1]
 		res, err := view.ApplyPatch(ctx, last.Base, last.Patch, src)
 		if err != nil {
-			return nil, fmt.Errorf("chain file %s: %w", p, err)
+			return nil, nil, fmt.Errorf("chain file %s: %w", p, err)
 		}
 		ch.Head = res.ID
 	}
 	if !c.Seal.IsNil() && c.Seal != ch.Head {
-		return nil, fmt.Errorf("chain file %s ends with %s and resolves to %s", p, c.Seal, ch.Head)
+		return nil, nil, fmt.Errorf("chain file %s ends with %s and resolves to %s", p, c.Seal, ch.Head)
 	}
-	return ch, nil
+	return ch, c, nil
 }
 
 // Empty reports whether the chain has no base yet.
@@ -223,6 +225,9 @@ type RecordedChain struct {
 	// and a mapping cut back to it loses nothing that is not made again.
 	Lines   []int
 	Commits []string
+	// Views are the views the changesets produce, as their lines record;
+	// the last is Head.
+	Views []c4.ID
 	// MissingBefore is the mapping line the chain starts at when it starts
 	// there only because that line does not apply to the view before it:
 	// lines are missing from the mapping, and the commits they recorded
@@ -297,6 +302,7 @@ func chainsRecorded(m []Commit, only string) map[string]*RecordedChain {
 		cur.Changesets = append(cur.Changesets, c.Changeset)
 		cur.Lines = append(cur.Lines, i+1)
 		cur.Commits = append(cur.Commits, c.Commit)
+		cur.Views = append(cur.Views, c.View)
 		cur.Head = c.View
 	}
 	return out
@@ -305,13 +311,32 @@ func chainsRecorded(m []Commit, only string) map[string]*RecordedChain {
 // holds reports whether an opened chain file is the one the mapping
 // records: it resolves to the recorded head, as the recorded chain or as
 // that chain sealed and started again from its head (which leaves no line
-// of its own; with no sections a chain's base is its head). The sections
-// before the last are counted, not read again.
+// of its own; with no sections a chain's base is its head).
 func (rc RecordedChain) holds(ch *ChainFile) bool {
 	if ch.Head != rc.Head {
 		return false
 	}
 	return ch.Base == rc.Base && ch.Sections == len(rc.Changesets) || ch.Sections == 0
+}
+
+// differs returns the number of the first section of c, counted from 1,
+// that is not the changeset the mapping records in that place, and 0 when
+// every section is. A section is compared as the c4m library writes it:
+// its C4 ID is the one its line records, or, for a line written before
+// 2026-11-09, the one that text has with its view's C4 ID after it. So
+// every section is checked against the mapping, not only the last one
+// applied, and by hashing alone: the store is not read.
+func (rc RecordedChain) differs(c *view.Chain) (int, error) {
+	for i, sec := range c.Sections {
+		text, err := view.EncodeChangeset(sec.Base, sec.Patch)
+		if err != nil {
+			return 0, err
+		}
+		if c4.Identify(bytes.NewReader(text)) != rc.Changesets[i] && !oldForm(text, rc.Views[i], rc.Changesets[i]) {
+			return i + 1, nil
+		}
+	}
+	return 0, nil
 }
 
 // CannotRemake is why a recorded chain could not be made again from the
@@ -407,7 +432,7 @@ func tailIsWhole(data []byte, sections int) bool {
 // check reads a chain file's bytes against the record, and says what is
 // wrong with them; nothing when they are the recorded chain.
 func (rc RecordedChain) check(ctx context.Context, p string, data []byte, recorded bool, src view.RecordSource) (ch *ChainFile, wrong string) {
-	ch, err := openChain(ctx, p, data, src)
+	ch, c, err := openChain(ctx, p, data, src)
 	switch {
 	case err != nil:
 		return nil, err.Error()
@@ -421,7 +446,16 @@ func (rc RecordedChain) check(ctx context.Context, p string, data []byte, record
 			wrong += fmt.Sprintf(", a chain that starts at mapping line %d because the lines before it are missing", rc.MissingBefore)
 		}
 		return ch, wrong
-	case !tailIsWhole(data, ch.Sections):
+	case ch.Sections > 0:
+		n, err := rc.differs(c)
+		if err != nil {
+			return ch, err.Error()
+		}
+		if n != 0 {
+			return ch, fmt.Sprintf("its section %d is not the changeset %s the mapping records for it at line %d", n, rc.Changesets[n-1], rc.Lines[n-1])
+		}
+	}
+	if !tailIsWhole(data, ch.Sections) {
 		// The chain is right and the file does not end where a write
 		// ended. Appended to as it is, the next changeset would run on
 		// from a cut line.
