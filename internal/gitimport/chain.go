@@ -223,6 +223,12 @@ type RecordedChain struct {
 	// and a mapping cut back to it loses nothing that is not made again.
 	Lines   []int
 	Commits []string
+	// MissingBefore is the mapping line the chain starts at when it starts
+	// there only because that line does not apply to the view before it:
+	// lines are missing from the mapping, and the commits they recorded
+	// are no longer published. Zero for a chain that starts where the
+	// importer started one.
+	MissingBefore int
 }
 
 // reimport is the way out when the mapping cannot be read from one line
@@ -255,22 +261,45 @@ const reimport = "cut the mapping back to before line %d and import again every 
 // the chain recorded is the one from where they resume, which is as much
 // as the mapping still knows.
 func ChainRecorded(m []Commit, ref string) (RecordedChain, bool) {
-	var cur RecordedChain
-	found := false
-	for i, c := range m {
-		if c.Ref != ref || c.Changeset.IsNil() || c.ChainSeq < 1 {
+	rc, ok := chainsRecorded(m, ref)[ref]
+	if !ok {
+		return RecordedChain{}, false
+	}
+	return *rc, true
+}
+
+// ChainsRecorded returns what the mapping records of every ref's chain
+// (ChainRecorded), read in one pass.
+func ChainsRecorded(m []Commit) map[string]RecordedChain {
+	out := map[string]RecordedChain{}
+	for ref, rc := range chainsRecorded(m, "") {
+		out[ref] = *rc
+	}
+	return out
+}
+
+// chainsRecorded reads the chains of every ref, or of only when it is set.
+func chainsRecorded(m []Commit, only string) map[string]*RecordedChain {
+	out := map[string]*RecordedChain{}
+	for i := range m {
+		c := &m[i]
+		if c.Ref == "" || only != "" && c.Ref != only || c.Changeset.IsNil() || c.ChainSeq < 1 {
 			continue
 		}
-		if !found || c.ChainSeq == 1 || c.ParentView != cur.Head {
-			cur = RecordedChain{Base: c.ParentView}
+		cur := out[c.Ref]
+		if cur == nil || c.ChainSeq == 1 || c.ParentView != cur.Head {
+			cur = &RecordedChain{Base: c.ParentView}
+			if c.ChainSeq != 1 {
+				cur.MissingBefore = i + 1
+			}
+			out[c.Ref] = cur
 		}
-		found = true
 		cur.Changesets = append(cur.Changesets, c.Changeset)
 		cur.Lines = append(cur.Lines, i+1)
 		cur.Commits = append(cur.Commits, c.Commit)
 		cur.Head = c.View
 	}
-	return cur, found
+	return out
 }
 
 // holds reports whether an opened chain file is the one the mapping
@@ -387,7 +416,11 @@ func (rc RecordedChain) check(ctx context.Context, p string, data []byte, record
 	case !recorded:
 		return ch, fmt.Sprintf("it holds a chain to %s, and the mapping records none for the ref", ch.Head)
 	case !rc.holds(ch):
-		return ch, fmt.Sprintf("it resolves to %s in %d sections from %s, and the mapping records %s in %d from %s", ch.Head, ch.Sections, ch.Base, rc.Head, len(rc.Changesets), rc.Base)
+		wrong = fmt.Sprintf("it resolves to %s in %d sections from %s, and the mapping records %s in %d from %s", ch.Head, ch.Sections, ch.Base, rc.Head, len(rc.Changesets), rc.Base)
+		if rc.MissingBefore != 0 {
+			wrong += fmt.Sprintf(", a chain that starts at mapping line %d because the lines before it are missing", rc.MissingBefore)
+		}
+		return ch, wrong
 	case !tailIsWhole(data, ch.Sections):
 		// The chain is right and the file does not end where a write
 		// ended. Appended to as it is, the next changeset would run on

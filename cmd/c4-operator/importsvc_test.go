@@ -601,6 +601,18 @@ func TestTheNextPushAfterATornFile(t *testing.T) {
 		t.Fatalf("with a line gone from the middle of the mapping: %d %s; logged %q", rec.Code, rec.Body, logged.String())
 	}
 	headIs("with a line gone from the middle of the mapping", res)
+	// It is said where an operator will see it: in the log line, in the
+	// import's result, and in /refs for that ref and no other.
+	resumed := at + 1 // the line after the one gone is where it was
+	if want := fmt.Sprintf("starts at mapping line %d because the lines before it are missing", resumed); !strings.Contains(logged.String(), want) {
+		t.Fatalf("logged %q, want %q in it", logged.String(), want)
+	}
+	if res.ChainMissingBefore != resumed || refs()["refs/heads/main"]["chainMissingBefore"] != fmt.Sprint(resumed) {
+		t.Fatalf("the result says lines are missing before line %d and /refs %v, want %d", res.ChainMissingBefore, refs()["refs/heads/main"], resumed)
+	}
+	if _, ok := refs()["refs/heads/dev"]["chainMissingBefore"]; ok || devWas.ChainMissingBefore != 0 {
+		t.Fatalf("dev, whose lines are all there, is said to have lines missing: %v", refs()["refs/heads/dev"])
+	}
 	if now := recordedNow(); len(now.Changesets) != 2 || now.Head != rc.Head || now.Changesets[1] != rc.Changesets[len(rc.Changesets)-1] {
 		t.Fatalf("the chain recorded after a line went: %d changesets from %s", len(now.Changesets), now.Base)
 	}

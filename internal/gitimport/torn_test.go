@@ -441,7 +441,7 @@ func TestWhatTheMappingRecordsOfAChain(t *testing.T) {
 	skipped := append([]Commit(nil), all...)
 	skipped[3].ChainSeq = 5
 	whole := h.chainFile(t, gp, 4)
-	if rc, ok := ChainRecorded(skipped, "main"); !ok || len(rc.Changesets) != 4 || rc.Base != h.views[0] || rc.Head != h.views[4] {
+	if rc, ok := ChainRecorded(skipped, "main"); !ok || len(rc.Changesets) != 4 || rc.Base != h.views[0] || rc.Head != h.views[4] || rc.MissingBefore != 0 {
 		t.Fatalf("counts that skip a number with no line missing: %+v", rc)
 	}
 	if ch, repaired, err := OpenRecordedChain(ctx, gp, h.src, skipped, "main"); err != nil || repaired != "" || ch.Sections != 4 {
@@ -470,9 +470,17 @@ func TestWhatTheMappingRecordsOfAChain(t *testing.T) {
 		if !ok || rc.Base != c.base || len(rc.Changesets) != c.n || rc.Lines[0] != c.line || rc.Head != c.lines[len(c.lines)-1].View {
 			t.Fatalf("%s: the record is %+v", name, rc)
 		}
+		// The record says where it starts and that it starts there for
+		// want of lines, and so does the reason the file is made again.
+		if rc.MissingBefore != c.line {
+			t.Fatalf("%s: the record says lines are missing before line %d, want %d", name, rc.MissingBefore, c.line)
+		}
 		ch, repaired, err := OpenRecordedChain(ctx, gp, h.src, c.lines, "main")
 		if err != nil || repaired == "" || ch.Base != c.base || ch.Sections != c.n || ch.Head != rc.Head {
 			t.Fatalf("%s: opened as %+v, %q, %v", name, ch, repaired, err)
+		}
+		if want := fmt.Sprintf("starts at mapping line %d because the lines before it are missing", c.line); !strings.Contains(repaired, want) {
+			t.Fatalf("%s: made again for the reason %q, want %q in it", name, repaired, want)
 		}
 		if base, n := sections(); base != c.base || n != c.n {
 			t.Fatalf("%s: the file made again has %d sections from %s", name, n, base)
@@ -481,6 +489,22 @@ func TestWhatTheMappingRecordsOfAChain(t *testing.T) {
 		if now, _ := os.ReadFile(gp); err != nil || !bytes.Equal(served, now) {
 			t.Fatalf("%s: a reader is served something else than the file made again (%v)", name, err)
 		}
+	}
+	// A chain the importer started (a line counted first) is not one that
+	// starts for want of lines, whatever came before it; and each ref's
+	// chain is read from its own lines, all refs in one pass.
+	restarted := all[3]
+	restarted.ChainSeq = 1
+	mixed := []Commit{all[0], all[2], restarted}
+	other := all[1]
+	other.Ref = "release"
+	mixed = append(mixed, other)
+	if rc, ok := ChainRecorded(mixed, "main"); !ok || rc.MissingBefore != 0 || rc.Base != h.views[3] || len(rc.Changesets) != 1 {
+		t.Fatalf("a chain started after lines went missing: %+v", rc)
+	}
+	every := ChainsRecorded(mixed)
+	if rc, ok := ChainRecorded(mixed, "release"); !ok || rc.MissingBefore != 4 || len(every) != 2 || every["release"].MissingBefore != 4 || every["main"].Base != h.views[3] || every["main"].MissingBefore != 0 {
+		t.Fatalf("every ref's chain in one pass: %+v", every)
 	}
 	// A line with a changeset and no chain fields (an import with no chain
 	// kept) says nothing of a chain.

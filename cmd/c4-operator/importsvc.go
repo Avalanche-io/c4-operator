@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -68,12 +69,17 @@ type refResult struct {
 	Skipped int                `json:"skipped"`
 	// Chain is the ref's chain: base, head view and sections, and
 	// the stored chain object when this run stored one.
-	ChainBase     string  `json:"chainBase,omitempty"`
-	ChainHead     string  `json:"chainHead,omitempty"`
-	ChainSections int     `json:"chainSections,omitempty"`
-	ChainObject   string  `json:"chainObject,omitempty"`
-	FetchMs       float64 `json:"fetchMs"`
-	TotalMs       float64 `json:"totalMs"`
+	ChainBase     string `json:"chainBase,omitempty"`
+	ChainHead     string `json:"chainHead,omitempty"`
+	ChainSections int    `json:"chainSections,omitempty"`
+	ChainObject   string `json:"chainObject,omitempty"`
+	// ChainMissingBefore is the mapping line the ref's chain starts at
+	// because the lines before it are missing from the mapping: the commits
+	// they recorded are no longer published. As the mapping had it when
+	// this import began.
+	ChainMissingBefore int     `json:"chainMissingBefore,omitempty"`
+	FetchMs            float64 `json:"fetchMs"`
+	TotalMs            float64 `json:"totalMs"`
 
 	summary *gitimport.Summary
 }
@@ -140,6 +146,9 @@ func (s *importService) importRef(ctx context.Context, ref, rev string, sinceLas
 		}
 		if repaired != "" {
 			fmt.Fprintf(s.log, "chain file for %s made again from the mapping: %s\n", ref, repaired)
+		}
+		if rc, ok := gitimport.ChainRecorded(prior, ref); ok {
+			res.ChainMissingBefore = rc.MissingBefore
 		}
 	}
 	var writeErr error
@@ -462,12 +471,18 @@ func (s *importService) handler(secret string) http.Handler {
 			return
 		}
 		views := gitimport.KnownViews(m)
+		chains := gitimport.ChainsRecorded(m)
 		out := map[string]map[string]string{}
 		for ref, sha := range gitimport.LastByRef(m) {
 			if sha == "" {
 				continue
 			}
 			out[ref] = map[string]string{"commit": sha, "view": views[sha].String()}
+			// Lines of the ref's chain are missing from the mapping, and
+			// the commits they recorded are no longer published.
+			if n := chains[ref].MissingBefore; n != 0 {
+				out[ref]["chainMissingBefore"] = strconv.Itoa(n)
+			}
 		}
 		writeJSON(w, out)
 	})

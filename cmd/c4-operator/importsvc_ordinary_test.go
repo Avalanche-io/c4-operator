@@ -316,6 +316,11 @@ func TestExportChainIsTheRecordedChain(t *testing.T) {
 	if now, _ := os.ReadFile(p); !bytes.Equal(now, torn) {
 		t.Fatal("the export wrote the chain file")
 	}
+	// By the chain file's spelling of the ref, as a request to the
+	// listener may name it.
+	if got, err := export("refs_heads_main"); err != nil || !bytes.Equal(got, whole) {
+		t.Fatalf("export by the file's spelling of the ref: %d bytes, %v", len(got), err)
+	}
 	if _, err := export("refs/heads/none"); err == nil || !strings.Contains(err.Error(), "records no chain") {
 		t.Fatalf("export of a ref the mapping does not have: %v", err)
 	}
