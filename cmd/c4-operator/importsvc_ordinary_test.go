@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Avalanche-io/c4"
 
@@ -492,4 +496,183 @@ func TestALostChangesetThatCannotBeMadeAgain(t *testing.T) {
 	if code, head := o.head("refs/heads/main"); code != http.StatusOK || head != m[0].View.String() {
 		t.Fatalf("after the cut a reader gets %d, a chain to %s, want the first commit's view", code, head)
 	}
+}
+
+// A lost changeset whose parent's view has lost its records too. The next
+// import puts both back from the repository (the parent imported again in
+// full, then the commit), with no line of the mapping cut, and goes on.
+func TestALostChangesetWithItsParentsRecords(t *testing.T) {
+	o := newOrdinary(t, 0)
+	for i := range 4 {
+		o.commit(map[string]string{fmt.Sprintf("d/f%d.txt", i): fmt.Sprint(i, "\n")})
+		o.ok(fmt.Sprint("commit ", i+1), "main")
+	}
+	m, _ := gitimport.ReadMapping(o.svc.out)
+	mappingWas, _ := os.ReadFile(o.svc.out)
+	for _, id := range []c4.ID{m[2].Changeset, m[1].View} {
+		p := o.object(id)
+		if p == "" || os.Remove(p) != nil {
+			t.Fatalf("%s was not in the store to remove", id)
+		}
+	}
+	os.Remove(o.svc.chainPath("refs/heads/main"))
+	o.commit(map[string]string{"after.txt": "after\n"})
+	code, body := o.push("main")
+	if code != http.StatusOK {
+		t.Fatalf("the next push: %d %s", code, body)
+	}
+	if !strings.Contains(o.log.String(), "(mapping line 3) was not in the store and was made again from the repository") {
+		t.Fatalf("logged %q", o.log)
+	}
+	for _, id := range []c4.ID{m[2].Changeset, m[1].View} {
+		if o.object(id) == "" {
+			t.Errorf("%s is not back in the store", id)
+		}
+	}
+	if now, _ := os.ReadFile(o.svc.out); !bytes.HasPrefix(now, mappingWas) {
+		t.Fatal("a line of the mapping was cut or changed")
+	}
+	o.served("after the push", "main")
+}
+
+// stuckSink takes every object but one, which it says it already holds.
+type stuckSink struct {
+	gitimport.Sink
+	id    c4.ID
+	asked int
+}
+
+func (s *stuckSink) Put(ctx context.Context, id c4.ID, size int64, r io.Reader) (bool, error) {
+	if id == s.id {
+		s.asked++
+		return false, nil
+	}
+	return s.Sink.Put(ctx, id, size, r)
+}
+
+// A lost changeset that stays lost after it was made again (a store that
+// says it holds it and does not) is made again once and then an error: the
+// import does not go round for ever, holding the service's lock and the
+// mapping's, while every other import of the repository waits.
+func TestALostChangesetThatStaysLost(t *testing.T) {
+	o := newOrdinary(t, 0)
+	for i := range 3 {
+		o.commit(map[string]string{"a.txt": fmt.Sprint(i, "\n")})
+		o.ok(fmt.Sprint("commit ", i+1), "main")
+	}
+	m, _ := gitimport.ReadMapping(o.svc.out)
+	if p := o.object(m[1].Changeset); p == "" || os.Remove(p) != nil {
+		t.Fatal("the changeset was not in the store to remove")
+	}
+	os.Remove(o.svc.chainPath("refs/heads/main"))
+	ss := &stuckSink{Sink: o.svc.base.Sink, id: m[1].Changeset}
+	o.svc.base.Sink = ss
+	done := make(chan struct{})
+	var code int
+	var body string
+	go func() { code, body = o.push("main"); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(60 * time.Second):
+		t.Fatal("the import did not return in 60 s: it goes round for ever")
+	}
+	if code == http.StatusOK || !strings.Contains(body, "was made again from the repository and still cannot be read from the store") || ss.asked != 1 {
+		t.Fatalf("%d %s (made again %d times)", code, body, ss.asked)
+	}
+}
+
+// The cut named when a lost changeset cannot be made again: to before its
+// own line, or, when the records of its parent's view could not be put
+// back either, to before the line that recorded the parent, so that the
+// next import goes on from a view it can read.
+func TestTheCutLeft(t *testing.T) {
+	prior := []gitimport.Commit{
+		{Commit: "p0", Ref: "refs/heads/main"},
+		{Commit: "p1", Ref: "refs/heads/main"},
+		{Commit: "p1", Ref: "refs/heads/dev", RefOnly: true},
+		{Commit: "c", Ref: "refs/heads/main"},
+	}
+	lost := &gitimport.CannotRemake{Commit: "c", Line: 4}
+	for _, c := range []struct {
+		name string
+		err  error
+		line int
+	}{
+		{"the commit is gone", errors.New("commit c is not in the repository"), 4},
+		{"the parent could not be put back", fmt.Errorf("x: %w", &gitimport.ParentNotRemade{Parent: "p1"}), 2},
+		{"a parent no line records", &gitimport.ParentNotRemade{Parent: "elsewhere"}, 4},
+	} {
+		if got := cutLeft(prior, lost, c.err); !strings.Contains(got, fmt.Sprintf("cut the mapping back to before line %d and", c.line)) {
+			t.Errorf("%s: %q, want the cut to before line %d", c.name, got, c.line)
+		}
+	}
+}
+
+// Lines gone from the middle of the mapping where the views read across
+// the gap: a revert brings the commits after it back to the view before
+// it. Every changeset applies to the view before it, so nothing in the
+// views shows the gap; the commits whose lines are gone are not published,
+// and that is said: in the log, the import's result and /refs, for that
+// ref and no other.
+func TestMissingLinesTheViewsReadAcross(t *testing.T) {
+	o := newOrdinary(t, 0)
+	for i, c := range []string{"1\n", "2\n", "1\n", "3\n", "4\n"} {
+		o.commit(map[string]string{"a.txt": c})
+		o.ok(fmt.Sprint("commit ", i+1), "main")
+	}
+	o.git(o.work, "checkout", "-q", "-b", "dev")
+	o.commit(map[string]string{"dev.txt": "dev\n"})
+	o.ok("dev", "dev")
+	o.git(o.work, "checkout", "-q", "main")
+	m, _ := gitimport.ReadMapping(o.svc.out)
+	if m[0].View != m[2].View {
+		t.Fatal("the revert does not come back to the first view; the test tells nothing")
+	}
+	raw, _ := os.ReadFile(o.svc.out)
+	lines := bytes.SplitAfter(raw, []byte("\n"))
+	if err := os.WriteFile(o.svc.out, bytes.Join(append(append([][]byte(nil), lines[:1]...), lines[3:]...), nil), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o.log.Reset()
+	o.commit(map[string]string{"a.txt": "5\n"})
+	sha := o.git(o.work, "rev-parse", "HEAD")
+	o.git(o.work, "push", "-q", "-f", "origin", "HEAD:refs/heads/main")
+	rec, res := o.post(o.h, `{"ref":"refs/heads/main","after":"`+sha+`"}`, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("the next push: %d %s", rec.Code, rec.Body)
+	}
+	// The file held the two sections whose lines are gone, so it is made
+	// again as the chain the mapping still records, and the reason says
+	// why it is shorter.
+	if !strings.Contains(o.log.String(), "and lines of the chain are missing from the mapping before line 2") {
+		t.Fatalf("logged %q", o.log)
+	}
+	o.served("after the push", "main")
+	want := "lines of the chain of refs/heads/main are missing from the mapping before line 2: the commits they recorded are not published"
+	if res.ChainMissingBefore != 2 || !strings.Contains(o.log.String(), want) || o.refs()["refs/heads/main"]["chainMissingBefore"] != "2" {
+		t.Fatalf("result %d, log %q, /refs %v", res.ChainMissingBefore, o.log, o.refs()["refs/heads/main"])
+	}
+	// dev, pushed after the damage, has all its lines.
+	o.git(o.work, "checkout", "-q", "dev")
+	o.commit(map[string]string{"dev.txt": "dev2\n"})
+	sha = o.git(o.work, "rev-parse", "HEAD")
+	o.git(o.work, "push", "-q", "-f", "origin", "HEAD:refs/heads/dev")
+	o.log.Reset()
+	if rec, res := o.post(o.h, `{"ref":"refs/heads/dev","after":"`+sha+`"}`, nil); rec.Code != http.StatusOK || res.ChainMissingBefore != 0 || o.log.Len() != 0 {
+		t.Fatalf("dev after the damage: %d, missing before %d, log %q", rec.Code, res.ChainMissingBefore, o.log)
+	}
+	if _, ok := o.refs()["refs/heads/dev"]["chainMissingBefore"]; ok {
+		t.Fatalf("/refs says dev has lines missing: %v", o.refs()["refs/heads/dev"])
+	}
+}
+
+func (o *ordinary) refs() map[string]map[string]string {
+	o.t.Helper()
+	rec := httptest.NewRecorder()
+	o.h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/refs", nil))
+	out := map[string]map[string]string{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		o.t.Fatalf("GET /refs: %d %s", rec.Code, rec.Body)
+	}
+	return out
 }

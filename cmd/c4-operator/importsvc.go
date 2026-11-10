@@ -73,10 +73,10 @@ type refResult struct {
 	ChainHead     string `json:"chainHead,omitempty"`
 	ChainSections int    `json:"chainSections,omitempty"`
 	ChainObject   string `json:"chainObject,omitempty"`
-	// ChainMissingBefore is the mapping line the ref's chain starts at
-	// because the lines before it are missing from the mapping: the commits
-	// they recorded are no longer published. As the mapping had it when
-	// this import began.
+	// ChainMissingBefore is the last mapping line of the ref's chain
+	// before which lines are missing from the mapping: the commits they
+	// recorded are no longer published. As the mapping had it when this
+	// import began.
 	ChainMissingBefore int     `json:"chainMissingBefore,omitempty"`
 	FetchMs            float64 `json:"fetchMs"`
 	TotalMs            float64 `json:"totalMs"`
@@ -147,8 +147,9 @@ func (s *importService) importRef(ctx context.Context, ref, rev string, sinceLas
 		if repaired != "" {
 			fmt.Fprintf(s.log, "chain file for %s made again from the mapping: %s\n", ref, repaired)
 		}
-		if rc, ok := gitimport.ChainRecorded(prior, ref); ok {
+		if rc, ok := gitimport.ChainRecorded(prior, ref); ok && rc.MissingBefore != 0 {
 			res.ChainMissingBefore = rc.MissingBefore
+			fmt.Fprintf(s.log, "lines of the chain of %s are missing from the mapping before line %d: the commits they recorded are not published\n", ref, rc.MissingBefore)
 		}
 	}
 	var writeErr error
@@ -232,11 +233,31 @@ func (s *importService) openChain(ctx context.Context, ref string, prior []gitim
 			return nil, "", fmt.Errorf("%s was made again from the repository and still cannot be read from the store: %w", what, lost.Err)
 		}
 		if err := gitimport.Remake(ctx, opts, prior[lost.Line-1]); err != nil {
-			return nil, "", fmt.Errorf("%s is not in the store and could not be made again from the repository: %w. What is left is to %s", what, err, lost.CutBack())
+			return nil, "", fmt.Errorf("%s is not in the store and could not be made again from the repository: %w. What is left is to %s", what, err, cutLeft(prior, lost, err))
 		}
 		made = lost.Changeset
 		fmt.Fprintf(s.log, "%s was not in the store and was made again from the repository\n", what)
 	}
+}
+
+// cutLeft is the cut the mapping needs when a lost changeset cannot be
+// made again from the repository. Cut back to before the changeset's line,
+// the next import goes on from the view of the ref's line before it, which
+// is the changeset's parent's. When the records of that view are lost too
+// and could not be put back, that would fail in turn, so the cut is to
+// before the line that recorded the parent: the import then goes on from
+// one view further back and imports the parent as well.
+func cutLeft(prior []gitimport.Commit, lost *gitimport.CannotRemake, err error) string {
+	var pn *gitimport.ParentNotRemade
+	if !errors.As(err, &pn) {
+		return lost.CutBack()
+	}
+	for i := lost.Line - 2; i >= 0; i-- {
+		if prior[i].Commit == pn.Parent && !prior[i].RefOnly {
+			return (&gitimport.CannotRemake{Line: i + 1}).CutBack()
+		}
+	}
+	return lost.CutBack()
 }
 
 // chainAppend appends a commit's changeset to its ref's chain and records

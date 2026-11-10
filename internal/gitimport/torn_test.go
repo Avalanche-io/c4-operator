@@ -485,7 +485,7 @@ func TestWhatTheMappingRecordsOfAChain(t *testing.T) {
 		if err != nil || repaired == "" || ch.Base != c.base || ch.Sections != c.n || ch.Head != rc.Head {
 			t.Fatalf("%s: opened as %+v, %q, %v", name, ch, repaired, err)
 		}
-		if want := fmt.Sprintf("starts at mapping line %d because the lines before it are missing", c.line); !strings.Contains(repaired, want) {
+		if want := fmt.Sprintf("lines of the chain are missing from the mapping before line %d", c.line); !strings.Contains(repaired, want) {
 			t.Fatalf("%s: made again for the reason %q, want %q in it", name, repaired, want)
 		}
 		if base, n := sections(); base != c.base || n != c.n {
@@ -495,6 +495,34 @@ func TestWhatTheMappingRecordsOfAChain(t *testing.T) {
 		if now, _ := os.ReadFile(gp); err != nil || !bytes.Equal(served, now) {
 			t.Fatalf("%s: a reader is served something else than the file made again (%v)", name, err)
 		}
+	}
+	// A gap the views read across: the commits after it come back to the
+	// view before it (a revert). The changeset applies, so the chain goes
+	// on, and the file is the recorded chain; but the commit's git parent
+	// has no line, which the importer never leaves, so lines are missing.
+	// A commit whose parent has a line, of whatever ref and whatever kind,
+	// shows nothing.
+	across := []Commit{
+		{Commit: "c1", Ref: "main", View: h.views[1], ParentView: h.views[0], Changeset: all[0].Changeset, ChainBase: h.views[0], ChainSeq: 1},
+		{Commit: "c4", Parent: "c3", Ref: "main", View: h.views[2], ParentView: h.views[1], Changeset: all[1].Changeset, ChainBase: h.views[0], ChainSeq: 4},
+	}
+	if rc, ok := ChainRecorded(across, "main"); !ok || rc.MissingBefore != 2 || len(rc.Changesets) != 2 || rc.Base != h.views[0] {
+		t.Fatalf("a gap the views read across: %+v", rc)
+	}
+	for name, before := range map[string]Commit{
+		"an empty commit's line":  {Commit: "c3", Parent: "c1", Ref: "main", View: h.views[1], ParentView: h.views[1], ChainBase: h.views[0], ChainSeq: 1},
+		"another ref's line":      {Commit: "c3", Parent: "c1", Ref: "dev", View: h.views[1], ParentView: h.views[0], Changeset: all[0].Changeset, ChainBase: h.views[0], ChainSeq: 1},
+		"a line that moved a ref": {Commit: "c3", Ref: "dev", RefOnly: true, View: h.views[1]},
+	} {
+		with := []Commit{across[0], before, across[1]}
+		if rc, ok := ChainRecorded(with, "main"); !ok || rc.MissingBefore != 0 || len(rc.Changesets) != 2 {
+			t.Fatalf("with %s for the parent: %+v", name, rc)
+		}
+	}
+	// A chain the importer starts again clears it.
+	again := Commit{Commit: "c5", Parent: "c4", Ref: "main", View: h.views[3], ParentView: h.views[2], Changeset: all[2].Changeset, ChainBase: h.views[2], ChainSeq: 1}
+	if rc, _ := ChainRecorded(append(append([]Commit(nil), across...), again), "main"); rc.MissingBefore != 0 || len(rc.Changesets) != 1 {
+		t.Fatalf("a chain started again after a gap: %+v", rc)
 	}
 	// A chain the importer started (a line counted first) is not one that
 	// starts for want of lines, whatever came before it; and each ref's

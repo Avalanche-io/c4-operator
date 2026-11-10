@@ -1118,15 +1118,21 @@ import step, so import must be fast and push-driven.
     from the stored changesets, each checked against its C4 ID and the
     whole against the recorded view, and the service logs that it was.
   - *Every section is compared, not only the last.* The last section is
-    applied to recompute the head. Each section, as the c4m library writes
-    it, is also hashed and compared with the C4 ID its mapping line
-    records (for a line written before 2026-11-09, with the C4 ID that
-    text has with its view's C4 ID after it), so a file changed before its
-    last section in a way that still parses, keeps the count and resolves
-    to the recorded view is made again too. The store is not read for it.
-    On a chain of 1,024 sections (417 KB) it adds 14 ms to an open of
-    25 ms (measured once, on a Mac). With every section compared, applying
-    the last one tells nothing new; it is left in.
+    applied to recompute the head. Each section is also written out as the
+    c4m library writes it, hashed, and compared with the C4 ID its mapping
+    line records (for a line written before 2026-11-09, with the C4 ID that
+    text has with its view's C4 ID after it). So every section must read
+    as the changeset its line records: a file with an earlier section left
+    out or exchanged is made again, though it parses, keeps the count and
+    resolves to the recorded view. The comparison is of what the file
+    reads as, not of its bytes: a file in another form of the same chain
+    (spaces at line ends, blank lines, a null timestamp written `0` for
+    `-`, a boundary line repeated, an entry stated twice) reads as the
+    recorded chain and is taken, and everything served, sealed or exported
+    from it is written again by the library, so no other form leaves the
+    service. The store is not read for it. On a chain of 1,024 sections
+    (417 KB) it adds 14 ms to an open of 25 ms (measured on a Mac, by me
+    and by the reviewer).
   - *A reader is served the same way,* from one read of the file, with
     nothing written, and by the ref's exact name when the mapping has it.
     That costs a read of the whole mapping for each request, as an import
@@ -1146,11 +1152,16 @@ import step, so import must be fast and push-driven.
     that does not apply to the view before it starts the recorded chain
     again from the view it does apply to, so the chain made and served is
     the one from where the lines resume: as much as the mapping still
-    knows, every section of it checked. The commits whose lines are gone
-    are no longer published. That a chain starts where it does for want of
-    lines is in the reason its file is made again, in each import's result
-    (`chainMissingBefore`, the mapping line it starts at) and in `GET
-    /refs` for that ref, until the importer starts the ref a new chain.
+    knows, every section of it checked. A gap the views read across (the
+    commits after it come back to a view from before it, as a revert does)
+    is found another way: the importer writes a line for a commit's parent
+    before the commit, so a changeset line whose commit's git parent has no
+    line is a line gone. Either way the commits whose lines are gone are
+    no longer published, and that is said in the reason the chain file is
+    made again, in a line the service logs on each import of the ref, in
+    the import's result (`chainMissingBefore`, the last mapping line before
+    which lines are missing) and in `GET /refs` for that ref, until the
+    importer starts the ref a new chain.
     The same reading takes a mapping the importer before this one could
     write: it took a file with a torn section on it as it stood and
     counted the section, so its counts can skip a number with no line
@@ -1159,19 +1170,42 @@ import step, so import must be fast and push-driven.
   - *A changeset the store has lost is made again from the repository.*
     When a recorded chain cannot be made because the store does not hold
     one of its changesets, the next import of the ref imports that commit
-    again, over its parent's view as its line records it. An import is a
-    function of the commit, so it comes to the same view and the same
-    changeset; the store, which keeps what it has, takes only what was
-    missing (the changeset, and any record or file object of the view
-    that was gone with it), and the chain is made. No line of the mapping
-    is cut or written, and no other ref is touched. A reader, who writes
-    nothing, is told the next import makes it again. It stays an error,
-    saying which, when the commit is not in the repository, when it comes
-    to another view or changeset than the line records, and when the line
-    records its changeset in the form written before 2026-11-09, ending
-    with the view's C4 ID: that form is not written any more, so such a
-    changeset, once lost, is not made again here. For those the error
-    names what is left, the cut below, with what it costs the other refs.
+    again, over its parent's view as its line records it, and requires it
+    to come to the view and changeset the line records. The store, which
+    keeps what it has, takes the changeset and the records along the paths
+    the commit changed. When the records of the parent's view are lost as
+    well, the parent is imported again in full first, which puts back
+    every record of its view, and must come to the view the line records.
+    No line of the mapping is cut or written, and no other ref is touched.
+    A reader, who writes nothing, is told the next import makes it again.
+    This happens only when the chain file has to be made: while the file
+    is the recorded chain, every section checked, a changeset lost from
+    the store is not noticed, and stays lost until the file is made again;
+    and a changeset of a chain sealed and started again since is never
+    made again here, since no chain file holds it.
+    A file object the commit did not change is not put back either: a
+    commit's import does not read it.
+  - *What a remake cannot do.* The view a commit comes to depends on the
+    commit and, for c4git files, on which of their objects the c4git store
+    and the project store hold: an object missing at the first import and
+    there since, or there then and lost from both stores since, gives
+    another view. So it stays an error, saying which and why, when the
+    commit is not in the repository, when it comes to another view or
+    changeset than its line records (with c4git files, the error says the
+    stores may have changed), when its parent's view cannot be put back,
+    and when the line records its changeset in the form written before
+    2026-11-09, ending with the view's C4 ID, which is not written any
+    more. The objects a refused remake stored stay in the store, named by
+    nothing. Each of those errors names what is left, the cut below, with
+    what it costs the other refs: to before the changeset's line, or, when
+    the parent's view could not be put back, to before the line that
+    recorded the parent, so the next import goes on from a view it can
+    read. That cut assumes the views before it can be read along the
+    paths the next commits change; a record of an earlier view lost from
+    the store stops the next import as it does on main, and nothing here
+    makes it again. A changeset that is still not in the store after it
+    was made again (a store that says it holds what it does not) is an
+    error after one try, not a loop.
   - *A wrong object is not written over.* A store keeps the object it has
     under a C4 ID, so a changeset the store holds wrongly cannot be made
     again until the object is removed; the error says so, and the next

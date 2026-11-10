@@ -228,11 +228,12 @@ type RecordedChain struct {
 	// Views are the views the changesets produce, as their lines record;
 	// the last is Head.
 	Views []c4.ID
-	// MissingBefore is the mapping line the chain starts at when it starts
-	// there only because that line does not apply to the view before it:
-	// lines are missing from the mapping, and the commits they recorded
-	// are no longer published. Zero for a chain that starts where the
-	// importer started one.
+	// MissingBefore is the last mapping line of the chain before which
+	// lines are missing from the mapping (the commits they recorded are no
+	// longer published): the line the chain starts at when it starts there
+	// only because that line does not apply to the view before it, or a
+	// line whose commit's parent has no line. Zero when no line of the
+	// chain shows a gap; a chain the importer starts again clears it.
 	MissingBefore int
 }
 
@@ -284,10 +285,23 @@ func ChainsRecorded(m []Commit) map[string]RecordedChain {
 }
 
 // chainsRecorded reads the chains of every ref, or of only when it is set.
+//
+// Lines missing from the mapping are found two ways. A changeset that does
+// not apply to the view before it starts the chain again. And a changeset
+// line whose commit's git parent has no line before it: the importer
+// writes a line for a commit's parent before the commit (a parent not
+// imported yet is imported first, in full if need be), so a parent with no
+// line is a line gone. That second way finds a gap the views read across,
+// when the commits after it come back to a view from before it (a revert).
 func chainsRecorded(m []Commit, only string) map[string]*RecordedChain {
 	out := map[string]*RecordedChain{}
+	seen := map[string]bool{} // commits with a line so far, of any ref
 	for i := range m {
 		c := &m[i]
+		parentSeen := c.Parent == "" || seen[c.Parent]
+		if c.Commit != "" {
+			seen[c.Commit] = true
+		}
 		if c.Ref == "" || only != "" && c.Ref != only || c.Changeset.IsNil() || c.ChainSeq < 1 {
 			continue
 		}
@@ -298,6 +312,9 @@ func chainsRecorded(m []Commit, only string) map[string]*RecordedChain {
 				cur.MissingBefore = i + 1
 			}
 			out[c.Ref] = cur
+		}
+		if c.ChainSeq != 1 && !parentSeen {
+			cur.MissingBefore = i + 1
 		}
 		cur.Changesets = append(cur.Changesets, c.Changeset)
 		cur.Lines = append(cur.Lines, i+1)
@@ -448,7 +465,7 @@ func (rc RecordedChain) check(ctx context.Context, p string, data []byte, record
 	case !rc.holds(ch):
 		wrong = fmt.Sprintf("it resolves to %s in %d sections from %s, and the mapping records %s in %d from %s", ch.Head, ch.Sections, ch.Base, rc.Head, len(rc.Changesets), rc.Base)
 		if rc.MissingBefore != 0 {
-			wrong += fmt.Sprintf(", a chain that starts at mapping line %d because the lines before it are missing", rc.MissingBefore)
+			wrong += fmt.Sprintf(", and lines of the chain are missing from the mapping before line %d", rc.MissingBefore)
 		}
 		return ch, wrong
 	case ch.Sections > 0:

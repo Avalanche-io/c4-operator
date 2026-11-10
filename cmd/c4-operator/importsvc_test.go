@@ -604,7 +604,7 @@ func TestTheNextPushAfterATornFile(t *testing.T) {
 	// It is said where an operator will see it: in the log line, in the
 	// import's result, and in /refs for that ref and no other.
 	resumed := at + 1 // the line after the one gone is where it was
-	if want := fmt.Sprintf("starts at mapping line %d because the lines before it are missing", resumed); !strings.Contains(logged.String(), want) {
+	if want := fmt.Sprintf("lines of the chain are missing from the mapping before line %d", resumed); !strings.Contains(logged.String(), want) {
 		t.Fatalf("logged %q, want %q in it", logged.String(), want)
 	}
 	if res.ChainMissingBefore != resumed || refs()["refs/heads/main"]["chainMissingBefore"] != fmt.Sprint(resumed) {
