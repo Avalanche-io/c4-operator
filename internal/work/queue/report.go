@@ -137,7 +137,11 @@ const ConditionOutputRecorded = "OutputRecorded"
 // status computes a job's status from the queue's memory and the latest
 // decision.
 func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJobStatus {
-	st := c4v1.WorkJobStatus{ObservedGeneration: v.job.Generation, Conditions: v.job.Status.Conditions}
+	// The conditions are a copy. Setting a condition that is already there
+	// edits it in place, and on the job's own slice that would change the
+	// job this status is later compared with, so the change would never be
+	// written: a condition's reason or message would stay as first stored.
+	st := c4v1.WorkJobStatus{ObservedGeneration: v.job.Generation, Conditions: append([]metav1.Condition(nil), v.job.Status.Conditions...)}
 	m := v.mem
 	if v.outWait != "" {
 		// The output has been folded and the index that holds its fold log

@@ -24,6 +24,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
+	"github.com/Avalanche-io/c4-operator/work/sched"
 )
 
 func foldStore(t *testing.T) (*storeurl.Sharded, string) {
@@ -1307,7 +1308,8 @@ func TestFoldRefusesADirectoryByIDAloneOverAnother(t *testing.T) {
 // status says a finished unit's changes are not in its output, and why,
 // for as long as that is so. Here the changeset is the one the fold
 // refuses. The unit's pod stays and the other unit's work stays in the
-// output. A fold that is only late says so too, and stops when it is made.
+// output. The condition follows what is failing now, and keeps the time
+// the output first fell behind.
 func TestAFoldThatFailsIsACondition(t *testing.T) {
 	ns, q, now, st := graphFarm(t)
 	ctx := context.Background()
@@ -1340,9 +1342,11 @@ func TestAFoldThatFailsIsACondition(t *testing.T) {
 	}
 	refused := string(podOfUnit(t, ns, "bon", 2).UID)
 	finishUnit(t, now, ns, "bon", 1, map[string]string{c4v1.AnnotationOutputChangeset: wrote})
+	finishUnit(t, now, ns, "bon", 2, map[string]string{c4v1.AnnotationOutputChangeset: byID.String()})
 
-	// First a fold that is only late: the store is away for one tick. The
-	// status says so, and stops saying so once the fold is made.
+	// First both folds fail for want of the store. Then the store is back:
+	// unit 1 folds, and unit 2's changeset is refused. The condition has to
+	// follow, from the one reason to the other, and keep its time.
 	away := true
 	q.Stores = func(context.Context, string) (*storeurl.Sharded, error) {
 		pc := make([]uintptr, 32)
@@ -1360,18 +1364,14 @@ func TestAFoldThatFailsIsACondition(t *testing.T) {
 	}
 	tick(t, q)
 	late := get(t, ns, "bon")
-	if c := meta.FindStatusCondition(late.Status.Conditions, ConditionOutputRecorded); c == nil || c.Reason != "FoldFailed" || !strings.Contains(c.Message, "unit 1") || !strings.Contains(c.Message, "the store is away") || late.Status.Output != nil {
-		t.Fatalf("with the store away for the fold: output %+v, conditions %+v", late.Status.Output, late.Status.Conditions)
+	first := meta.FindStatusCondition(late.Status.Conditions, ConditionOutputRecorded)
+	if first == nil || first.Reason != "FoldFailed" || !strings.Contains(first.Message, "the store is away") || late.Status.Output != nil {
+		t.Fatalf("with the store away for the folds: output %+v, conditions %+v", late.Status.Output, late.Status.Conditions)
 	}
 	away = false
-	tick(t, q)
-	if got := get(t, ns, "bon"); got.Status.Output == nil || got.Status.Output.Changesets != 1 || meta.FindStatusCondition(got.Status.Conditions, ConditionOutputRecorded) != nil {
-		t.Fatalf("once the fold is made: output %+v, conditions %+v", got.Status.Output, got.Status.Conditions)
-	}
 
-	finishUnit(t, now, ns, "bon", 2, map[string]string{c4v1.AnnotationOutputChangeset: byID.String()})
-	var since metav1.Time
-	for i := range 3 {
+	since := first.LastTransitionTime
+	for range 3 {
 		// Long enough, by the queue's clock and the wall's, for a status
 		// to be written again and for a condition made anew to show it.
 		*now = now.Add(11 * time.Second)
@@ -1382,12 +1382,10 @@ func TestAFoldThatFailsIsACondition(t *testing.T) {
 		if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "FoldFailed" || !strings.Contains(c.Message, "unit 2") || !strings.Contains(c.Message, "by its C4 ID alone") {
 			t.Fatalf("the status does not say the fold fails, or why: %+v", got.Status.Conditions)
 		}
-		// The condition says since when: a fold that has failed for an
-		// hour must not read as one that has just begun to.
-		if i == 0 {
-			since = c.LastTransitionTime
-		} else if !c.LastTransitionTime.Equal(&since) {
-			t.Fatalf("the condition's time moved from %s to %s while the fold went on failing", since.Time, c.LastTransitionTime.Time)
+		// The condition says since when: an output that has been behind
+		// for an hour must not read as one that has just fallen behind.
+		if !c.LastTransitionTime.Equal(&since) {
+			t.Fatalf("the condition's time moved from %s to %s while the output stayed behind", since.Time, c.LastTransitionTime.Time)
 		}
 		if got.Status.Output == nil || got.Status.Output.Changesets != 1 {
 			t.Fatalf("the output moved, or lost the other unit's fold: %+v", got.Status.Output)
@@ -1442,5 +1440,67 @@ func TestWhatCountsAsAFoldThatFailed(t *testing.T) {
 	first := v.foldWait
 	if q.foldChangeset(ctx, v, Fold{Unit: 4, Changeset: cs}) || v.foldWait != first {
 		t.Fatalf("a second failure in the tick replaced the first: %q", v.foldWait)
+	}
+}
+
+// A fold that is only late says so, and stops saying so once it is made.
+func TestAFoldThatIsOnlyLateStopsBeingACondition(t *testing.T) {
+	ns, q, now, st := graphFarm(t)
+	ctx := context.Background()
+	if err := k8s.Create(ctx, job(ns, "bon", "graph", "cpu-"+ns, nil, now.Add(8*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	doc := putDoc(t, st, `{"version": 1, "units": [{"name": "a1"}, {"name": "b"}]}`)
+	finishUnit(t, now, ns, "bon", 0, map[string]string{c4v1.AnnotationOutputExpand: doc})
+	tick(t, q)
+	finishUnit(t, now, ns, "bon", 1, map[string]string{c4v1.AnnotationOutputChangeset: writeChangeset(t, st, "a1.txt", "unit one")})
+	away := true
+	q.Stores = func(context.Context, string) (*storeurl.Sharded, error) {
+		pc := make([]uintptr, 32)
+		frames := runtime.CallersFrames(pc[:runtime.Callers(2, pc)])
+		for away {
+			f, more := frames.Next()
+			if strings.HasSuffix(f.Function, "(*Queue).foldChangeset") {
+				return nil, errors.New("the store is away")
+			}
+			if !more {
+				break
+			}
+		}
+		return st, nil
+	}
+	tick(t, q)
+	late := get(t, ns, "bon")
+	if c := meta.FindStatusCondition(late.Status.Conditions, ConditionOutputRecorded); c == nil || c.Reason != "FoldFailed" || !strings.Contains(c.Message, "unit 1") || !strings.Contains(c.Message, "the store is away") || late.Status.Output != nil {
+		t.Fatalf("with the store away for the fold: output %+v, conditions %+v", late.Status.Output, late.Status.Conditions)
+	}
+	away = false
+	tick(t, q)
+	if got := get(t, ns, "bon"); got.Status.Output == nil || got.Status.Output.Changesets != 1 || meta.FindStatusCondition(got.Status.Conditions, ConditionOutputRecorded) != nil {
+		t.Fatalf("once the fold is made: output %+v, conditions %+v", got.Status.Output, got.Status.Conditions)
+	}
+}
+
+// Computing a status never edits the job it is computed from. A condition
+// already on the job, set again with another reason, must come back changed
+// in the new status and unchanged on the job, or the two compare equal and
+// the change is never written.
+func TestAStatusDoesNotEditTheJobItIsComputedFrom(t *testing.T) {
+	q := &Queue{}
+	was := metav1.Condition{Type: ConditionOutputRecorded, Status: metav1.ConditionFalse, Reason: "IndexNotSaved", Message: "the index could not be saved", LastTransitionTime: metav1.NewTime(time.Unix(1700000000, 0))}
+	j := &c4v1.WorkJob{}
+	j.Status.Conditions = []metav1.Condition{was}
+	v := &view{key: "ns/job", job: j, mem: &jobMem{}, foldWait: "unit 2, fold: refused"}
+	st := q.status(time.Unix(1700000100, 0), sched.Decisions{}, v)
+	got := meta.FindStatusCondition(st.Conditions, ConditionOutputRecorded)
+	if got == nil || got.Reason != "FoldFailed" || !strings.Contains(got.Message, "unit 2, fold: refused") {
+		t.Fatalf("the new status says %+v", got)
+	}
+	if !got.LastTransitionTime.Equal(&was.LastTransitionTime) {
+		t.Errorf("the condition's time moved though the output stayed behind: %s", got.LastTransitionTime.Time)
+	}
+	if on := j.Status.Conditions[0]; on.Reason != "IndexNotSaved" || on.Message != was.Message {
+		t.Fatalf("computing the status edited the job's own condition to %+v", on)
 	}
 }
