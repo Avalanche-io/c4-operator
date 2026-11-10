@@ -623,6 +623,17 @@ func TestWhereAChainFileEnds(t *testing.T) {
 	if ch, repaired, err := OpenRecordedChain(ctx, p, h.src, m, "main"); err != nil || repaired != "" || ch.Sections != 0 {
 		t.Fatalf("a chain of its base alone: %+v, %q, %v", ch, repaired, err)
 	}
+	// A chain of its base alone at any other view is not the recorded
+	// chain started again: it is made again.
+	if err := ch.Rebase(h.views[1]); err != nil {
+		t.Fatal(err)
+	}
+	if ch, repaired, err := OpenRecordedChain(ctx, p, h.src, m, "main"); err != nil || repaired == "" || ch.Sections != 3 || ch.Head != h.views[3] {
+		t.Fatalf("a chain of another view alone: %+v, %q, %v", ch, repaired, err)
+	}
+	if err := ch.Rebase(h.views[3]); err != nil {
+		t.Fatal(err)
+	}
 	// And the next changeset goes on from it.
 	if err := ch.Append(h.changesets[3], h.views[3], h.views[4]); err != nil {
 		t.Fatal(err)

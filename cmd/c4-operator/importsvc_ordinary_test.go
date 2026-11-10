@@ -419,6 +419,9 @@ func TestALostChangesetThatCannotBeMadeAgain(t *testing.T) {
 	}
 	opts := o.svc.base
 	opts.Known, opts.KnownFiles = gitimport.KnownViews(m), gitimport.KnownFiles(m)
+	// Nothing is told of a commit imported again: no mapping line is
+	// written for it and no chain appended to.
+	opts.Progress = func(c gitimport.Commit) { t.Errorf("commit %s imported again was reported as imported", c.Commit) }
 
 	// With nothing lost, each commit comes to what its line records, and
 	// nothing is written.
@@ -472,5 +475,21 @@ func TestALostChangesetThatCannotBeMadeAgain(t *testing.T) {
 	}
 	if code, _ := o.head("refs/heads/main"); code == http.StatusOK {
 		t.Fatal("a reader was served a chain the store cannot make")
+	}
+	// What is left is the cut, and the error names it with what it costs
+	// the other refs. Cut back, the ref is imported as the repository now
+	// has it.
+	if want := "What is left is to cut the mapping back to before line 2 and import again every ref that has a line from there on"; !strings.Contains(rec.Body.String(), want) {
+		t.Fatalf("with the commit gone: %s\nwant %q in it", rec.Body, want)
+	}
+	raw, _ := os.ReadFile(o.svc.out)
+	if err := os.WriteFile(o.svc.out, bytes.SplitAfter(raw, []byte("\n"))[0], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if rec, _ := o.post(o.h, `{"ref":"refs/heads/main","after":"`+a+`"}`, nil); rec.Code != http.StatusOK {
+		t.Fatalf("after the cut: %d %s", rec.Code, rec.Body)
+	}
+	if code, head := o.head("refs/heads/main"); code != http.StatusOK || head != m[0].View.String() {
+		t.Fatalf("after the cut a reader gets %d, a chain to %s, want the first commit's view", code, head)
 	}
 }

@@ -364,6 +364,11 @@ func (e *CannotRemake) Error() string {
 
 func (e *CannotRemake) Unwrap() error { return e.Err }
 
+// CutBack says what is left when the changeset cannot be made again from
+// the repository either: the mapping cut back to before its line, with
+// what that costs every other ref.
+func (e *CannotRemake) CutBack() string { return fmt.Sprintf(reimport, e.Line) }
+
 // bytes is the recorded chain as a chain file holds it, made from the
 // stored changesets. Each is checked against its C4 ID and read on its own
 // (one stored before 2026-11-09 ends with the view it produces, which is

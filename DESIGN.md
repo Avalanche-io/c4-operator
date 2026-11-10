@@ -1117,19 +1117,22 @@ import step, so import must be fast and push-driven.
     file's name does not tell a slash from an underscore) is made again
     from the stored changesets, each checked against its C4 ID and the
     whole against the recorded view, and the service logs that it was.
-  - *What the check does not find.* The file is read and parsed whole, and
-    only its last section is applied. The sections before it are counted,
-    not compared with the changesets the mapping names, so a file changed
-    before its last section in a way that still parses and keeps the count
-    is taken. An append cut by a crash does not make one. Each section,
-    encoded, compared with the C4 ID the mapping records would find it
-    with no read of the store; that is not built, and a changeset stored
-    before 2026-11-09, which ends with a line the file's sections do not
-    have, would not match.
+  - *Every section is compared, not only the last.* The last section is
+    applied to recompute the head. Each section, as the c4m library writes
+    it, is also hashed and compared with the C4 ID its mapping line
+    records (for a line written before 2026-11-09, with the C4 ID that
+    text has with its view's C4 ID after it), so a file changed before its
+    last section in a way that still parses, keeps the count and resolves
+    to the recorded view is made again too. The store is not read for it.
+    On a chain of 1,024 sections (417 KB) it adds 14 ms to an open of
+    25 ms (measured once, on a Mac). With every section compared, applying
+    the last one tells nothing new; it is left in.
   - *A reader is served the same way,* from one read of the file, with
     nothing written, and by the ref's exact name when the mapping has it.
-    That costs a read of the mapping for each request, as an import and
-    `GET /refs` already do.
+    That costs a read of the whole mapping for each request, as an import
+    and `GET /refs` already do; it is known, and keeping the mapping
+    parsed and reading only what was appended is to be done once for all
+    three.
   - *A mapping cut at its end mends itself.* A cut line cannot pass for a
     whole one (a JSON object without its end does not parse). A tail that
     does not end a line, whether a cut line, lines that never reached the
@@ -1139,30 +1142,49 @@ import step, so import must be fast and push-driven.
     then too; until then the ref is published as the shorter mapping has
     it. An import is a function of the commit, so the commits come back to
     the same views and changesets.
-  - *Lines gone from its middle stop nothing.* A changeset that does not
-    apply to the view before it starts the recorded chain again from the
-    view it does apply to, so the chain made and served is the one from
-    where the lines resume: as much as the mapping still knows, every
-    section of it checked. The commits whose lines are gone are no longer
-    published, and nothing notices. The same reading takes a mapping the
-    importer before this one could write: it took a file with a torn
-    section on it as it stood and counted the section, so its counts can
-    skip a number with no line missing. Read by views that is the whole
-    chain, and the file is made again once, without the torn section.
-  - *What cannot be read or made again is an error that names the way
-    out.* A whole mapping line that does not parse (zeros under later
-    lines) stops every import and reader of the repository; a recorded
-    changeset the store does not hold, or holds wrongly, stops its ref's.
-    Each names the mapping line to cut back to. The cut takes every ref's
-    lines from there on, so every such ref has to be imported again, and
-    the error says so. Until one is, it is published as the shorter
-    mapping has it: at an earlier commit, or not at all, and a ref deleted
-    since shows again until its deletion is sent again. Imported again,
-    the commits come back to the same views and changesets. A wrong object
-    has to be removed from the store first: a store keeps the object it
-    has under a C4 ID, so importing the commit again does not replace it.
-    Making a lost changeset again in place, with no cut, is the next step
-    and is not built.
+  - *Lines gone from its middle stop nothing, and are said.* A changeset
+    that does not apply to the view before it starts the recorded chain
+    again from the view it does apply to, so the chain made and served is
+    the one from where the lines resume: as much as the mapping still
+    knows, every section of it checked. The commits whose lines are gone
+    are no longer published. That a chain starts where it does for want of
+    lines is in the reason its file is made again, in each import's result
+    (`chainMissingBefore`, the mapping line it starts at) and in `GET
+    /refs` for that ref, until the importer starts the ref a new chain.
+    The same reading takes a mapping the importer before this one could
+    write: it took a file with a torn section on it as it stood and
+    counted the section, so its counts can skip a number with no line
+    missing. Read by views that is the whole chain, nothing is said to be
+    missing, and the file is made again once, without the torn section.
+  - *A changeset the store has lost is made again from the repository.*
+    When a recorded chain cannot be made because the store does not hold
+    one of its changesets, the next import of the ref imports that commit
+    again, over its parent's view as its line records it. An import is a
+    function of the commit, so it comes to the same view and the same
+    changeset; the store, which keeps what it has, takes only what was
+    missing (the changeset, and any record or file object of the view
+    that was gone with it), and the chain is made. No line of the mapping
+    is cut or written, and no other ref is touched. A reader, who writes
+    nothing, is told the next import makes it again. It stays an error,
+    saying which, when the commit is not in the repository, when it comes
+    to another view or changeset than the line records, and when the line
+    records its changeset in the form written before 2026-11-09, ending
+    with the view's C4 ID: that form is not written any more, so such a
+    changeset, once lost, is not made again here. For those the error
+    names what is left, the cut below, with what it costs the other refs.
+  - *A wrong object is not written over.* A store keeps the object it has
+    under a C4 ID, so a changeset the store holds wrongly cannot be made
+    again until the object is removed; the error says so, and the next
+    import then makes it.
+  - *A mapping line that does not parse is the one cut left.* A whole line
+    that does not parse (zeros under later lines) stops every import and
+    reader of the repository, and names the line to cut the mapping back
+    to. The cut takes every ref's lines from there on, so every such ref
+    has to be imported again, and the error says so. Until one is, it is
+    published as the shorter mapping has it: at an earlier commit, or not
+    at all, and a ref deleted since shows again until its deletion is sent
+    again. Imported again, the commits come back to the same views and
+    changesets.
 - **c4git files** are 90-byte C4 IDs in git. The importer uses the ID
   directly, copies the object from the c4git store without rehashing (c4git
   verified it at `git add`), and takes its size from the store.

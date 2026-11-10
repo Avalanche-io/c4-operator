@@ -216,7 +216,9 @@ func (s *importService) importRef(ctx context.Context, ref, rev string, sinceLas
 // or is an error, and the chain is opened again. Each lost changeset is
 // made again once; one that is still not there afterwards, a wrong object
 // under a changeset's C4 ID, and a commit that cannot be imported again to
-// what the mapping records are errors.
+// what the mapping records are errors. The last names what is left: the
+// mapping cut back to before the line, so the ref's commits from there are
+// imported as the repository now has them.
 func (s *importService) openChain(ctx context.Context, ref string, prior []gitimport.Commit, opts gitimport.Options) (*gitimport.ChainFile, string, error) {
 	var made c4.ID
 	for {
@@ -230,7 +232,7 @@ func (s *importService) openChain(ctx context.Context, ref string, prior []gitim
 			return nil, "", fmt.Errorf("%s was made again from the repository and still cannot be read from the store: %w", what, lost.Err)
 		}
 		if err := gitimport.Remake(ctx, opts, prior[lost.Line-1]); err != nil {
-			return nil, "", fmt.Errorf("%s is not in the store and could not be made again from the repository: %w", what, err)
+			return nil, "", fmt.Errorf("%s is not in the store and could not be made again from the repository: %w. What is left is to %s", what, err, lost.CutBack())
 		}
 		made = lost.Changeset
 		fmt.Fprintf(s.log, "%s was not in the store and was made again from the repository\n", what)
