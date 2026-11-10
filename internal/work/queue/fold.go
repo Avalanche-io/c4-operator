@@ -258,15 +258,21 @@ func (q *Queue) refoldOutput(ctx context.Context, v *view) bool {
 			return false
 		}
 	}
-	if o.view.IsNil() && len(m.out.chain) > 0 {
+	if o.view.IsNil() && !m.out.view.IsNil() {
 		// Every fold was superseded: the output is the job's input view,
-		// and its chain is that view alone.
-		ch, err := c4view.ReadChain(m.out.chain)
-		if err != nil {
-			q.Log.Error(err, "refold", "job", v.key)
-			return false
+		// and its chain is that view alone. The input is the base of the
+		// chain there was, or the old output itself where no fold had
+		// changed it.
+		base := m.out.view
+		if len(m.out.chain) > 0 {
+			ch, err := c4view.ReadChain(m.out.chain)
+			if err != nil {
+				q.Log.Error(err, "refold", "job", v.key)
+				return false
+			}
+			base = ch.Base
 		}
-		alone, err := (&c4view.Chain{Base: ch.Base}).Encode()
+		alone, err := (&c4view.Chain{Base: base}).Encode()
 		if err == nil {
 			o.id, err = st.PutBytes(ctx, alone)
 		}
@@ -274,7 +280,7 @@ func (q *Queue) refoldOutput(ctx context.Context, v *view) bool {
 			q.Log.Error(err, "refold", "job", v.key)
 			return false
 		}
-		o.view = ch.Base
+		o.view = base
 	}
 	q.Log.Info("refolded", "job", v.key, "from", m.out.view.String(), "to", o.view.String(), "folds", len(o.folds))
 	o.dirty = true

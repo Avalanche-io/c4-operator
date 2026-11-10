@@ -212,7 +212,7 @@ stored and served in the current one.
 The c4 CLI reads these chains as they are. `c4 split` works on a stored
 chain unchanged. `c4 log` computes each version's ID from the chain text
 alone, so a chain exported with its base listing written out in full lists
-exactly the view IDs (checked with c4 1.0.18); a chain stored with
+exactly the view IDs (checked with c4 1.0.24, and with c4's change that refuses a trailing ID); a chain stored with
 an external base needs `c4 log` to resolve that base from the store, a
 proposed c4 change (PROGRESS.md).
 

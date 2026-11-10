@@ -132,11 +132,17 @@ func (r *resolver) finish(levels [][]item) (*Resolved, error) {
 		res.Chain = append(res.Chain, FromNode(root))
 	}
 	res.RootID = rootID(levels[len(levels)-1])
-	// A changeset or chain in the old form says which view it resolves to.
-	// Resolved whole, that can be checked. Under a filter the view is
-	// partial and its ID is another, so the line is only dropped.
-	if got := res.View().ID; !r.seal.IsNil() && r.f.All() && got != r.seal {
-		return nil, fmt.Errorf("the description ends with %s and resolves to %s", r.seal, got)
+	// A changeset or chain in the old form ends with the ID of what it
+	// resolves to, and two writers wrote that line. This system's wrote
+	// the view's ID. The c4 CLI's diff (through 1.0.24) wrote the ID of
+	// the description as recorded, with its dates and modes, which is
+	// RootID. Either is checked: the description's ID always, the view's
+	// when the resolution is whole (under a filter the view is partial
+	// and its ID is another, so the line is only dropped).
+	if !r.seal.IsNil() && r.seal != res.RootID {
+		if got := res.View().ID; r.f.All() && got != r.seal {
+			return nil, fmt.Errorf("the description ends with %s; it resolves to the view %s and the description %s", r.seal, got, res.RootID)
+		}
 	}
 	return res, nil
 }

@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Avalanche-io/c4"
 	"github.com/Avalanche-io/c4/c4m"
 
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
 )
@@ -242,5 +244,91 @@ func TestFoldRetriedLeavesOneSection(t *testing.T) {
 	got, err := stored.Verify(ctx, c4view.StoreRecords(st))
 	if err != nil || len(stored.Sections) != 2 || got[1] != o.view || o.view != res.ID {
 		t.Fatalf("after a retry the chain has %d sections and verifies: %v", len(stored.Sections), err)
+	}
+}
+
+// A unit that turns a directory into a file: the job's output changes. The
+// changeset states the file, then the directory restated, and the fold
+// once applied that to nothing.
+func TestFoldADirectoryBecomesAFile(t *testing.T) {
+	ctx := context.Background()
+	st, _ := foldStore(t)
+	q := &Queue{}
+	src := c4view.StoreRecords(st)
+	put := func(data []byte) c4.ID {
+		id, err := st.PutBytes(ctx, data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	put(nil)
+	apply := func(parent c4.ID, edits ...c4view.Edit) (c4.ID, string) {
+		c4view.SortEdits(edits)
+		a, err := c4view.Apply(ctx, parent, edits, src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range a.Records {
+			put(r.Data)
+		}
+		return a.ID, put(a.Changeset).String()
+	}
+	in, first := apply(c4view.EmptyID(), c4view.Edit{Path: "lib/a.txt", Entry: c4view.FileEntry("", 1, put([]byte("a")), false)})
+	want, second := apply(in, c4view.Edit{Path: "lib/"}, c4view.Edit{Path: "lib", Entry: c4view.FileEntry("", 10, put([]byte("now a file")), false)})
+	o := newOutput()
+	if err := q.fold(ctx, st, o, 0, first, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.fold(ctx, st, o, 1, second, ""); err != nil {
+		t.Fatal(err)
+	}
+	if o.view != want {
+		t.Fatalf("after a unit turned a directory into a file the output is %v, want lib as a file", outputNames(t, st, o.view))
+	}
+	_, ch := readChain(t, st, o.id)
+	if got, err := ch.Verify(ctx, src); err != nil || len(got) != 2 || got[1] != want {
+		t.Fatalf("the chain verifies to %v: %v", got, err)
+	}
+}
+
+// A manager restarts between two units of a job. The output it restores
+// is the chain with the view the status keeps beside it, and the next
+// unit folds onto that.
+func TestOutputIsRestoredAfterARestartAndFoldedOnto(t *testing.T) {
+	ns, q, now, st := graphFarm(t)
+	ctx := context.Background()
+	if err := k8s.Create(ctx, job(ns, "bon", "graph", "cpu-"+ns, nil, now.Add(8*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	doc := putDoc(t, st, `{"version": 1, "units": [{"name": "a1"}, {"name": "a2"}]}`)
+	finishUnit(t, now, ns, "bon", 0, map[string]string{c4v1.AnnotationOutputExpand: doc})
+	tick(t, q)
+	finishUnit(t, now, ns, "bon", 1, map[string]string{c4v1.AnnotationOutputChangeset: writeChangeset(t, st, "a1.txt", "one")})
+	tick(t, q)
+	got := get(t, ns, "bon")
+	if got.Status.Output == nil || got.Status.Output.Changesets != 1 {
+		t.Fatalf("after the first unit: %+v", got.Status.Output)
+	}
+	// The restart: a new queue with no memory.
+	q = &Queue{Client: q.Client, Policy: q.Policy, Cfg: q.Cfg, Log: q.Log, Now: q.Now, CaptureWait: q.CaptureWait, Stores: q.Stores}
+	tick(t, q)
+	finishUnit(t, now, ns, "bon", 2, map[string]string{c4v1.AnnotationOutputChangeset: writeChangeset(t, st, "a2.txt", "two")})
+	tick(t, q)
+	tick(t, q)
+	got = get(t, ns, "bon")
+	files := outputFiles(t, st, got)
+	if len(files) != 2 || files[0] != "a1.txt" || files[1] != "a2.txt" || got.Status.Output.Changesets != 2 {
+		t.Fatalf("after a restart and a second unit the output holds %v, %d changesets", files, got.Status.Output.Changesets)
+	}
+	id, err := c4.Parse(got.Status.Output.Chain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, ch := readChain(t, st, id)
+	views, err := ch.Verify(ctx, c4view.StoreRecords(st))
+	if err != nil || len(views) != 2 || views[1].String() != got.Status.Output.View {
+		t.Fatalf("the stored chain verifies to %d views, the last not the status's output: %v", len(views), err)
 	}
 }

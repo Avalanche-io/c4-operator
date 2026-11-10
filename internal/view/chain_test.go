@@ -537,3 +537,193 @@ func TestWriteChainForCLI(t *testing.T) {
 		t.Logf("view %d %s", i, v)
 	}
 }
+
+// everyReader applies edits to parent and checks that every reader of the
+// changeset agrees with Apply: the chain verifier, the encoder, the
+// resolver, and the c4m library's own patch rule.
+func everyReader(t *testing.T, name string, ram *store.RAM, parent c4.ID, edits []Edit) *Applied {
+	t.Helper()
+	ctx := context.Background()
+	applied, err := Apply(ctx, parent, edits, StoreRecords(ram))
+	if err != nil {
+		t.Fatalf("%s: %v", name, err)
+	}
+	if applied.ID == parent {
+		t.Fatalf("%s: the edits changed nothing", name)
+	}
+	for _, r := range applied.Records {
+		putBytes(t, ram, r.ID, r.Data)
+	}
+	ch, err := ReadChain(applied.Changeset)
+	if err != nil || len(ch.Sections) != 1 || ch.Base != parent {
+		t.Fatalf("%s: the changeset reads as %v (%v)\n%s", name, ch, err, applied.Changeset)
+	}
+	if got, err := ch.Verify(ctx, StoreRecords(ram)); err != nil || len(got) != 1 || got[0] != applied.ID {
+		t.Errorf("%s: the chain verifier gives %v (%v), Apply gave %s\n%s", name, got, err, applied.ID, applied.Changeset)
+	}
+	if again, err := ch.Encode(); err != nil || !bytes.Equal(again, applied.Changeset) {
+		t.Errorf("%s: the changeset does not encode to itself (%v)", name, err)
+	}
+	if r, err := FromBytes(applied.Changeset, ram, Filter{}); err != nil || r.View().ID != applied.ID {
+		t.Errorf("%s: the resolver disagrees with Apply (%v)\n%s", name, err, applied.Changeset)
+	}
+	return applied
+}
+
+// A path that changes kind: a directory becomes a file, a file a
+// directory. The file sorts before the directory of the same name, so a
+// directory replaced by a file is written as the file and then the
+// directory restated; read against the tree as edited so far, the
+// restatement put the directory back and the changeset applied to nothing.
+func TestAPathThatChangesKind(t *testing.T) {
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{
+		"a/x.txt":     "x",
+		"a/sub/y.txt": "y",
+		"b":           "a file",
+		"c/z":         "z",
+		"keep.txt":    "keep",
+	})
+	base, err := ScanDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ram := store.NewRAM()
+	publish(t, ram, base)
+	cur := base.ID
+	file := func(content string) *c4m.Entry {
+		return FileEntry("", int64(len(content)), c4.Identify(strings.NewReader(content)), false)
+	}
+	step := func(name string, change func(), edits ...Edit) {
+		t.Helper()
+		change()
+		SortEdits(edits)
+		a := everyReader(t, name, ram, cur, edits)
+		want, err := ScanDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a.ID != want.ID {
+			t.Fatalf("%s: Apply gives %s, the filesystem %s", name, a.ID, want.ID)
+		}
+		cur = a.ID
+	}
+	step("a directory becomes a file", func() {
+		os.RemoveAll(dir + "/a")
+		os.WriteFile(dir+"/a", []byte("now a file"), 0o644)
+	}, Edit{Path: "a/"}, Edit{Path: "a", Entry: file("now a file")})
+	step("a file becomes a directory", func() {
+		os.Remove(dir + "/b")
+		os.MkdirAll(dir+"/b", 0o755)
+		os.WriteFile(dir+"/b/inner.txt", []byte("inner"), 0o644)
+	}, Edit{Path: "b"}, Edit{Path: "b/inner.txt", Entry: file("inner")})
+	step("a file becomes an empty directory", func() {
+		os.Remove(dir + "/keep.txt")
+		os.MkdirAll(dir+"/keep.txt", 0o755)
+	}, Edit{Path: "keep.txt"}, Edit{Path: "keep.txt/", Entry: &c4m.Entry{Name: "keep.txt/"}})
+	step("a directory becomes a file, with no removal stated", func() {
+		os.RemoveAll(dir + "/c")
+		os.WriteFile(dir+"/c", []byte("c file"), 0o644)
+	}, Edit{Path: "c", Entry: file("c file")})
+	step("and back to the directory it was", func() {
+		os.Remove(dir + "/c")
+		os.MkdirAll(dir+"/c", 0o755)
+		os.WriteFile(dir+"/c/z", []byte("z"), 0o644)
+	}, Edit{Path: "c/z", Entry: file("z")})
+	step("a directory becomes a symlink", func() {
+		os.RemoveAll(dir + "/b")
+		os.Symlink("keep.txt", dir+"/b")
+	}, Edit{Path: "b/"}, Edit{Path: "b", Entry: &c4m.Entry{Name: "b", Mode: os.ModeSymlink, Target: "keep.txt", Timestamp: c4m.NullTimestamp(), Size: -1}})
+}
+
+// The c4 CLI through 1.0.24 ended `c4 diff` with the new description's
+// ID: its own, with dates and modes, not a view's. These two files are its
+// real output (a.c4m from `c4 id a/`, d.c4m from `c4 diff a.c4m b.c4m`),
+// kept byte for byte. Such a patch over a stored c4m resolved before the
+// last line was checked, and still does: the line names the description
+// as recorded.
+func TestAC4DiffInTheOldFormIsStillRead(t *testing.T) {
+	base, err := os.ReadFile("testdata/c4-diff-1.0.24/a.c4m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	diff, err := os.ReadFile("testdata/c4-diff-1.0.24/d.c4m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !endsWithBareID(diff) {
+		t.Fatal("the fixture is not in the old form")
+	}
+	ram := store.NewRAM()
+	putBytes(t, ram, c4.Identify(bytes.NewReader(base)), base)
+	r, err := FromBytes(diff, ram, Filter{})
+	if err != nil {
+		t.Fatalf("a c4 diff from 1.0.24 is refused: %v", err)
+	}
+	_, last := lastLine(diff)
+	if r.RootID.String() != last {
+		t.Fatalf("the diff's last line is %s; the description resolves to %s", last, r.RootID)
+	}
+	if len(r.View().Files) != 3 || r.Levels != 2 {
+		t.Fatalf("resolved to %d files in %d levels", len(r.View().Files), r.Levels)
+	}
+	// The same check under a filter, where the view is partial.
+	f, _ := NewFilter([]string{"one.txt"})
+	if _, err := FromBytes(diff, ram, f); err != nil {
+		t.Fatalf("under a filter: %v", err)
+	}
+	// A last line that is neither ID is refused.
+	forged := c4.Identify(strings.NewReader("forged"))
+	bad := append(append([]byte(nil), diff[:len(diff)-91]...), forged.String()+"\n"...)
+	if _, err := FromBytes(bad, ram, Filter{}); err == nil {
+		t.Fatal("a c4 diff whose last line names something else resolved")
+	}
+}
+
+// An old changeset whose parent is another old changeset: the line is
+// taken off at every depth of a resolution, not only the first.
+func TestOldChangesetsNest(t *testing.T) {
+	chain, views, ram := buildChain(t, 13, 6)
+	ch, err := ReadChain(chain)
+	if err != nil || len(ch.Sections) < 3 {
+		t.Fatalf("need a longer chain: %v", err)
+	}
+	// Each section as an old changeset stored under its own ID, the next
+	// one naming it as its parent.
+	parent := views[0]
+	var top []byte
+	for i, sec := range ch.Sections[:3] {
+		one := &Chain{Base: parent, Sections: []Section{{Base: parent, Patch: sec.Patch}}}
+		top = oldForm(t, one, []c4.ID{parent, views[i+1]})
+		parent = c4.Identify(bytes.NewReader(top))
+		putBytes(t, ram, parent, top)
+	}
+	r, err := FromBytes(top, ram, Filter{})
+	if err != nil {
+		t.Fatalf("old changesets over old changesets: %v", err)
+	}
+	if r.View().ID != views[3] || r.Levels != 4 {
+		t.Fatalf("resolved to %s in %d levels, want %s in 4", r.View().ID, r.Levels, views[3])
+	}
+}
+
+// A last line the c4m library reads as a bare ID, though no ID prints that
+// way, is taken off and checked like any other, not left for the library
+// to drop.
+func TestALastLineNoIDPrintsAsIsStillChecked(t *testing.T) {
+	chain, _, ram := buildChain(t, 3, 2)
+	odd := "c4" + strings.Repeat("z", 88)
+	if id, err := c4.Parse(odd); err != nil || id.String() == odd {
+		t.Skipf("%q is not a line that parses to an ID printed otherwise (%v)", odd, err)
+	}
+	ch, err := ReadChain(append(append([]byte(nil), chain...), odd+"\n"...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ch.Seal.IsNil() {
+		t.Fatal("the line was left in the chain for the library to drop")
+	}
+	if _, err := ch.Verify(context.Background(), StoreRecords(ram)); err == nil {
+		t.Fatal("a chain ending with a line that names nothing it resolves to verified")
+	}
+}

@@ -130,7 +130,7 @@ o = json.load(open(os.path.join(out, "p5-sh010.json")))["status"].get("output") 
 if o:
     print(
         f"Output: sh010-comp-v003 folded {o.get('changesets', 0)} unit changesets into its output view {o.get('view', '')[:10]}...; "
-        f"the stored chain {o.get('chain', '')[:10]}... has one section per fold, each sealed by the output view after it."
+        f"the stored chain {o.get('chain', '')[:10]}... has one section per fold, each a changeset over the output before it."
     )
     if o.get("conflicts"):
         print(f"Conflicts reported: {len(o['conflicts'])}.")

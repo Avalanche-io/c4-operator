@@ -98,8 +98,12 @@ func (ch *Chain) Encode() ([]byte, error) {
 		return []byte(ch.Base.String() + "\n"), nil
 	}
 	var out bytes.Buffer
-	for _, sec := range ch.Sections {
-		cs, err := EncodeChangeset(sec.Base, sec.Patch)
+	for i, sec := range ch.Sections {
+		base := sec.Base
+		if i == 0 {
+			base = ch.Base // one fact, read from one place, as Verify does
+		}
+		cs, err := EncodeChangeset(base, sec.Patch)
 		if err != nil {
 			return nil, err
 		}
@@ -197,13 +201,16 @@ func lastLine(data []byte) (start int, line string) {
 	return 0, ""
 }
 
-// bareID reports whether a trimmed line is a C4 ID and nothing else.
+// bareID reports whether a trimmed line is one the c4m library reads as a
+// bare C4 ID: 90 characters starting "c4" that parse. It is the library's
+// test, so a line taken off here is exactly a line the library would have
+// read as a boundary, and is checked instead of dropped.
 func bareID(line string) (c4.ID, bool) {
-	if len(line) != 90 {
+	if len(line) != 90 || !strings.HasPrefix(line, "c4") {
 		return c4.ID{}, false
 	}
 	id, err := c4.Parse(line)
-	if err != nil || id.String() != line {
+	if err != nil {
 		return c4.ID{}, false
 	}
 	return id, true
@@ -234,12 +241,14 @@ func ApplyPatch(ctx context.Context, base c4.ID, patch *c4m.Manifest, src Record
 			return nil, err
 		}
 		name := pe.Name
+		// What the base holds here decides what the entry means, whatever
+		// an earlier entry of this patch has done since. A directory
+		// replaced by a file is written as the file, then the directory
+		// restated (files sort first): by then the file's entry has taken
+		// the directory out, and the restatement still means its removal.
+		// Read against the tree as edited so far, it looked like a new
+		// directory and put the old one back over the file.
 		existing, had := parent.orig[name]
-		if _, still := parent.files[name]; !still {
-			if _, stillDir := parent.dirs[name]; !stillDir {
-				had = false
-			}
-		}
 		if had && !hasChildren && sameEntry(existing, pe) && existing.C4ID == pe.C4ID {
 			// An exact restatement removes the path.
 			delete(parent.files, name)

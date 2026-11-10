@@ -283,3 +283,52 @@ func equalIDs(a, b []c4.ID) bool {
 	}
 	return true
 }
+
+// A commit that turns a directory into a file, then an ordinary push. The
+// next import reopens the chain file and recomputes its head; with the
+// head right, the push appends as section 3 and no chain is sealed.
+func TestChainFollowsACommitThatTurnsADirectoryIntoAFile(t *testing.T) {
+	r := newPushRig(t)
+	ctx := context.Background()
+	zero := strings.Repeat("0", 40)
+	c1 := r.commit(map[string]string{"lib/a.txt": "a\n", "lib/sub/b.txt": "b\n", "keep.txt": "k\n"})
+	r.git(r.work, "push", "-q", "origin", "main")
+	postReceive(t, r, zero, c1, "refs/heads/main")
+
+	r.git(r.work, "rm", "-r", "-q", "lib")
+	os.RemoveAll(filepath.Join(r.work, "lib"))
+	c2 := r.commit(map[string]string{"lib": "now a file\n"})
+	r.git(r.work, "push", "-q", "origin", "main")
+	postReceive(t, r, c1, c2, "refs/heads/main")
+
+	_, views := importedViews(t, r.svc.out)
+	if len(views) != 2 {
+		t.Fatalf("%d views imported", len(views))
+	}
+	p := r.svc.chainPath("refs/heads/main")
+	now, err := gitimport.OpenChainFile(ctx, p, view.StoreRecords(r.st))
+	if err != nil || now.Head != views[1] {
+		t.Fatalf("the chain file reopens with head %v, the commit's view is %s (%v)", now, views[1], err)
+	}
+	data, _ := os.ReadFile(p)
+	ch, err := view.ReadChain(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ch.Verify(ctx, view.StoreRecords(r.st)); err != nil || !equalIDs(got, views) {
+		t.Fatalf("the chain does not resolve to the imported views: %v", err)
+	}
+
+	c3 := r.commit(map[string]string{"more.txt": "m\n"})
+	r.git(r.work, "push", "-q", "origin", "main")
+	postReceive(t, r, c2, c3, "refs/heads/main")
+	m, _ := gitimport.ReadMapping(r.svc.out)
+	for _, c := range m {
+		if c.ChainRef != "" {
+			t.Errorf("an ordinary push sealed the chain: %d sections at %s", c.ChainSections, c.View)
+		}
+	}
+	if last := m[len(m)-1]; last.ChainSeq != 3 {
+		t.Errorf("the third commit is section %d of its chain, want 3", last.ChainSeq)
+	}
+}

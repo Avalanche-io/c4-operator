@@ -277,3 +277,86 @@ func TestAnOldChainFileIsStillRead(t *testing.T) {
 		t.Fatal("a chain file with a torn last line opened")
 	}
 }
+
+// kindChange is a history whose last commit replaces a directory with a
+// file: base holds lib/a.txt; the commit removes lib/ and writes lib.
+func kindChange(t *testing.T) *history {
+	t.Helper()
+	h := &history{ram: store.NewRAM(), views: []c4.ID{view.EmptyID()}}
+	h.src = view.StoreRecords(h.ram)
+	h.put(t, nil)
+	file := func(content string) *c4m.Entry {
+		return view.FileEntry("", int64(len(content)), c4.Identify(strings.NewReader(content)), false)
+	}
+	for _, edits := range [][]view.Edit{
+		{{Path: "lib/a.txt", Entry: file("a")}, {Path: "keep.txt", Entry: file("keep")}},
+		{{Path: "lib/"}, {Path: "lib", Entry: file("now a file")}},
+	} {
+		view.SortEdits(edits)
+		a, err := view.Apply(context.Background(), h.views[len(h.views)-1], edits, h.src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range a.Records {
+			h.put(t, r.Data)
+		}
+		h.views = append(h.views, a.ID)
+		h.changesets = append(h.changesets, a.Changeset)
+	}
+	return h
+}
+
+// A chain file whose last commit turns a directory into a file reopens
+// with that commit's view as its head, in the current form and in the old
+// one. The head is recomputed from the last section, so a wrong answer
+// there would seal and re-base the chain at the next ordinary push, and
+// would refuse an old file whose last line is true.
+func TestChainFileHeadAfterADirectoryBecomesAFile(t *testing.T) {
+	ctx := context.Background()
+	h := kindChange(t)
+	head := h.views[len(h.views)-1]
+	p := filepath.Join(t.TempDir(), "main.c4m")
+	ch, _ := OpenChainFile(ctx, p, h.src)
+	for i, cs := range h.changesets {
+		if err := ch.Append(cs, h.views[i], h.views[i+1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	again, err := OpenChainFile(ctx, p, h.src)
+	if err != nil || again.Head != head || again.Sections != 2 {
+		t.Fatalf("reopened: head %s, want %s; %d sections (%v)", again.Head, head, again.Sections, err)
+	}
+	if err := os.WriteFile(p, h.oldFile(t, 2), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old, err := OpenChainFile(ctx, p, h.src)
+	if err != nil || old.Head != head {
+		t.Fatalf("the same chain in the old form: head %v, want %s (%v)", old, head, err)
+	}
+}
+
+// A chain file that exists and is empty is an empty chain, as a missing
+// one is: the first changeset gives it its base.
+func TestAnEmptyChainFileIsAnEmptyChain(t *testing.T) {
+	ctx := context.Background()
+	h := newHistory(t, 1)
+	p := filepath.Join(t.TempDir(), "main.c4m")
+	for _, content := range []string{"", "\n \n"} {
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		ch, err := OpenChainFile(ctx, p, h.src)
+		if err != nil || !ch.Empty() || ch.Sections != 0 {
+			t.Fatalf("an empty chain file (%q): %+v, %v", content, ch, err)
+		}
+		if err := ch.Append(h.changesets[0], h.views[0], h.views[1]); err != nil {
+			t.Fatal(err)
+		}
+		if data, _ := os.ReadFile(p); !bytes.Equal(data, h.changesets[0]) {
+			t.Fatalf("after the first append to an empty file: %q", data)
+		}
+		if _, err := os.Stat(p + ".tmp"); err == nil {
+			t.Fatal("the first append left its temporary file")
+		}
+	}
+}

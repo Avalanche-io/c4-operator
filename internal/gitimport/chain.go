@@ -92,20 +92,29 @@ func (ch *ChainFile) Append(changeset []byte, parent, produced c4.ID) error {
 	if !ch.Empty() && parent != ch.Head {
 		return fmt.Errorf("changeset applies to %s, the chain's head is %s", parent, ch.Head)
 	}
-	flags := os.O_APPEND | os.O_CREATE | os.O_WRONLY
 	if ch.Sections == 0 {
-		flags = os.O_TRUNC | os.O_CREATE | os.O_WRONLY
-	}
-	f, err := os.OpenFile(ch.Path, flags, 0o644)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(changeset); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
+		// In one step, so no reader, and no crash, finds the file empty
+		// between the base line going and the changeset arriving.
+		tmp := ch.Path + ".tmp"
+		if err := os.WriteFile(tmp, changeset, 0o644); err != nil {
+			return err
+		}
+		if err := os.Rename(tmp, ch.Path); err != nil {
+			os.Remove(tmp)
+			return err
+		}
+	} else {
+		f, err := os.OpenFile(ch.Path, os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			return err
+		}
+		if _, err := f.Write(changeset); err != nil {
+			f.Close()
+			return err
+		}
+		if err := f.Close(); err != nil {
+			return err
+		}
 	}
 	if ch.Empty() {
 		ch.Base = parent
@@ -123,7 +132,12 @@ func (ch *ChainFile) Rebase(base c4.ID) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(ch.Path, alone, 0o644); err != nil {
+	tmp := ch.Path + ".tmp"
+	if err := os.WriteFile(tmp, alone, 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, ch.Path); err != nil {
+		os.Remove(tmp)
 		return err
 	}
 	ch.Base, ch.Head, ch.Sections = base, base, 0
