@@ -10,8 +10,8 @@
 // writes records only along changed paths, so the cost of a commit is
 // proportional to its change, not to the size of the repository.
 //
-// Blob content is hashed once, here, which is the verify-once point for
-// source files (DESIGN.md section 1.1). Git blob IDs are remembered with
+// Blob content is hashed once, here, which is where source files get
+// their C4 IDs (DESIGN.md section 1.1). Git blob IDs are remembered with
 // their C4 IDs, so a blob is never read twice.
 //
 // Files managed by c4git are stored in git as their bare C4 ID. For those

@@ -565,8 +565,6 @@ func TestVerifyingFillHoldsTheLastByte(t *testing.T) {
 	}
 }
 
-// A fill started for a project that verifies its fills hashes what it
-// fetches, whoever asked: a forged object is never served or cached.
 // A server that was told nothing about projects checks every fill: not
 // checking is what has to be said. So a command that forgot to pass the
 // rule fails towards checking.
@@ -600,6 +598,8 @@ func TestFillsVerifyUnlessToldNotTo(t *testing.T) {
 	}
 }
 
+// A fill started for a project that verifies its fills hashes what it
+// fetches, whoever asked: a forged object is never served or cached.
 func TestFillsVerifyForProjectsThatAsk(t *testing.T) {
 	data := randomBytes(4096)
 	id := c4.Identify(bytes.NewReader(data))

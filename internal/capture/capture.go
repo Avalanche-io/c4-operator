@@ -3,7 +3,7 @@
 // After the overlay is unmounted, the upper directory holds exactly the
 // container's changes: new and copied-up files, whiteouts for deletions,
 // and opaque markers for replaced directories. Capture hashes each file
-// (the verify-once point for new content), applies the changes to the
+// (where new content gets its C4 ID), applies the changes to the
 // parent view along changed paths only, and writes the new objects, the
 // new directory records and the changeset c4m. A file that was copied up
 // without changing (a metadata-only write) has the parent's ID and is not

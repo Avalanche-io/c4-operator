@@ -25,7 +25,7 @@ type multiFlag []string
 func (m *multiFlag) String() string     { return strings.Join(*m, ",") }
 func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 
-// runIngest hashes a directory (the verify-once point), uploads every
+// runIngest hashes a directory (where its content gets its C4 IDs), uploads every
 // object the project's store lacks to its shard, publishes the view's
 // records, and prints the view ID. S3 credentials come from the standard
 // AWS chain, as this process runs: the environment (with AWS_SESSION_TOKEN

@@ -828,7 +828,12 @@ key" (section 1.2) for encrypted projects: a node that holds a task's keys
 encrypts that task's captured outputs itself, so the regional tier cannot
 hash them, and readers verify instead. With `keys.retainPlaintext: false`, a
 node deletes the project's layers and plaintext objects as soon as no volume
-of the project uses them, trading cache warmth for exposure time.
+of the project uses them, trading cache warmth for exposure time. The same
+holds for the fill check of section 1.1: a tier that carries ciphertext
+under a plaintext ID cannot check a fill against that ID, so for an
+encrypted project the check is the consuming node's, as it decrypts. This
+section is designed and not built; when it is, a tier server's rule for such
+a project has to say so, since a server given no rule checks every fill.
 
 **Revocation.** Disabling the project's KMS key stops new releases at once.
 The broker can refuse renewals for a project, a node or a pod. Node daemons

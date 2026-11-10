@@ -282,8 +282,10 @@ func TestAFailedSyncNamesNothing(t *testing.T) {
 	}
 }
 
-// The sync behind the seam is a real one: on a file that has been closed
-// it fails, where a function that only returned nil would not.
+// The call behind the seam reaches the system: on a file that has been
+// closed it fails, where a function that only returned nil would not. It
+// does not show which call it is; another call on the descriptor would
+// fail the same way.
 func TestTheSyncIsASync(t *testing.T) {
 	f, err := os.CreateTemp(t.TempDir(), "synced-*")
 	if err != nil {
