@@ -460,11 +460,13 @@ func (q *Queue) fold(ctx context.Context, st *storeurl.Sharded, o *output, f Fol
 		// A pod whose unit and changeset match a fold from before runs
 		// were named, with no record to say which pod that was: it may be
 		// that fold's own run seen again after the upgrade, or a later
-		// one. It has been folded either way, and is reported, once.
+		// one. It has been folded either way, and is reported, once, as
+		// what it is: a fold that may have been made twice, not one that
+		// was.
 		for i := range o.folds {
 			if d := &o.folds[i]; d.BeforeRuns && d.Unit == idx && d.Changeset == f.Changeset {
 				d.BeforeRuns = false
-				conflicts = append(conflicts, fmt.Sprintf("unit %d was folded again after an upgrade: its earlier fold names no run and has no task record, so this may be the same run; where another unit wrote the same paths since, this unit's write now stands", idx))
+				conflicts = append(conflicts, fmt.Sprintf("unit %d may have been folded a second time after an upgrade: a fold of it from before names no run and has no task record that can be believed, so this pod may be that same run or a later one; if it is the same, and another unit wrote the same paths in between, this unit's older write now stands", idx))
 			}
 		}
 	}

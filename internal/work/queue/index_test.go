@@ -306,7 +306,7 @@ func TestAnOldFoldWithNoRecordToSayIsFoldedAndReported(t *testing.T) {
 			}
 			upgrade := 0
 			for _, line := range re.conflicts {
-				if strings.Contains(line, "unit 0 was folded again after an upgrade") {
+				if strings.Contains(line, "unit 0 may have been folded a second time after an upgrade") {
 					upgrade++
 				}
 			}
