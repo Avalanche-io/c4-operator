@@ -8,8 +8,9 @@
 // then given its name, so a reader sees a whole object or none, and after
 // a crash a name is never left over bytes that did not reach the disk.
 // That holds for a crash of the process or of the operating system on
-// every platform, and for a power cut on Linux, where the sync flushes the
-// device. On macOS the sync is fsync(2), not a full flush: after a power
+// every platform, and for a power cut on Linux where the filesystem sends
+// the device a flush and the device honours it (not with barriers off, or
+// on a virtual disk with unsafe caching). On macOS the sync is fsync(2), not a full flush: after a power
 // cut on a drive that reorders its writes, the cache can hold a wrong
 // object under a C4 ID, and nothing here finds it. A lost name only loses
 // a cache entry, so directories are not synced. On a node, layers hardlink objects;
@@ -271,11 +272,7 @@ func (c *Cache) Commit(tmp string, id c4.ID) (err error) {
 	if err := os.Chtimes(tmp, time.Now(), time.Unix(0, 0)); err != nil {
 		return err
 	}
-	// The bytes first, then the name.
-	if err := synced(tmp); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, final); err != nil {
+	if err := publish(tmp, final, false); err != nil {
 		return err
 	}
 	c.set.add(st.Size())
@@ -287,10 +284,23 @@ func (c *Cache) Commit(tmp string, id c4.ID) (err error) {
 // that it ran, on what, and before which name existed.
 var syncFile = syncData
 
-// synced syncs the file at name. Every route by which a file gets a name
-// under objects or xobjects calls it first.
-func synced(name string) error {
-	f, err := os.Open(name)
+// linkFile is os.Link. A variable so a test can refuse a link the way a
+// second filesystem does, and so reach the copy that stands in for it.
+var linkFile = os.Link
+
+// publish gives the file at tmp the name final, and is the only way a file
+// gets a name under objects or xobjects: the bytes first, then the name.
+// It syncs the file, then renames it, or with byLink links it (tmp stays,
+// and a name already there is fs.ErrExist). A sync that fails names
+// nothing.
+//
+// The file is opened by name to be synced, since callers hand over a path
+// they have closed. On Linux a write-back error raised after the writer
+// closed, on an inode since dropped from memory, is not reported to this
+// descriptor; syncing the writer's own descriptor would close that, and
+// would mean every caller passing an open file.
+func publish(tmp, final string, byLink bool) error {
+	f, err := os.Open(tmp)
 	if err != nil {
 		return err
 	}
@@ -298,7 +308,13 @@ func synced(name string) error {
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	if byLink {
+		return os.Link(tmp, final)
+	}
+	return os.Rename(tmp, final)
 }
 
 // Adopt makes a file of a dead upper directory the cache's object for
@@ -357,7 +373,7 @@ func (c *Cache) linkInto(src, final string, mode os.FileMode, id c4.ID) error {
 	name := tmp.Name()
 	tmp.Close()
 	os.Remove(name)
-	if err := os.Link(src, name); err != nil {
+	if err := linkFile(src, name); err != nil {
 		if !errors.Is(err, syscall.EXDEV) {
 			return err
 		}
@@ -383,13 +399,9 @@ func (c *Cache) linkInto(src, final string, mode os.FileMode, id c4.ID) error {
 	if err != nil {
 		return err
 	}
-	// The bytes first, then the name. Published with a link, which fails
-	// if another adopter got there first: then the variant is there and
-	// was counted once.
-	if err := synced(name); err != nil {
-		return err
-	}
-	if err := os.Link(name, final); err != nil {
+	// Published with a link, which fails if another adopter got there
+	// first: then the variant is there and was counted once.
+	if err := publish(name, final, true); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return nil
 		}
@@ -520,8 +532,9 @@ func (c *Cache) ExecPath(id c4.ID) (string, error) {
 		return "", err
 	}
 	tmp.Close()
+	// Gone once it has its name; removed here on every other way out.
+	defer os.Remove(tmp.Name())
 	if err := copyFile(c.Path(id), tmp.Name()); err != nil {
-		os.Remove(tmp.Name())
 		return "", err
 	}
 	if err := os.Chmod(tmp.Name(), c.set.opts.ExecMode); err != nil {
@@ -529,11 +542,7 @@ func (c *Cache) ExecPath(id c4.ID) (string, error) {
 	}
 	os.Chtimes(tmp.Name(), time.Now(), time.Unix(0, 0))
 	st, _ := os.Stat(tmp.Name())
-	if err := synced(tmp.Name()); err != nil {
-		os.Remove(tmp.Name())
-		return "", err
-	}
-	if err := os.Rename(tmp.Name(), p); err != nil {
+	if err := publish(tmp.Name(), p, false); err != nil {
 		return "", err
 	}
 	if st != nil {
