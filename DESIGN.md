@@ -108,7 +108,9 @@ Project says not to, and are trusted from the local cache from then on.**
   word, and a Project that shares a partition with one that verifies is
   verified too, since they share fills. (Until 2026-11 this was off unless
   asked for, and the regional tier never checked.) Hashing while writing
-  costs about 1.5 GiB/s on one core, above any network a fill uses.
+  ran at about 1.5 GiB/s on one core of an M3 Max, which is 12.9 Gbit/s:
+  free where the network is slower than that, and the limit on a fill where
+  it is faster. It is not measured on x86.
 - **A PUT is hashed** by the tier that receives it (section 1.2).
 - **What a capture adopts was hashed by that capture**, from the bytes it
   then keeps: a private copy for a workspace still in use, the file itself
@@ -117,12 +119,20 @@ Project says not to, and are trusted from the local cache from then on.**
   synced before it gets its name in the cache, on every route in, so after
   a crash a name is never left over bytes that did not reach the disk. That
   holds for a crash of the process or of the operating system on every
-  platform, and for a power cut on Linux, where the sync flushes the
-  device. On macOS the sync is fsync(2), not a full flush (about 20 µs an
-  object against 6 ms): it survives a crash, not a power cut on a drive
-  that reorders writes. Directories are not synced; a lost name is a miss.
-  Layers are links and directories, which a journaling filesystem replays
-  in order.
+  platform. For a power cut it holds on Linux where the filesystem sends
+  the device a flush and the device honours it, which is not so with
+  barriers turned off, a virtual disk with unsafe caching, or a kind node
+  whose disk is a file on a Mac. On macOS the sync is fsync(2), not a full
+  flush (about 20 µs an object against 6 ms): it survives a crash, not a
+  power cut on a drive that reorders writes. Directories are not synced; a
+  lost name is a miss. None of this is shown by a crash: the tests show
+  the order of the calls, and the rest is how these filesystems are
+  documented to behave.
+  A layer is links and directories, which a journaling filesystem replays
+  in order, and one small meta file, written last and not synced. A layer
+  whose meta is missing or cannot be read is not built: it is built again
+  when next wanted, which keeps its directory and rewrites the meta, or it
+  is collected.
 - **Not built: a scrub.** After a power cut on macOS, or a disk fault
   anywhere, a cache can hold wrong bytes under a C4 ID and nothing finds
   them. The rule this breaks is that IDs are checked, never trusted. What
