@@ -366,114 +366,204 @@ func TestTheNextPushAfterATornFile(t *testing.T) {
 		t.Fatalf("the chain has %d sections from %s, want %d from the empty view", len(full.Sections), full.Base, len(changed))
 	}
 
-	// A changeset the mapping names is gone from the store, and the chain
-	// file with it. The import says which, where the mapping records it,
-	// and what to do; done, the next push imports those commits again to
-	// the same changesets.
-	rc, _ := gitimport.ChainRecorded(final, "refs/heads/main")
-	lost := len(rc.Changesets) - 2
-	removed := 0
-	for _, dir := range r.shards {
-		filepath.Walk(dir, func(p string, fi os.FileInfo, err error) error {
-			if err != nil || fi.IsDir() {
-				return nil
-			}
-			if f, err := os.Open(p); err == nil {
-				id := c4.Identify(f)
-				f.Close()
-				if id == rc.Changesets[lost] {
-					os.Remove(p)
-					removed++
+	// Another ref, with lines after the ones damaged below: a way out that
+	// cuts the mapping back takes every ref's lines from there on.
+	r.git(r.work, "checkout", "-q", "-b", "dev")
+	dev := r.commit(map[string]string{"dev.txt": "dev\n"})
+	r.git(r.work, "push", "-q", "origin", "dev")
+	r.git(r.work, "checkout", "-q", "main")
+	postDev := func() refResult {
+		t.Helper()
+		rec, res := r.post(h, `{"ref":"refs/heads/dev","after":"`+dev+`"}`, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("push dev: %d %s", rec.Code, rec.Body)
+		}
+		return res
+	}
+	devWas := postDev()
+	refs := func() map[string]map[string]string {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/refs", nil))
+		out := map[string]map[string]string{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("GET /refs: %d %s", rec.Code, rec.Body)
+		}
+		return out
+	}
+	// object is the store's file of an object.
+	object := func(id c4.ID) string {
+		t.Helper()
+		found := ""
+		for _, dir := range r.shards {
+			filepath.Walk(dir, func(p string, fi os.FileInfo, err error) error {
+				if err != nil || fi.IsDir() {
+					return nil
 				}
-			}
-			return nil
-		})
+				if f, err := os.Open(p); err == nil {
+					if c4.Identify(f) == id {
+						found = p
+					}
+					f.Close()
+				}
+				return nil
+			})
+		}
+		if found == "" {
+			t.Fatalf("%s is not in the store", id)
+		}
+		return found
 	}
-	if removed == 0 {
-		t.Fatal("the changeset was not found in the store to remove")
-	}
-	os.Remove(chainPath)
+	// cutBack does what an error says: it cuts the mapping back to before
+	// the line the error names, and imports again every ref that had a line
+	// from there on. Then main's chain is as it was recorded, changeset for
+	// changeset, and dev is published as it was.
 	cNew := r.commit(map[string]string{"e.txt": "e\n"})
 	r.git(r.work, "push", "-q", "origin", "main")
-	rec, _ := r.post(h, `{"ref":"refs/heads/main","after":"`+cNew+`"}`, nil)
-	wantLine := fmt.Sprintf("cut the mapping back to before line %d", rc.Lines[lost])
-	if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), rc.Changesets[lost].String()) || !strings.Contains(rec.Body.String(), wantLine) {
-		t.Fatalf("with a recorded changeset gone from the store: %d %s\nwant an error naming it and %q", rec.Code, rec.Body, wantLine)
+	postMain := func() (*httptest.ResponseRecorder, refResult) {
+		return r.post(h, `{"ref":"refs/heads/main","after":"`+cNew+`"}`, nil)
 	}
-	// The way out the error names.
-	m, _ := os.ReadFile(r.svc.out)
-	lines := bytes.SplitAfter(m, []byte("\n"))
-	if err := os.WriteFile(r.svc.out, bytes.Join(lines[:rc.Lines[lost]-1], nil), 0o644); err != nil {
-		t.Fatal(err)
+	if rec, _ := postMain(); rec.Code != http.StatusOK {
+		t.Fatalf("push: %d %s", rec.Code, rec.Body)
 	}
-	rec, res = r.post(h, `{"ref":"refs/heads/main","after":"`+cNew+`"}`, nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("after cutting the mapping back: %d %s", rec.Code, rec.Body)
-	}
-	headIs("after cutting the mapping back", res)
-	again, _ := gitimport.ReadMapping(r.svc.out)
-	rc2, _ := gitimport.ChainRecorded(again, "refs/heads/main")
-	if len(rc2.Changesets) != len(rc.Changesets)+1 || rc2.Changesets[lost] != rc.Changesets[lost] {
-		t.Fatalf("the commits were not imported again to the same changesets: %d recorded, were %d", len(rc2.Changesets), len(rc.Changesets))
-	}
-
-	// Damage in the middle of the mapping, with whole lines after it (blocks
-	// that never reached the disk under later ones that did): a line gone,
-	// and a line of zeros. Neither is mended by guessing. The import and
-	// the readers stop with the line to cut the mapping back to; done, the
-	// same push imports those commits again, to the same changesets.
-	for _, damage := range []struct {
-		name, says string
-		do         func(lines [][]byte, at int) [][]byte
-	}{
-		{"a line gone from the middle", "lines are missing", func(lines [][]byte, at int) [][]byte {
-			return append(append([][]byte(nil), lines[:at]...), lines[at+1:]...)
-		}},
-		{"a line of zeros in the middle", "does not read", func(lines [][]byte, at int) [][]byte {
-			out := append([][]byte(nil), lines...)
-			out[at] = append(make([]byte, len(lines[at])-1), 0x0a)
-			return out
-		}},
-	} {
-		before, _ := gitimport.ReadMapping(r.svc.out)
-		rc, _ := gitimport.ChainRecorded(before, "refs/heads/main")
-		m, _ := os.ReadFile(r.svc.out)
-		lines := bytes.SplitAfter(m, []byte("\n"))
-		at := rc.Lines[len(rc.Lines)-3] - 1
-		if err := os.WriteFile(r.svc.out, bytes.Join(damage.do(lines, at), nil), 0o644); err != nil {
-			t.Fatal(err)
+	cutBack := func(what, body string, was gitimport.RecordedChain) {
+		t.Helper()
+		named := regexp.MustCompile(`cut the mapping back to before line (\d+) and import again every ref that has a line from there on`).FindStringSubmatch(body)
+		if named == nil {
+			t.Fatalf("%s: the error does not name the line to cut back to and every ref after it: %s", what, body)
 		}
-		rec, _ := r.post(h, `{"ref":"refs/heads/main","after":"`+cNew+`"}`, nil)
-		named := regexp.MustCompile(`cut the mapping back to before line (\d+) `).FindStringSubmatch(rec.Body.String())
-		if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), damage.says) || named == nil {
-			t.Fatalf("%s: %d %s\nwant an error that says %q and names the line to cut back to", damage.name, rec.Code, rec.Body, damage.says)
-		}
-		got := httptest.NewRecorder()
-		h.ServeHTTP(got, httptest.NewRequest(http.MethodGet, "/chains/refs/heads/main", nil))
-		if got.Code == http.StatusOK {
-			t.Fatalf("%s: a reader was served a chain", damage.name)
-		}
-		// The way out the error names.
 		var line int
 		fmt.Sscan(named[1], &line)
-		m, _ = os.ReadFile(r.svc.out)
+		m, _ := os.ReadFile(r.svc.out)
 		if err := os.WriteFile(r.svc.out, bytes.Join(bytes.SplitAfter(m, []byte("\n"))[:line-1], nil), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		rec, res = r.post(h, `{"ref":"refs/heads/main","after":"`+cNew+`"}`, nil)
+		rec, res := postMain()
 		if rec.Code != http.StatusOK {
-			t.Fatalf("%s: after cutting the mapping back to before line %d: %d %s", damage.name, line, rec.Code, rec.Body)
+			t.Fatalf("%s: after cutting the mapping back to before line %d: %d %s", what, line, rec.Code, rec.Body)
 		}
-		headIs("after "+damage.name+" and the cut back", res)
+		headIs("after "+what+" and the cut back", res)
 		after, _ := gitimport.ReadMapping(r.svc.out)
 		now, _ := gitimport.ChainRecorded(after, "refs/heads/main")
-		if len(now.Changesets) != len(rc.Changesets) || now.Head != rc.Head {
-			t.Fatalf("%s: the chain recorded has %d changesets, had %d", damage.name, len(now.Changesets), len(rc.Changesets))
+		if len(now.Changesets) != len(was.Changesets) || now.Head != was.Head || now.Base != was.Base {
+			t.Fatalf("%s: the chain recorded has %d changesets, had %d", what, len(now.Changesets), len(was.Changesets))
 		}
-		for i, id := range rc.Changesets {
+		for i, id := range was.Changesets {
 			if now.Changesets[i] != id {
-				t.Fatalf("%s: changeset %d was not imported again to the same C4 ID", damage.name, i+1)
+				t.Fatalf("%s: changeset %d was not imported again to the same C4 ID", what, i+1)
 			}
 		}
+		// The cut took dev's lines; until dev is imported again it is not
+		// published.
+		if at, ok := refs()["refs/heads/dev"]; ok {
+			t.Fatalf("%s: dev is still published after the cut, at %v; the test tells nothing of the other refs", what, at)
+		}
+		if res := postDev(); res.View != devWas.View || refs()["refs/heads/dev"]["commit"] != dev || refs()["refs/heads/dev"]["view"] != devWas.View {
+			t.Fatalf("%s: dev imported again is at %v, was at view %s", what, refs()["refs/heads/dev"], devWas.View)
+		}
+	}
+	recordedNow := func() gitimport.RecordedChain {
+		t.Helper()
+		m, err := gitimport.ReadMapping(r.svc.out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rc, _ := gitimport.ChainRecorded(m, "refs/heads/main")
+		return rc
+	}
+
+	// A changeset the mapping names is gone from the store, and the chain
+	// file with it. The import says which, where the mapping records it,
+	// and what to do.
+	rc := recordedNow()
+	lost := len(rc.Changesets) - 3
+	os.Remove(object(rc.Changesets[lost]))
+	os.Remove(chainPath)
+	rec, _ := postMain()
+	if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), rc.Changesets[lost].String()) || !strings.Contains(rec.Body.String(), fmt.Sprintf("(mapping line %d) cannot be read from the store", rc.Lines[lost])) {
+		t.Fatalf("with a recorded changeset gone from the store: %d %s", rec.Code, rec.Body)
+	}
+	cutBack("a changeset gone from the store", rec.Body.String(), rc)
+
+	// A wrong object under a changeset's C4 ID (cut short). A store keeps
+	// the object it has, so importing the commit again does not replace
+	// it: the error says it has to be removed first. Removed, the same way
+	// out; and then the chain can be made again from the store.
+	rc = recordedNow()
+	lost = len(rc.Changesets) - 3
+	wrong := object(rc.Changesets[lost])
+	stored, _ := os.ReadFile(wrong)
+	os.Chmod(wrong, 0o644)
+	if err := os.WriteFile(wrong, stored[:len(stored)/2], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(chainPath)
+	rec, _ = postMain()
+	if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), "wrong object") || !strings.Contains(rec.Body.String(), "removed from the store first") {
+		t.Fatalf("with a wrong object under a changeset's C4 ID: %d %s", rec.Code, rec.Body)
+	}
+	if err := os.Remove(wrong); err != nil {
+		t.Fatal(err)
+	}
+	cutBack("a wrong object removed from the store", rec.Body.String(), rc)
+	os.Remove(chainPath)
+	if rec, res := postMain(); rec.Code != http.StatusOK {
+		t.Fatalf("the chain cannot be made again after the wrong object was replaced: %d %s", rec.Code, rec.Body)
+	} else {
+		headIs("made again from the replaced object", res)
+	}
+
+	// A line of zeros in the middle of the mapping, with whole lines after
+	// it (a block that never reached the disk under later ones that did).
+	// The mapping cannot be read past it, and what it held is not guessed:
+	// every import and reader of the repository stops with the line to cut
+	// back to.
+	rc = recordedNow()
+	m, _ := os.ReadFile(r.svc.out)
+	lines := bytes.SplitAfter(m, []byte("\n"))
+	at := rc.Lines[len(rc.Lines)-3] - 1
+	lines[at] = append(make([]byte, len(lines[at])-1), 0x0a)
+	if err := os.WriteFile(r.svc.out, bytes.Join(lines, nil), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec, _ = postMain()
+	if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), fmt.Sprintf("mapping line %d does not read", at+1)) {
+		t.Fatalf("a line of zeros in the middle of the mapping: %d %s", rec.Code, rec.Body)
+	}
+	got := httptest.NewRecorder()
+	h.ServeHTTP(got, httptest.NewRequest(http.MethodGet, "/chains/refs/heads/dev", nil))
+	if got.Code == http.StatusOK {
+		t.Fatal("a reader was served a chain from a mapping that does not read")
+	}
+	cutBack("a line of zeros in the middle of the mapping", rec.Body.String(), rc)
+
+	// A line gone from the middle of the mapping, the lines round it
+	// whole. Nothing stops and no chain is read into the missing line: the
+	// chain recorded, made and served is the one from where the lines
+	// resume, which still resolves to the ref's view. The commit whose line
+	// is gone is no longer published, and nothing brings it back but a cut
+	// to before it.
+	rc = recordedNow()
+	m, _ = os.ReadFile(r.svc.out)
+	lines = bytes.SplitAfter(m, []byte("\n"))
+	at = rc.Lines[len(rc.Lines)-3] - 1
+	goneCommit := rc.Commits[len(rc.Commits)-3]
+	if err := os.WriteFile(r.svc.out, bytes.Join(append(append([][]byte(nil), lines[:at]...), lines[at+1:]...), nil), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var logged bytes.Buffer
+	r.svc.log = &logged
+	rec, res = postMain()
+	if rec.Code != http.StatusOK || !strings.Contains(logged.String(), "chain file for refs/heads/main made again") {
+		t.Fatalf("with a line gone from the middle of the mapping: %d %s; logged %q", rec.Code, rec.Body, logged.String())
+	}
+	headIs("with a line gone from the middle of the mapping", res)
+	if now := recordedNow(); len(now.Changesets) != 2 || now.Head != rc.Head || now.Changesets[1] != rc.Changesets[len(rc.Changesets)-1] {
+		t.Fatalf("the chain recorded after a line went: %d changesets from %s", len(now.Changesets), now.Base)
+	}
+	got = httptest.NewRecorder()
+	h.ServeHTTP(got, httptest.NewRequest(http.MethodGet, "/commits/"+goneCommit, nil))
+	if got.Code != http.StatusNotFound {
+		t.Fatalf("the commit whose line is gone: %d", got.Code)
 	}
 }

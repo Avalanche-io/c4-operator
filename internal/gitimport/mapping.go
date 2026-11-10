@@ -59,7 +59,7 @@ func decodeMapping(r io.Reader) (out []Commit, whole int64, err error) {
 			case err == nil:
 				out = append(out, c)
 			case ended:
-				return nil, 0, fmt.Errorf("mapping line %d does not read (%w). It and the lines after it can be made again from the repository: cut the mapping back to before line %d and import its refs again, and the commits from there are imported again to the same changesets", n, err, n)
+				return nil, 0, fmt.Errorf("mapping line %d does not read (%w). It and the lines after it can be made again from the repository: "+reimport, n, err, n)
 			default:
 				return out, whole, nil // a cut append: not a line yet
 			}

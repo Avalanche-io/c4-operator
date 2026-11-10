@@ -1105,18 +1105,27 @@ import step, so import must be fast and push-driven.
     the format allows. So the file is opened as the mapping records it.
     Only a line with a changeset says anything of a chain: a commit that
     changes nothing, a ref moved to a commit imported under another ref,
-    and a seal leave the chain where its last changeset left it. The file
-    must resolve to that changeset's view, from the recorded base, in the
+    and a seal leave the chain where its last changeset left it. A
+    changeset goes on the chain when it applies to the view the chain is
+    at, which can be checked, and not when its count says so, which
+    cannot; a line counted first starts a chain (after a seal, a force
+    push, or a move of the ref) from the view it applies to. The file must
+    resolve to the last changeset's view, from the recorded base, in the
     recorded number of sections (or be that chain sealed and started again
-    from its head), and end where a write ended. The sections before the
-    last are counted, not read again, so that an open costs one changeset
-    and not the chain: a file changed before its last section in a way that
-    still parses and keeps the count is not found here. An append cut by
-    a crash does not make one. A file that is not the recorded chain
+    from its head), and end where a write ended. A file that is not that
     (torn, ahead of the mapping, behind it, or another ref's: a chain
     file's name does not tell a slash from an underscore) is made again
     from the stored changesets, each checked against its C4 ID and the
     whole against the recorded view, and the service logs that it was.
+  - *What the check does not find.* The file is read and parsed whole, and
+    only its last section is applied. The sections before it are counted,
+    not compared with the changesets the mapping names, so a file changed
+    before its last section in a way that still parses and keeps the count
+    is taken. An append cut by a crash does not make one. Each section,
+    encoded, compared with the C4 ID the mapping records would find it
+    with no read of the store; that is not built, and a changeset stored
+    before 2026-11-09, which ends with a line the file's sections do not
+    have, would not match.
   - *A reader is served the same way,* from one read of the file, with
     nothing written, and by the ref's exact name when the mapping has it.
     That costs a read of the mapping for each request, as an import and
@@ -1125,19 +1134,35 @@ import step, so import must be fast and push-driven.
     whole one (a JSON object without its end does not parse). A tail that
     does not end a line, whether a cut line, lines that never reached the
     disk, or zeros, is left out by a reader and taken off by the next
-    writer, and those commits are imported again. An import is a function
-    of the commit, so they come back to the same views and changesets.
-  - *Damage in its middle is not mended by guessing.* A whole line that
-    does not parse, a chain line whose count does not follow on from the
-    lines before it (lines are missing), and a recorded changeset the
-    store does not hold, or holds wrongly, are errors. Each stops the
-    ref's imports and its readers (a line that does not parse stops the
-    repository's) until someone acts, and names the mapping line to cut
-    back to; cut back, the next import imports the commits from there
-    again, to the same changesets. What a cut does not bring back is a
-    ref's deletion recorded after it (read, not run): the ref shows until
-    its deletion is sent again. Making a lost changeset again without the
-    cut is the next step and is not built.
+    writer. Each commit lost that way is imported again when its ref is
+    next imported, and a lost line that only moved a ref is written again
+    then too; until then the ref is published as the shorter mapping has
+    it. An import is a function of the commit, so the commits come back to
+    the same views and changesets.
+  - *Lines gone from its middle stop nothing.* A changeset that does not
+    apply to the view before it starts the recorded chain again from the
+    view it does apply to, so the chain made and served is the one from
+    where the lines resume: as much as the mapping still knows, every
+    section of it checked. The commits whose lines are gone are no longer
+    published, and nothing notices. The same reading takes a mapping the
+    importer before this one could write: it took a file with a torn
+    section on it as it stood and counted the section, so its counts can
+    skip a number with no line missing. Read by views that is the whole
+    chain, and the file is made again once, without the torn section.
+  - *What cannot be read or made again is an error that names the way
+    out.* A whole mapping line that does not parse (zeros under later
+    lines) stops every import and reader of the repository; a recorded
+    changeset the store does not hold, or holds wrongly, stops its ref's.
+    Each names the mapping line to cut back to. The cut takes every ref's
+    lines from there on, so every such ref has to be imported again, and
+    the error says so. Until one is, it is published as the shorter
+    mapping has it: at an earlier commit, or not at all, and a ref deleted
+    since shows again until its deletion is sent again. Imported again,
+    the commits come back to the same views and changesets. A wrong object
+    has to be removed from the store first: a store keeps the object it
+    has under a C4 ID, so importing the commit again does not replace it.
+    Making a lost changeset again in place, with no cut, is the next step
+    and is not built.
 - **c4git files** are 90-byte C4 IDs in git. The importer uses the ID
   directly, copies the object from the c4git store without rehashing (c4git
   verified it at `git add`), and takes its size from the store.

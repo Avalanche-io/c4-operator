@@ -223,21 +223,17 @@ type RecordedChain struct {
 	// and a mapping cut back to it loses nothing that is not made again.
 	Lines   []int
 	Commits []string
-	// Gap is the mapping line whose count does not follow on from the
-	// lines before it: changesets of this chain have no line (a mapping
-	// with lines missing from its middle). Zero when the record is whole.
-	// A record with a gap is of no chain; nothing is held to it or made
-	// from it, and the error says where to cut the mapping back to.
-	Gap int
 }
 
-// reimport is the way out of a record that cannot be used from one line on.
-const reimport = "cut the mapping back to before line %d and import the ref again, and the commits from there are imported again to the same changesets"
+// reimport is the way out when the mapping cannot be used from one line
+// on. The cut takes every ref's lines from there on with it, so every such
+// ref has to be imported again, not only the one the error is for.
+const reimport = "cut the mapping back to before line %d and import again every ref that has a line from there on: their commits are imported again to the same changesets, and until a ref is imported again it is published as the shorter mapping has it"
 
 // ChainRecorded returns what the mapping m records of ref's chain file,
 // and false when it records none. The mapping is the authority for a
-// chain: each commit's line carries its changeset's C4 ID and the chain's
-// base and length once it was appended, and is written only after the
+// chain: each commit's line carries its changeset's C4 ID, the view it
+// applies to and the view it produces, and is written only after the
 // changeset is in the store. The chain file is those changesets joined,
 // kept beside the mapping so an append costs one changeset; it can always
 // be made again from the mapping, and is never the source of anything
@@ -247,11 +243,17 @@ const reimport = "cut the mapping back to before line %d and import the ref agai
 // nothing, a line that only moves the ref, and a line that records a seal
 // say nothing of it: the ref can move to a commit imported under another
 // ref, and have empty commits made on it, while its chain stays where its
-// last changeset left it. A changeset's line names the chain it was
-// appended to: another base is a chain started again (after a seal, or a
-// force push), and a count no greater than the lines before it give is the
-// same chain cut back to there (its commits imported again). A greater
-// count is a gap: lines are missing, and no chain is read into them.
+// last changeset left it.
+//
+// A changeset goes on the chain when it applies to the view the chain is
+// at, which can be checked, and not when its count says so, which cannot
+// (a file with a torn section left on it was once counted as it stood, so
+// mappings exist whose counts skip a number with no line missing). A line
+// counted first started a chain (after a seal, a force push, or a move of
+// the ref), from the view it applies to. So does a line that does not
+// apply to the view before it: lines are missing from the mapping, and
+// the chain recorded is the one from where they resume, which is as much
+// as the mapping still knows.
 func ChainRecorded(m []Commit, ref string) (RecordedChain, bool) {
 	var cur RecordedChain
 	found := false
@@ -259,21 +261,13 @@ func ChainRecorded(m []Commit, ref string) (RecordedChain, bool) {
 		if c.Ref != ref || c.Changeset.IsNil() || c.ChainSeq < 1 {
 			continue
 		}
-		before := c.ChainSeq - 1 // the chain's length when this one was appended
-		if !found || c.ChainBase != cur.Base {
-			cur = RecordedChain{Base: c.ChainBase}
+		if !found || c.ChainSeq == 1 || c.ParentView != cur.Head {
+			cur = RecordedChain{Base: c.ParentView}
 		}
 		found = true
-		if before > len(cur.Changesets) {
-			if cur.Gap == 0 {
-				cur.Gap = i + 1
-			}
-			continue
-		}
-		cur.Gap = 0
-		cur.Changesets = append(cur.Changesets[:before:before], c.Changeset)
-		cur.Lines = append(cur.Lines[:before:before], i+1)
-		cur.Commits = append(cur.Commits[:before:before], c.Commit)
+		cur.Changesets = append(cur.Changesets, c.Changeset)
+		cur.Lines = append(cur.Lines, i+1)
+		cur.Commits = append(cur.Commits, c.Commit)
 		cur.Head = c.View
 	}
 	return cur, found
@@ -285,7 +279,7 @@ func ChainRecorded(m []Commit, ref string) (RecordedChain, bool) {
 // of its own; with no sections a chain's base is its head). The sections
 // before the last are counted, not read again.
 func (rc RecordedChain) holds(ch *ChainFile) bool {
-	if rc.Gap != 0 || ch.Head != rc.Head {
+	if ch.Head != rc.Head {
 		return false
 	}
 	return ch.Base == rc.Base && ch.Sections == len(rc.Changesets) || ch.Sections == 0
@@ -315,10 +309,6 @@ func (e *CannotRemake) Unwrap() error { return e.Err }
 // back is the chain the mapping records, in the form the format allows, or
 // an error.
 func (rc RecordedChain) bytes(ctx context.Context, src view.RecordSource) ([]byte, error) {
-	if rc.Gap != 0 {
-		return nil, fmt.Errorf("mapping line %d does not follow on from the %d changesets the mapping has before it for this chain: lines are missing. They can be made again from the repository: "+reimport,
-			rc.Gap, len(rc.Changesets), rc.Gap)
-	}
 	c := &view.Chain{Base: rc.Base}
 	seals := make([]c4.ID, len(rc.Changesets))
 	for i, id := range rc.Changesets {
@@ -330,7 +320,7 @@ func (rc RecordedChain) bytes(ctx context.Context, src view.RecordSource) ([]byt
 			return nil, lost(fmt.Errorf("cannot be read from the store: %w", err))
 		}
 		if got := c4.Identify(bytes.NewReader(data)); got != id {
-			return nil, lost(errors.New("is a wrong object in the store: its bytes are not what that C4 ID names"))
+			return nil, lost(errors.New("is a wrong object in the store (its bytes are not what that C4 ID names), which has to be removed from the store first, since a store keeps the object it has"))
 		}
 		one, err := view.ReadChain(data)
 		if err != nil || len(one.Sections) != 1 {

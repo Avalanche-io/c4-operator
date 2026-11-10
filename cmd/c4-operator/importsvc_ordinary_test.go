@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/Avalanche-io/c4-operator/internal/gitimport"
 	"github.com/Avalanche-io/c4-operator/internal/view"
 )
 
@@ -269,4 +271,126 @@ func TestTwoRefsWithOneChainFileName(t *testing.T) {
 			t.Fatalf("at the end: a reader of %s gets %d, a chain to %s, want %s", b, code, head, views[b])
 		}
 	}
+}
+
+// --export-chain writes the chain the mapping records, as a reader of the
+// listener is served it: with the chain file torn (cut in an entry's name,
+// where it still parses) it writes what it wrote from the whole file, and
+// it leaves the file alone.
+func TestExportChainIsTheRecordedChain(t *testing.T) {
+	o := newOrdinary(t, 0)
+	o.commit(map[string]string{"a.txt": "a\n"})
+	o.ok("the first commit", "main")
+	o.commit(map[string]string{"dir/more.txt": "more\n"})
+	o.ok("the second commit", "main")
+	export := func(ref string) ([]byte, error) {
+		t.Helper()
+		out, err := os.Create(filepath.Join(t.TempDir(), "out"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer out.Close()
+		stdout := os.Stdout
+		os.Stdout = out
+		defer func() { os.Stdout = stdout }()
+		err = runImportGit([]string{"--repo", o.remote, "--store", o.shards[0], "--store", o.shards[1], "--out", o.svc.out, "--export-chain", ref})
+		data, _ := os.ReadFile(out.Name())
+		return data, err
+	}
+	whole, err := export("refs/heads/main")
+	if err != nil || len(whole) == 0 {
+		t.Fatalf("export: %d bytes, %v", len(whole), err)
+	}
+	p := o.svc.chainPath("refs/heads/main")
+	file, _ := os.ReadFile(p)
+	torn := file[:bytes.LastIndex(file, []byte("more.txt"))+len("mo")]
+	if err := os.WriteFile(p, torn, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := export("refs/heads/main")
+	if err != nil || !bytes.Equal(got, whole) {
+		t.Fatalf("export from a torn chain file: %v\n%s\nwant\n%s", err, got, whole)
+	}
+	if now, _ := os.ReadFile(p); !bytes.Equal(now, torn) {
+		t.Fatal("the export wrote the chain file")
+	}
+	if _, err := export("refs/heads/none"); err == nil || !strings.Contains(err.Error(), "records no chain") {
+		t.Fatalf("export of a ref the mapping does not have: %v", err)
+	}
+}
+
+// A mapping and a chain file as the importer before this one could leave
+// them. A crash cut an append after a directory's line, a fragment that
+// parses as a section and changes nothing; that importer took the file as
+// it stood, went on, and counted the fragment, so the mapping counts 1, 2,
+// 3, 5, 6 with no line missing and the file has a section no commit made.
+// The chain is read by what each changeset applies to, not by the counts:
+// the next push imports, the file is made again once without the
+// fragment, and the chain served has a section for each commit.
+func TestAMappingWhoseCountsSkipANumber(t *testing.T) {
+	o := newOrdinary(t, 0)
+	for i, files := range []map[string]string{
+		{"a/x.txt": "x\n", "a/b/y.txt": "y\n", "top.txt": "t\n"},
+		{"top.txt": "t2\n"},
+		{"a/x.txt": "x3\n"},
+		{"a/b/y.txt": "y4\n"},
+		{"top.txt": "t5\n"},
+	} {
+		o.commit(files)
+		o.ok(fmt.Sprintf("commit %d", i+1), "main")
+	}
+	// The state left: the fragment (the first two lines of the fourth
+	// changeset) before the fourth changeset, and the counts after it one
+	// more than they were.
+	m, err := gitimport.ReadMapping(o.svc.out)
+	if err != nil || len(m) != 5 {
+		t.Fatalf("the mapping has %d lines, %v", len(m), err)
+	}
+	p := o.svc.chainPath("refs/heads/main")
+	file, _ := os.ReadFile(p)
+	fourth := bytes.LastIndex(file, []byte(m[2].View.String()+"\n"))
+	lines := bytes.SplitAfterN(file[fourth:], []byte("\n"), 3)
+	left := append(append(append([]byte(nil), file[:fourth]...), append(lines[0], lines[1]...)...), file[fourth:]...)
+	if err := os.WriteFile(p, left, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if ch, err := gitimport.OpenChainFile(context.Background(), p, o.svc.base.Records); err != nil || ch.Sections != 6 || ch.Head != m[4].View {
+		t.Fatalf("the file with the fragment in it opens as %+v (%v); the test needs it to open as six sections to the same view", ch, err)
+	}
+	os.Remove(o.svc.out)
+	w, err := gitimport.AppendMapping(o.svc.out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, line := range m {
+		if i >= 3 {
+			line.ChainSeq++
+		}
+		if err := w.Write(line); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.Close()
+
+	o.commit(map[string]string{"top.txt": "t6\n"})
+	code, body := o.push("main")
+	if code != http.StatusOK {
+		t.Fatalf("the next push: %d %s", code, body)
+	}
+	if !strings.Contains(o.log.String(), "chain file for refs/heads/main made again") {
+		t.Fatalf("the file with the fragment in it was not made again: %q", o.log)
+	}
+	rec := httptest.NewRecorder()
+	o.h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/chains/refs/heads/main", nil))
+	c, err := view.ReadChain(rec.Body.Bytes())
+	if err != nil || len(c.Sections) != 6 || c.Base != view.EmptyID() {
+		t.Fatalf("the chain served: %d, %d sections (%v), want one for each of the six commits", rec.Code, len(c.Sections), err)
+	}
+	if _, err := c.Verify(context.Background(), o.svc.base.Records); err != nil {
+		t.Fatal(err)
+	}
+	// And once: the next push finds the file as recorded.
+	o.log.Reset()
+	o.commit(map[string]string{"top.txt": "t7\n"})
+	o.ok("the push after", "main")
 }

@@ -294,9 +294,7 @@ func TestAChainThatCannotBeMadeAgain(t *testing.T) {
 	wrongHead := append([]Commit(nil), m...)
 	wrongHead[2].View = h.views[1]
 	wrongBase := append([]Commit(nil), m...)
-	for i := range wrongBase {
-		wrongBase[i].ChainBase = h.views[1]
-	}
+	wrongBase[0].ParentView = h.views[1]
 	for name, mm := range map[string][]Commit{"a changeset the store does not hold": missing, "changesets that do not reach the recorded head": wrongHead, "a first changeset that is not over the recorded base": wrongBase} {
 		os.WriteFile(p, torn, 0o644)
 		if ch, _, err := OpenRecordedChain(ctx, p, h.src, mm, "main"); err == nil || !strings.Contains(err.Error(), "cannot be made again") {
@@ -327,8 +325,17 @@ func TestAChainThatCannotBeMadeAgain(t *testing.T) {
 	w.Write([]byte("not the changeset"))
 	w.Close()
 	os.WriteFile(p, torn, 0o644)
-	if _, _, err := OpenRecordedChain(ctx, p, h.src, m, "main"); err == nil || !strings.Contains(err.Error(), "wrong object") {
-		t.Fatalf("a wrong object under a changeset's ID: %v", err)
+	// The error says which, where the mapping records it, and that the
+	// object has to go before anything can be made again: a store keeps the
+	// object it has under a C4 ID.
+	_, _, err = OpenRecordedChain(ctx, p, h.src, m, "main")
+	for _, want := range []string{"wrong object", id.String(), "mapping line 3", "removed from the store first", "cut the mapping back to before line 3 ", "every ref"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("a wrong object under a changeset's ID: %v\nwant %q in it", err, want)
+		}
+	}
+	if _, err := RecordedChainBytes(ctx, p, h.src, m, "main"); err == nil || !strings.Contains(err.Error(), "wrong object") {
+		t.Fatalf("a reader, with a wrong object under a changeset's ID: %v", err)
 	}
 }
 
@@ -408,48 +415,66 @@ func TestWhatTheMappingRecordsOfAChain(t *testing.T) {
 	ctx := context.Background()
 	h := newHistory(t, 4)
 	all := h.recorded(t, "main", 4)
-	// A commit imported again after the mapping was cut back: its line
-	// comes with the count it had, and takes that place.
-	again := all[1]
-	again.Commit = "again"
-	if rc, ok := ChainRecorded(append(append([]Commit(nil), all[:3]...), again), "main"); !ok || len(rc.Changesets) != 2 || rc.Changesets[1] != again.Changeset || rc.Head != again.View || rc.Lines[1] != 4 || rc.Commits[1] != "again" {
-		t.Fatalf("a line that takes an earlier place: %+v", rc)
-	}
-	// A count greater than the lines before it give is a gap: lines are
-	// missing from the middle of the mapping. No chain is read into what is
-	// left; the file is not held to it, whatever it holds, and the error
-	// names the line to cut the mapping back to.
 	gp := filepath.Join(t.TempDir(), "main.c4m")
-	for name, lines := range map[string][]Commit{
-		"the third of four lines gone": {all[0], all[1], all[3]},
-		"the first line gone":          {all[1], all[2]},
+	sections := func() (c4.ID, int) {
+		t.Helper()
+		data, err := os.ReadFile(gp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ch, err := openChain(ctx, gp, data, h.src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ch.Base, ch.Sections
+	}
+	// A changeset goes on the chain when it applies to the view the chain
+	// is at, whatever its count. A file with a torn section left on it was
+	// once counted as it stood, so a mapping can count 1, 2, 3, 5 with no
+	// line missing: that is a chain of four, and the file of four is it.
+	skipped := append([]Commit(nil), all...)
+	skipped[3].ChainSeq = 5
+	whole := h.chainFile(t, gp, 4)
+	if rc, ok := ChainRecorded(skipped, "main"); !ok || len(rc.Changesets) != 4 || rc.Base != h.views[0] || rc.Head != h.views[4] {
+		t.Fatalf("counts that skip a number with no line missing: %+v", rc)
+	}
+	if ch, repaired, err := OpenRecordedChain(ctx, gp, h.src, skipped, "main"); err != nil || repaired != "" || ch.Sections != 4 {
+		t.Fatalf("the file of a chain whose counts skip a number: %+v, %q, %v", ch, repaired, err)
+	}
+	// Lines gone from the mapping: a changeset that does not apply to the
+	// view before it starts the record again from the view it does apply
+	// to. No chain is read into the missing lines, nothing stops, and the
+	// file is made again as the chain the mapping still knows.
+	for name, c := range map[string]struct {
+		lines []Commit
+		base  c4.ID
+		n     int
+		line  int
+	}{
+		"the third of four lines gone": {[]Commit{all[0], all[1], all[3]}, h.views[3], 1, 3},
+		"the first line gone":          {[]Commit{all[1], all[2], all[3]}, h.views[1], 3, 1},
+		// A1 B2 C3 D4, a force push back onto the base, E1 F2 G3, and
+		// E's line gone: F does not go on after A by its count.
+		"the first line of a second chain gone": {[]Commit{all[0], all[1], all[2], all[3], all[1], all[2]}, h.views[1], 2, 5},
 	} {
-		whole := h.chainFile(t, gp, 4)
-		rc, ok := ChainRecorded(lines, "main")
-		wantGap := map[bool]int{true: 3, false: 1}[len(lines) == 3]
-		if !ok || rc.Gap != wantGap {
+		if err := os.WriteFile(gp, whole, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		rc, ok := ChainRecorded(c.lines, "main")
+		if !ok || rc.Base != c.base || len(rc.Changesets) != c.n || rc.Lines[0] != c.line || rc.Head != c.lines[len(c.lines)-1].View {
 			t.Fatalf("%s: the record is %+v", name, rc)
 		}
-		_, _, err := OpenRecordedChain(ctx, gp, h.src, lines, "main")
-		if want := fmt.Sprintf("cut the mapping back to before line %d ", wantGap); err == nil || !strings.Contains(err.Error(), "lines are missing") || !strings.Contains(err.Error(), want) {
-			t.Fatalf("%s: %v\nwant an error with %q", name, err, want)
+		ch, repaired, err := OpenRecordedChain(ctx, gp, h.src, c.lines, "main")
+		if err != nil || repaired == "" || ch.Base != c.base || ch.Sections != c.n || ch.Head != rc.Head {
+			t.Fatalf("%s: opened as %+v, %q, %v", name, ch, repaired, err)
 		}
-		if _, err := RecordedChainBytes(ctx, gp, h.src, lines, "main"); err == nil {
-			t.Fatalf("%s: a reader was served a chain", name)
+		if base, n := sections(); base != c.base || n != c.n {
+			t.Fatalf("%s: the file made again has %d sections from %s", name, n, base)
 		}
-		if now, _ := os.ReadFile(gp); !bytes.Equal(now, whole) {
-			t.Fatalf("%s: the file was written", name)
+		served, err := RecordedChainBytes(ctx, gp, h.src, c.lines, "main")
+		if now, _ := os.ReadFile(gp); err != nil || !bytes.Equal(served, now) {
+			t.Fatalf("%s: a reader is served something else than the file made again (%v)", name, err)
 		}
-	}
-	// Nor is a file that is the chain of the lines before the gap.
-	h.chainFile(t, gp, 2)
-	if ch, _, err := OpenRecordedChain(ctx, gp, h.src, []Commit{all[0], all[1], all[3]}, "main"); err == nil || !strings.Contains(err.Error(), "lines are missing") {
-		t.Fatalf("a file that is the chain before the gap: %+v, %v", ch, err)
-	}
-	// A line that follows on after a gap is the chain cut back to before
-	// it, as after any other line: the gap is behind it.
-	if rc, ok := ChainRecorded([]Commit{all[0], all[1], all[3], all[2]}, "main"); !ok || rc.Gap != 0 || len(rc.Changesets) != 3 || rc.Head != h.views[3] {
-		t.Fatalf("a line that follows on after a gap: %+v", rc)
 	}
 	// A line with a changeset and no chain fields (an import with no chain
 	// kept) says nothing of a chain.
@@ -481,6 +506,14 @@ func TestWhatTheMappingRecordsOfAChain(t *testing.T) {
 	bad[0].Changeset = c4.Identify(bytes.NewReader(wrongEnd))
 	if _, _, err := OpenRecordedChain(ctx, p, h.src, bad, "main"); err == nil || !strings.Contains(err.Error(), "ends with") {
 		t.Fatalf("an old changeset that ends with another view: %v", err)
+	}
+	// And not only the first of a chain.
+	wrongEnd = append(append([]byte(nil), h.changesets[1]...), []byte(h.views[3].String()+"\n")...)
+	h.put(t, wrongEnd)
+	second := []Commit{all[0], all[1]}
+	second[1].Changeset = c4.Identify(bytes.NewReader(wrongEnd))
+	if _, _, err := OpenRecordedChain(ctx, p, h.src, second, "main"); err == nil || !strings.Contains(err.Error(), "ends with") || !strings.Contains(err.Error(), "mapping line 2") {
+		t.Fatalf("a second old changeset that ends with another view: %v", err)
 	}
 
 	// The file a chain is made again into is synced before it takes its
@@ -528,6 +561,20 @@ func TestWhereAChainFileEnds(t *testing.T) {
 		if err != nil || repaired == "" || ch.Sections != 3 || ch.Head != h.views[3] || !bytes.Equal(now, recorded) {
 			t.Errorf("a file that ends with %s: %+v, made again %q, %v; the file is the recorded chain: %v", name, ch, repaired, err, bytes.Equal(now, recorded))
 		}
+	}
+	// A reader is served the chain as the c4m library writes it, not the
+	// file's bytes as they are: a blank line after the chain is nothing a
+	// write leaves and nothing an append runs on from, so the file is
+	// taken, and what is served is the chain alone.
+	os.WriteFile(p, append(append([]byte(nil), recorded...), 0x0a), 0o644)
+	if served, err := RecordedChainBytes(ctx, p, h.src, m, "main"); err != nil || !bytes.Equal(served, recorded) {
+		t.Fatalf("a reader of a file with a blank line after the chain is served %d bytes (%v), want the chain's %d", len(served), err, len(recorded))
+	}
+	if ch, _, err := OpenRecordedChain(ctx, p, h.src, m, "main"); err != nil || ch.Append(h.changesets[3], h.views[3], h.views[4]) != nil {
+		t.Fatalf("an append after a blank line: %v", err)
+	}
+	if ch, repaired, err := OpenRecordedChain(ctx, p, h.src, h.recorded(t, "main", 4), "main"); err != nil || repaired != "" || ch.Sections != 4 || ch.Head != h.views[4] {
+		t.Fatalf("the chain appended to after a blank line: %+v, %q, %v", ch, repaired, err)
 	}
 	os.WriteFile(p, recorded, 0o644)
 	ch, _, err := OpenRecordedChain(ctx, p, h.src, m, "main")
