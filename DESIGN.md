@@ -1894,7 +1894,11 @@ another unit wrote the same path in between, the second fold would put the
 first unit's write back over it. So the fold log, kept in the provenance
 index, names each fold's run (its pod), and a run in the log is not folded
 again; a unit that runs again is another run, and its write is the later
-one.
+one. The status names the chain and that index together or not at all: when
+the index cannot be saved, the job's status stays as last written, with the
+condition `OutputRecorded` false and the reason. That is tried again every
+tick for as long as the store refuses, and no finished pod is deleted
+meanwhile.
 
 A downstream job's `fromJob` input mounts that view. The dependency graph (sim to render to comp to transcode to
 delivery) is therefore also a data-flow graph of content-addressed trees, and

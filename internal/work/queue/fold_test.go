@@ -3,14 +3,19 @@ package queue
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/Avalanche-io/c4"
@@ -1049,5 +1054,98 @@ func TestRestartDoesNotFoldAFinishedUnitAgain(t *testing.T) {
 	}
 	if got.Status.Output.Changesets != before.Changesets || got.Status.Output.Chain != before.Chain {
 		t.Errorf("the restart moved the count or the chain: %d changesets (was %d), chain %s (was %s)", got.Status.Output.Changesets, before.Changesets, got.Status.Output.Chain, before.Chain)
+	}
+}
+
+// A job's status names its output's chain and the index holding its fold
+// log together. When the index cannot be saved the status waits, so a
+// restart never finds a chain whose folds the log does not know. The log
+// names each fold's run by its pod.
+func TestStatusWaitsForTheFoldLogToBeSaved(t *testing.T) {
+	ns, q, now, st := graphFarm(t)
+	ctx := context.Background()
+	if err := k8s.Create(ctx, job(ns, "bon", "graph", "cpu-"+ns, nil, now.Add(8*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	doc := putDoc(t, st, `{"version": 1, "units": [{"name": "a1"}, {"name": "b"}]}`)
+	finishUnit(t, now, ns, "bon", 0, map[string]string{c4v1.AnnotationOutputExpand: doc})
+	tick(t, q)
+	uid := string(podOfUnit(t, ns, "bon", 1).UID)
+	finishUnit(t, now, ns, "bon", 1, map[string]string{c4v1.AnnotationOutputChangeset: writeChangeset(t, st, "a1.txt", "unit one's file")})
+
+	// The store is away for the status write only: the fold itself lands.
+	away, refused := true, 0
+	q.Stores = func(context.Context, string) (*storeurl.Sharded, error) {
+		pc := make([]uintptr, 32)
+		frames := runtime.CallersFrames(pc[:runtime.Callers(2, pc)])
+		for away {
+			f, more := frames.Next()
+			if strings.HasSuffix(f.Function, "(*Queue).report") {
+				refused++
+				return nil, errors.New("the store is away")
+			}
+			if !more {
+				break
+			}
+		}
+		return st, nil
+	}
+	tick(t, q)
+	if refused == 0 {
+		t.Fatal("the status write never asked for the store, so this test shows nothing")
+	}
+	held := get(t, ns, "bon")
+	if held.Status.Output != nil {
+		t.Fatalf("the status names an output whose fold log was not saved: %+v", held.Status.Output)
+	}
+	// And it says why it waits, so a store that never takes the index is
+	// a condition someone can read and not a job that silently stands.
+	if c := meta.FindStatusCondition(held.Status.Conditions, ConditionOutputRecorded); c == nil || c.Status != metav1.ConditionFalse || !strings.Contains(c.Message, "the store is away") {
+		t.Fatalf("the waiting status does not say so: %+v", held.Status.Conditions)
+	}
+	if len(decode(held.Status.UnitStates["succeeded"])) != 1 {
+		t.Fatalf("the waiting status moved on without the output: units %v", held.Status.UnitStates)
+	}
+	// Still away a tick later: still waiting, still said.
+	tick(t, q)
+	if again := get(t, ns, "bon"); again.Status.Output != nil || meta.FindStatusCondition(again.Status.Conditions, ConditionOutputRecorded) == nil {
+		t.Fatalf("a second tick with the store away: %+v", again.Status)
+	}
+	var pods corev1.PodList
+	if err := k8s.List(ctx, &pods, client.InNamespace(ns), client.MatchingLabels{c4v1.LabelJob: "bon"}); err != nil {
+		t.Fatal(err)
+	}
+	kept := false
+	for _, p := range pods.Items {
+		kept = kept || (string(p.UID) == uid && p.DeletionTimestamp == nil)
+	}
+	if !kept {
+		t.Fatal("the unit's pod was deleted before the status that records it was written")
+	}
+
+	away = false
+	tick(t, q)
+	got := get(t, ns, "bon")
+	if got.Status.Output == nil || got.Status.Output.Changesets != 1 || got.Status.Output.Provenance == "" {
+		t.Fatalf("once the store is back: %+v", got.Status.Output)
+	}
+	if c := meta.FindStatusCondition(got.Status.Conditions, ConditionOutputRecorded); c != nil {
+		t.Fatalf("the status still says it waits: %+v", c)
+	}
+	if files := outputFiles(t, st, got); len(files) != 1 || files[0] != "a1.txt" {
+		t.Fatalf("the output holds %v", files)
+	}
+	id, _ := c4.Parse(got.Status.Output.Provenance)
+	data, err := c4view.ReadObject(st, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ix Index
+	if err := json.Unmarshal(data, &ix); err != nil {
+		t.Fatal(err)
+	}
+	if len(ix.Folds) != 1 || ix.Folds[0].Run != uid || ix.Folds[0].Unit != 1 {
+		t.Fatalf("the fold log is %+v, want one fold of unit 1 by pod %s", ix.Folds, uid)
 	}
 }

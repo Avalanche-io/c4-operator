@@ -639,6 +639,10 @@ type view struct {
 	// by first generator (rounds.go).
 	roundsExp map[int]roundsExp
 	planWait  string
+	// outWait is why the job's status waits this tick: its output is
+	// folded and the index holding the fold log could not be saved
+	// (report.go).
+	outWait string
 	// locked are units waiting for a holder of what they claim (holds.go)
 	// or for a gate, and gates the job's units at gates (gates.go).
 	locked map[int]lockInfo

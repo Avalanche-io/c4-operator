@@ -34,10 +34,19 @@ func (q *Queue) report(ctx context.Context, now time.Time, dec sched.Decisions, 
 	var ts []api.Transition
 	for i, v := range views {
 		if o := v.mem.out; o != nil && o.dirty && q.Stores != nil {
-			if store, err := q.Stores(ctx, v.project); err == nil && store != nil {
-				if err := o.saveIndex(ctx, store, v.key); err != nil {
-					q.Log.Error(err, "save provenance index", "job", v.key)
-				}
+			store, err := q.Stores(ctx, v.project)
+			if err == nil && store != nil {
+				err = o.saveIndex(ctx, store, v.key)
+			}
+			if err != nil {
+				// A status names the output's chain and the index that
+				// holds its fold log together. Written with the chain and
+				// an older index, a restart would not know a run in that
+				// chain had been folded, and would fold it again, after
+				// whatever was folded since. So the job's status waits
+				// (status, outWait), and says that it does.
+				q.Log.Error(err, "save provenance index: the job's status waits", "job", v.key)
+				v.outWait = err.Error()
 			}
 		}
 		sts[i] = q.status(now, dec, v)
@@ -52,6 +61,19 @@ func (q *Queue) report(ctx context.Context, now time.Time, dec sched.Decisions, 
 	for i, v := range views {
 		st := sts[i]
 		old := v.job.Status
+		if v.outWait != "" {
+			// Only the condition that says so is written, and the job's
+			// finished pods stay: no status records them yet.
+			if reflect.DeepEqual(old, st) {
+				continue
+			}
+			patch := client.MergeFrom(v.job.DeepCopy())
+			v.job.Status = st
+			if err := q.Client.Status().Patch(ctx, v.job, patch); err != nil {
+				q.Log.Error(err, "job status", "job", v.key)
+			}
+			continue
+		}
 		changed := !reflect.DeepEqual(withoutEstimate(old), withoutEstimate(st))
 		if !changed && now.Sub(v.mem.wrote) < statusEvery {
 			q.cleanup(ctx, v)
@@ -94,15 +116,34 @@ func withoutEstimate(st c4v1.WorkJobStatus) c4v1.WorkJobStatus {
 	return st
 }
 
+// ConditionOutputRecorded is on a job, False, while its output has been
+// folded and the provenance index holding the fold log could not be saved.
+// The job's status is then the last one written, and waits.
+const ConditionOutputRecorded = "OutputRecorded"
+
 // status computes a job's status from the queue's memory and the latest
 // decision.
 func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJobStatus {
 	st := c4v1.WorkJobStatus{ObservedGeneration: v.job.Generation, Conditions: v.job.Status.Conditions}
 	m := v.mem
+	if v.outWait != "" {
+		// The output has been folded and the index that holds its fold log
+		// is not saved (report): keep the last status, and say so. It
+		// waits as long as the store refuses the index, tried again every
+		// tick; meanwhile the status shows the job as it was before the
+		// fold, and no finished pod is deleted.
+		st = *v.job.Status.DeepCopy()
+		meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: ConditionOutputRecorded, Status: metav1.ConditionFalse,
+			Reason: "IndexNotSaved", ObservedGeneration: v.job.Generation,
+			Message: "the job's output is folded and its provenance index could not be saved, so this status is the last one written and waits until it is: " + v.outWait})
+		return st
+	}
+	meta.RemoveStatusCondition(&st.Conditions, ConditionOutputRecorded)
 	if v.planWait != "" && m.plan == nil {
 		// The unit table waits on the store (graph.go): keep the last
 		// status, and say so.
 		st = *v.job.Status.DeepCopy()
+		meta.RemoveStatusCondition(&st.Conditions, ConditionOutputRecorded)
 		meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: "Planned", Status: metav1.ConditionUnknown,
 			Reason: "LoadingExpansions", Message: v.planWait, ObservedGeneration: v.job.Generation})
 		return st
