@@ -157,9 +157,19 @@ func runImportGit(args []string) error {
 
 	switch {
 	case *exportChain != "":
-		data, err := os.ReadFile(svc.chainPath(*exportChain))
+		// The chain the mapping records for the ref, as a reader of the
+		// listener is served it, never the file at its own word.
+		m, err := gitimport.ReadMapping(svc.out)
 		if err != nil {
 			return err
+		}
+		ref := refNamed(m, *exportChain)
+		data, err := gitimport.RecordedChainBytes(ctx, svc.chainPath(ref), svc.base.Records, m, ref)
+		if err != nil {
+			return err
+		}
+		if data == nil {
+			return fmt.Errorf("the mapping records no chain for %s", *exportChain)
 		}
 		full, err := view.ExportChain(ctx, data, svc.base.Records)
 		if err != nil {

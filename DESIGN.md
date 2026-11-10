@@ -1090,20 +1090,54 @@ import step, so import must be fast and push-driven.
   (section 2.5), appended per commit, so `c4 log` lists a branch's commits
   as views.
 - **The mapping is the record, and a branch's chain file is made from it.**
-  Each commit's mapping line carries its changeset's C4 ID, its view and
-  its place in the branch's chain, and is written after the changeset is in
-  the store. The chain file is those changesets joined, kept so an append
-  costs one changeset. Both are appended to in place and neither is synced.
-  A cut mapping line cannot pass for a whole one (a JSON object without its
-  end does not parse): a reader leaves it out, the next writer takes it
-  off, and that commit is imported again. A cut c4m entry can: cut anywhere
-  from its name to one byte into its C4 ID it is still an entry, with no
-  C4 ID, since a missing ID is a null the format allows. So the chain file
-  is never taken at its own word. It is opened as the mapping records it:
-  if it does not read, or does not resolve to the view the mapping records
-  for the branch's last commit, it is made again from the stored
-  changesets, each checked against its C4 ID and the whole against that
-  view. A reader of a branch's chain is served the same way.
+  Each commit's mapping line carries its view and, when the commit changed
+  something, its changeset's C4 ID and where that went in the branch's
+  chain (the chain's base, and its length once the changeset was appended);
+  the line is written after the changeset is in the store. The chain file
+  is those changesets joined, kept so an append costs one changeset. Both
+  are appended to in place and neither is synced: no order of syncs makes
+  two files one, so the check below is the guard. (A sync would add to
+  each commit 10 to 15 µs with fsync(2), or 6 to 10 ms with a full flush;
+  measured on a Mac, not on Linux.)
+  - *The chain file is never taken at its own word.* A cut c4m entry can
+    pass for a whole one: cut anywhere from its name to one byte into its
+    C4 ID it is still an entry, with no C4 ID, since a missing ID is a null
+    the format allows. So the file is opened as the mapping records it.
+    Only a line with a changeset says anything of a chain: a commit that
+    changes nothing, a ref moved to a commit imported under another ref,
+    and a seal leave the chain where its last changeset left it. The file
+    must resolve to that changeset's view, from the recorded base, in the
+    recorded number of sections (or be that chain sealed and started again
+    from its head), and end where a write ended. The sections before the
+    last are counted, not read again, so that an open costs one changeset
+    and not the chain: a file changed before its last section in a way that
+    still parses and keeps the count is not found here. An append cut by
+    a crash does not make one. A file that is not the recorded chain
+    (torn, ahead of the mapping, behind it, or another ref's: a chain
+    file's name does not tell a slash from an underscore) is made again
+    from the stored changesets, each checked against its C4 ID and the
+    whole against the recorded view, and the service logs that it was.
+  - *A reader is served the same way,* from one read of the file, with
+    nothing written, and by the ref's exact name when the mapping has it.
+    That costs a read of the mapping for each request, as an import and
+    `GET /refs` already do.
+  - *A mapping cut at its end mends itself.* A cut line cannot pass for a
+    whole one (a JSON object without its end does not parse). A tail that
+    does not end a line, whether a cut line, lines that never reached the
+    disk, or zeros, is left out by a reader and taken off by the next
+    writer, and those commits are imported again. An import is a function
+    of the commit, so they come back to the same views and changesets.
+  - *Damage in its middle is not mended by guessing.* A whole line that
+    does not parse, a chain line whose count does not follow on from the
+    lines before it (lines are missing), and a recorded changeset the
+    store does not hold, or holds wrongly, are errors. Each stops the
+    ref's imports and its readers (a line that does not parse stops the
+    repository's) until someone acts, and names the mapping line to cut
+    back to; cut back, the next import imports the commits from there
+    again, to the same changesets. What a cut does not bring back is a
+    ref's deletion recorded after it (read, not run): the ref shows until
+    its deletion is sent again. Making a lost changeset again without the
+    cut is the next step and is not built.
 - **c4git files** are 90-byte C4 IDs in git. The importer uses the ID
   directly, copies the object from the c4git store without rehashing (c4git
   verified it at `git add`), and takes its size from the store.

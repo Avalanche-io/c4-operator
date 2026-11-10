@@ -7,14 +7,18 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/Avalanche-io/c4"
 
 	"github.com/Avalanche-io/c4-operator/internal/gitimport"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
@@ -29,6 +33,7 @@ type pushRig struct {
 	work   string
 	svc    *importService
 	st     *storeurl.Sharded
+	shards []string // the store's folders
 	env    []string
 }
 
@@ -42,7 +47,8 @@ func newPushRig(t *testing.T) *pushRig {
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	r.git("", "init", "-q", "--bare", "-b", "main", r.remote)
 	r.git("", "clone", "-q", r.remote, r.work)
-	st, err := storeurl.OpenSharded([]storeurl.Spec{storeurl.ParseSpec(t.TempDir()), storeurl.ParseSpec(t.TempDir())}, storeurl.Credentials{})
+	r.shards = []string{t.TempDir(), t.TempDir()}
+	st, err := storeurl.OpenSharded([]storeurl.Spec{storeurl.ParseSpec(r.shards[0]), storeurl.ParseSpec(r.shards[1])}, storeurl.Credentials{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,23 +295,185 @@ func TestTheNextPushAfterATornFile(t *testing.T) {
 	_, res = push(map[string]string{"c.txt": "c\n"})
 	headIs("after a chain file that does not parse", res)
 
-	// The mapping's last line cut: that commit is imported again, onto
-	// the chain as the shorter mapping records it.
-	m, err := os.ReadFile(r.svc.out)
+	// The mapping's last line cut, and then two whole lines gone as well
+	// (an append that never reached the disk), and then its tail zeros:
+	// those commits are imported again, to the same changesets, onto the
+	// chain as the shorter mapping records it.
+	for _, damage := range []struct {
+		name string
+		do   func(m []byte) []byte
+	}{
+		{"a cut last line", func(m []byte) []byte { return m[:len(m)-25] }},
+		{"the last two lines gone", func(m []byte) []byte {
+			m = m[:bytes.LastIndexByte(m[:len(m)-1], '\n')+1]
+			return m[:bytes.LastIndexByte(m[:len(m)-1], '\n')+1]
+		}},
+		{"a tail of zeros", func(m []byte) []byte {
+			cut := bytes.LastIndexByte(m[:len(m)-1], '\n') + 10
+			return append(append([]byte(nil), m[:cut]...), make([]byte, len(m)-cut)...)
+		}},
+	} {
+		m, err := os.ReadFile(r.svc.out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before, _ := gitimport.ReadMapping(r.svc.out)
+		if err := os.WriteFile(r.svc.out, damage.do(m), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		c, res := push(map[string]string{"d.txt": damage.name + "\n"})
+		after, err := gitimport.ReadMapping(r.svc.out)
+		if err != nil {
+			t.Fatalf("%s: the mapping does not read: %v", damage.name, err)
+		}
+		if gitimport.LastByRef(after)["refs/heads/main"] != c {
+			t.Fatalf("%s: main is at %s", damage.name, gitimport.LastByRef(after)["refs/heads/main"])
+		}
+		// Every commit the mapping had is in it again with the same view
+		// and the same changeset.
+		now := map[string]gitimport.Commit{}
+		for _, line := range after {
+			if line.Commit != "" && !line.RefOnly {
+				now[line.Commit] = line
+			}
+		}
+		for _, line := range before {
+			if line.Commit == "" || line.RefOnly {
+				continue
+			}
+			if got, ok := now[line.Commit]; !ok || got.View != line.View || got.Changeset != line.Changeset {
+				t.Fatalf("%s: commit %s is not in the mapping as it was: %+v", damage.name, line.Commit, got)
+			}
+		}
+		headIs("after "+damage.name, res)
+	}
+
+	// Made again is not thrown away: the chain served still starts at the
+	// first commit's parent and has a section for every commit that
+	// changed something.
+	full, err := view.ReadChain(chains())
 	if err != nil {
 		t.Fatal(err)
 	}
-	before, _ := gitimport.ReadMapping(r.svc.out)
-	if err := os.WriteFile(r.svc.out, m[:len(m)-25], 0o644); err != nil {
+	final, _ := gitimport.ReadMapping(r.svc.out)
+	changed := map[string]bool{}
+	for _, line := range final {
+		if line.Ref == "refs/heads/main" && !line.Changeset.IsNil() {
+			changed[line.Commit] = true
+		}
+	}
+	if full.Base != view.EmptyID() || len(full.Sections) != len(changed) {
+		t.Fatalf("the chain has %d sections from %s, want %d from the empty view", len(full.Sections), full.Base, len(changed))
+	}
+
+	// A changeset the mapping names is gone from the store, and the chain
+	// file with it. The import says which, where the mapping records it,
+	// and what to do; done, the next push imports those commits again to
+	// the same changesets.
+	rc, _ := gitimport.ChainRecorded(final, "refs/heads/main")
+	lost := len(rc.Changesets) - 2
+	removed := 0
+	for _, dir := range r.shards {
+		filepath.Walk(dir, func(p string, fi os.FileInfo, err error) error {
+			if err != nil || fi.IsDir() {
+				return nil
+			}
+			if f, err := os.Open(p); err == nil {
+				id := c4.Identify(f)
+				f.Close()
+				if id == rc.Changesets[lost] {
+					os.Remove(p)
+					removed++
+				}
+			}
+			return nil
+		})
+	}
+	if removed == 0 {
+		t.Fatal("the changeset was not found in the store to remove")
+	}
+	os.Remove(chainPath)
+	cNew := r.commit(map[string]string{"e.txt": "e\n"})
+	r.git(r.work, "push", "-q", "origin", "main")
+	rec, _ := r.post(h, `{"ref":"refs/heads/main","after":"`+cNew+`"}`, nil)
+	wantLine := fmt.Sprintf("cut the mapping back to before line %d", rc.Lines[lost])
+	if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), rc.Changesets[lost].String()) || !strings.Contains(rec.Body.String(), wantLine) {
+		t.Fatalf("with a recorded changeset gone from the store: %d %s\nwant an error naming it and %q", rec.Code, rec.Body, wantLine)
+	}
+	// The way out the error names.
+	m, _ := os.ReadFile(r.svc.out)
+	lines := bytes.SplitAfter(m, []byte("\n"))
+	if err := os.WriteFile(r.svc.out, bytes.Join(lines[:rc.Lines[lost]-1], nil), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	c, res := push(map[string]string{"d.txt": "d\n"})
-	after, err := gitimport.ReadMapping(r.svc.out)
-	if err != nil {
-		t.Fatalf("the mapping does not read after a cut line: %v", err)
+	rec, res = r.post(h, `{"ref":"refs/heads/main","after":"`+cNew+`"}`, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("after cutting the mapping back: %d %s", rec.Code, rec.Body)
 	}
-	if gitimport.LastByRef(after)["refs/heads/main"] != c || len(after) < len(before) {
-		t.Fatalf("after a cut mapping line: %d lines (were %d), main at %s", len(after), len(before), gitimport.LastByRef(after)["refs/heads/main"])
+	headIs("after cutting the mapping back", res)
+	again, _ := gitimport.ReadMapping(r.svc.out)
+	rc2, _ := gitimport.ChainRecorded(again, "refs/heads/main")
+	if len(rc2.Changesets) != len(rc.Changesets)+1 || rc2.Changesets[lost] != rc.Changesets[lost] {
+		t.Fatalf("the commits were not imported again to the same changesets: %d recorded, were %d", len(rc2.Changesets), len(rc.Changesets))
 	}
-	headIs("after a cut mapping line", res)
+
+	// Damage in the middle of the mapping, with whole lines after it (blocks
+	// that never reached the disk under later ones that did): a line gone,
+	// and a line of zeros. Neither is mended by guessing. The import and
+	// the readers stop with the line to cut the mapping back to; done, the
+	// same push imports those commits again, to the same changesets.
+	for _, damage := range []struct {
+		name, says string
+		do         func(lines [][]byte, at int) [][]byte
+	}{
+		{"a line gone from the middle", "lines are missing", func(lines [][]byte, at int) [][]byte {
+			return append(append([][]byte(nil), lines[:at]...), lines[at+1:]...)
+		}},
+		{"a line of zeros in the middle", "does not read", func(lines [][]byte, at int) [][]byte {
+			out := append([][]byte(nil), lines...)
+			out[at] = append(make([]byte, len(lines[at])-1), 0x0a)
+			return out
+		}},
+	} {
+		before, _ := gitimport.ReadMapping(r.svc.out)
+		rc, _ := gitimport.ChainRecorded(before, "refs/heads/main")
+		m, _ := os.ReadFile(r.svc.out)
+		lines := bytes.SplitAfter(m, []byte("\n"))
+		at := rc.Lines[len(rc.Lines)-3] - 1
+		if err := os.WriteFile(r.svc.out, bytes.Join(damage.do(lines, at), nil), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		rec, _ := r.post(h, `{"ref":"refs/heads/main","after":"`+cNew+`"}`, nil)
+		named := regexp.MustCompile(`cut the mapping back to before line (\d+) `).FindStringSubmatch(rec.Body.String())
+		if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), damage.says) || named == nil {
+			t.Fatalf("%s: %d %s\nwant an error that says %q and names the line to cut back to", damage.name, rec.Code, rec.Body, damage.says)
+		}
+		got := httptest.NewRecorder()
+		h.ServeHTTP(got, httptest.NewRequest(http.MethodGet, "/chains/refs/heads/main", nil))
+		if got.Code == http.StatusOK {
+			t.Fatalf("%s: a reader was served a chain", damage.name)
+		}
+		// The way out the error names.
+		var line int
+		fmt.Sscan(named[1], &line)
+		m, _ = os.ReadFile(r.svc.out)
+		if err := os.WriteFile(r.svc.out, bytes.Join(bytes.SplitAfter(m, []byte("\n"))[:line-1], nil), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		rec, res = r.post(h, `{"ref":"refs/heads/main","after":"`+cNew+`"}`, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: after cutting the mapping back to before line %d: %d %s", damage.name, line, rec.Code, rec.Body)
+		}
+		headIs("after "+damage.name+" and the cut back", res)
+		after, _ := gitimport.ReadMapping(r.svc.out)
+		now, _ := gitimport.ChainRecorded(after, "refs/heads/main")
+		if len(now.Changesets) != len(rc.Changesets) || now.Head != rc.Head {
+			t.Fatalf("%s: the chain recorded has %d changesets, had %d", damage.name, len(now.Changesets), len(rc.Changesets))
+		}
+		for i, id := range rc.Changesets {
+			if now.Changesets[i] != id {
+				t.Fatalf("%s: changeset %d was not imported again to the same C4 ID", damage.name, i+1)
+			}
+		}
+	}
 }

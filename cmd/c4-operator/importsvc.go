@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -247,6 +248,30 @@ func (s *importService) sealChain(ctx context.Context, chain *gitimport.ChainFil
 	return id, mw.Write(line)
 }
 
+// refNamed returns the ref a request for a chain means, as the mapping
+// spells it: the ref of that exact name when the mapping has it, and
+// otherwise the one whose chain file has the name the request's would
+// (a chain file's name does not tell a slash from an underscore, and
+// requests were always matched by file name); the first in order when
+// several do, so the answer does not change from one request to the next.
+func refNamed(m []gitimport.Commit, ref string) string {
+	refs := gitimport.LastByRef(m)
+	if _, ok := refs[ref]; ok {
+		return ref
+	}
+	var same []string
+	for name := range refs {
+		if gitimport.ChainFileName(name) == gitimport.ChainFileName(ref) {
+			same = append(same, name)
+		}
+	}
+	if len(same) == 0 {
+		return ref
+	}
+	sort.Strings(same)
+	return same[0]
+}
+
 // deleteRef records that ref no longer exists.
 func (s *importService) deleteRef(ref string) (*refResult, error) {
 	s.mu.Lock()
@@ -383,15 +408,7 @@ func (s *importService) handler(secret string) http.Handler {
 		m, err := gitimport.ReadMapping(s.out)
 		var data []byte
 		if err == nil {
-			// The ref as the mapping spells it: a chain file's name does
-			// not tell a slash from an underscore, and the request was
-			// always matched by file name.
-			for name := range gitimport.LastByRef(m) {
-				if gitimport.ChainFileName(name) == gitimport.ChainFileName(ref) {
-					ref = name
-					break
-				}
-			}
+			ref = refNamed(m, ref)
 			data, err = gitimport.RecordedChainBytes(r.Context(), s.chainPath(ref), s.base.Records, m, ref)
 		}
 		if err != nil {

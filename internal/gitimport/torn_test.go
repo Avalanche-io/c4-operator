@@ -306,6 +306,17 @@ func TestAChainThatCannotBeMadeAgain(t *testing.T) {
 			t.Errorf("%s: the file was written", name)
 		}
 	}
+	// A whole file that resolves to the recorded view and is not the
+	// recorded chain is not taken for it: one section short of the record,
+	// and from another base than the record's.
+	longer := append(append([]Commit(nil), m...), Commit{Commit: "x", Ref: "main", View: h.views[3], ParentView: h.views[3],
+		Changeset: m[0].Changeset, ChainBase: h.views[0], ChainSeq: 4})
+	for name, mm := range map[string][]Commit{"a file a section short of the record": longer, "a file from another base than the record's": wrongBase} {
+		os.WriteFile(p, whole, 0o644)
+		if ch, _, err := OpenRecordedChain(ctx, p, h.src, mm, "main"); err == nil || !strings.Contains(err.Error(), "cannot be made again") {
+			t.Errorf("%s: opened as %+v (%v)", name, ch, err)
+		}
+	}
 	// A wrong object under a changeset's ID.
 	id := m[2].Changeset
 	h.ram.Remove(id)
@@ -342,5 +353,195 @@ func TestAChainMadeAgainFromOldChangesets(t *testing.T) {
 	want := bytes.Join(h.changesets, nil)
 	if data, _ := os.ReadFile(p); !bytes.Equal(data, want) || isBareID(lastLineOf(data)) {
 		t.Fatalf("the chain made again is not the changesets in the form the format allows:\n%s", data)
+	}
+}
+
+// Torn in the order the service writes: the changeset is appended to the
+// chain file first and its mapping line written after. A crash between the
+// two leaves the recorded chain with all or part of one more changeset
+// after it, and no line for it. Cut at every byte of that changeset, the
+// file comes back as the recorded chain, exactly: a fragment that happens
+// to parse and change nothing (a changeset's first line alone, or a
+// directory restated by its C4 ID with nothing under it yet) is not left
+// on the end to be served and sealed.
+func TestAnAppendCutBeforeItsLineIsWritten(t *testing.T) {
+	ctx := context.Background()
+	h := newHistory(t, 4)
+	m := h.recorded(t, "main", 3)
+	p := filepath.Join(t.TempDir(), "main.c4m")
+	recorded := h.chainFile(t, p, 3)
+	next := h.changesets[3]
+	counts := map[string]int{}
+	for cut := 0; cut <= len(next); cut++ {
+		torn := append(append([]byte(nil), recorded...), next[:cut]...)
+		if err := os.WriteFile(p, torn, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		ch, repaired, err := OpenRecordedChain(ctx, p, h.src, m, "main")
+		now, _ := os.ReadFile(p)
+		switch {
+		case err != nil:
+			counts["refused"]++
+			t.Errorf("cut at %d: refused: %v", cut, err)
+		case ch.Head != h.views[3] || ch.Sections != 3 || !bytes.Equal(now, recorded):
+			counts["silently wrong"]++
+			t.Errorf("cut at %d (after %q): opens as %d sections, the file %d bytes of %d", cut, lastLineOf(torn), ch.Sections, len(now), len(recorded))
+		case repaired != "":
+			counts["made again"]++
+		default:
+			counts["as it was"]++
+		}
+		// A reader is served the recorded chain whatever the file holds.
+		os.WriteFile(p, torn, 0o644)
+		if served, err := RecordedChainBytes(ctx, p, h.src, m, "main"); err != nil || !bytes.Equal(served, recorded) {
+			t.Errorf("cut at %d: a reader is served %d bytes (%v), want the recorded chain", cut, len(served), err)
+		}
+	}
+	t.Logf("%d files: %v", len(next)+1, counts)
+	if counts["refused"] != 0 || counts["silently wrong"] != 0 || counts["as it was"] != 1 {
+		t.Fatalf("want every torn file made again and the recorded one left: %v", counts)
+	}
+}
+
+// What the record is made of, line by line.
+func TestWhatTheMappingRecordsOfAChain(t *testing.T) {
+	ctx := context.Background()
+	h := newHistory(t, 4)
+	all := h.recorded(t, "main", 4)
+	// A commit imported again after the mapping was cut back: its line
+	// comes with the count it had, and takes that place.
+	again := all[1]
+	again.Commit = "again"
+	if rc, ok := ChainRecorded(append(append([]Commit(nil), all[:3]...), again), "main"); !ok || len(rc.Changesets) != 2 || rc.Changesets[1] != again.Changeset || rc.Head != again.View || rc.Lines[1] != 4 || rc.Commits[1] != "again" {
+		t.Fatalf("a line that takes an earlier place: %+v", rc)
+	}
+	// A count greater than the lines before it give is a gap: lines are
+	// missing from the middle of the mapping. No chain is read into what is
+	// left; the file is not held to it, whatever it holds, and the error
+	// names the line to cut the mapping back to.
+	gp := filepath.Join(t.TempDir(), "main.c4m")
+	for name, lines := range map[string][]Commit{
+		"the third of four lines gone": {all[0], all[1], all[3]},
+		"the first line gone":          {all[1], all[2]},
+	} {
+		whole := h.chainFile(t, gp, 4)
+		rc, ok := ChainRecorded(lines, "main")
+		wantGap := map[bool]int{true: 3, false: 1}[len(lines) == 3]
+		if !ok || rc.Gap != wantGap {
+			t.Fatalf("%s: the record is %+v", name, rc)
+		}
+		_, _, err := OpenRecordedChain(ctx, gp, h.src, lines, "main")
+		if want := fmt.Sprintf("cut the mapping back to before line %d ", wantGap); err == nil || !strings.Contains(err.Error(), "lines are missing") || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s: %v\nwant an error with %q", name, err, want)
+		}
+		if _, err := RecordedChainBytes(ctx, gp, h.src, lines, "main"); err == nil {
+			t.Fatalf("%s: a reader was served a chain", name)
+		}
+		if now, _ := os.ReadFile(gp); !bytes.Equal(now, whole) {
+			t.Fatalf("%s: the file was written", name)
+		}
+	}
+	// Nor is a file that is the chain of the lines before the gap.
+	h.chainFile(t, gp, 2)
+	if ch, _, err := OpenRecordedChain(ctx, gp, h.src, []Commit{all[0], all[1], all[3]}, "main"); err == nil || !strings.Contains(err.Error(), "lines are missing") {
+		t.Fatalf("a file that is the chain before the gap: %+v, %v", ch, err)
+	}
+	// A line that follows on after a gap is the chain cut back to before
+	// it, as after any other line: the gap is behind it.
+	if rc, ok := ChainRecorded([]Commit{all[0], all[1], all[3], all[2]}, "main"); !ok || rc.Gap != 0 || len(rc.Changesets) != 3 || rc.Head != h.views[3] {
+		t.Fatalf("a line that follows on after a gap: %+v", rc)
+	}
+	// A line with a changeset and no chain fields (an import with no chain
+	// kept) says nothing of a chain.
+	bare := all[0]
+	bare.ChainBase, bare.ChainSeq = c4.ID{}, 0
+	if _, ok := ChainRecorded([]Commit{bare}, "main"); ok {
+		t.Fatal("a line with no chain fields was taken for a chain's")
+	}
+	// A commit that changes nothing does not move the chain, wherever its
+	// view is: the ref can be at a commit its own chain never reached.
+	elsewhere := Commit{Commit: "empty", Ref: "main", View: h.views[4], ParentView: h.views[4], ChainBase: h.views[0], ChainSeq: 2}
+	if rc, ok := ChainRecorded(append(append([]Commit(nil), all[:2]...), elsewhere), "main"); !ok || rc.Head != h.views[2] || len(rc.Changesets) != 2 {
+		t.Fatalf("after a commit that changes nothing: %+v", rc)
+	}
+
+	// A stored object that is more than one changeset is not a changeset.
+	two := append(append([]byte(nil), h.changesets[0]...), h.changesets[1]...)
+	h.put(t, two)
+	bad := []Commit{all[0]}
+	bad[0].Changeset = c4.Identify(bytes.NewReader(two))
+	p := filepath.Join(t.TempDir(), "main.c4m")
+	if _, _, err := OpenRecordedChain(ctx, p, h.src, bad, "main"); err == nil || !strings.Contains(err.Error(), "is not one changeset") {
+		t.Fatalf("a stored object of two changesets: %v", err)
+	}
+	// A changeset stored before 2026-11-09 that ends with a view it does
+	// not produce is refused, not carried on.
+	wrongEnd := append(append([]byte(nil), h.changesets[0]...), []byte(h.views[2].String()+"\n")...)
+	h.put(t, wrongEnd)
+	bad[0].Changeset = c4.Identify(bytes.NewReader(wrongEnd))
+	if _, _, err := OpenRecordedChain(ctx, p, h.src, bad, "main"); err == nil || !strings.Contains(err.Error(), "ends with") {
+		t.Fatalf("an old changeset that ends with another view: %v", err)
+	}
+
+	// The file a chain is made again into is synced before it takes its
+	// name, like any other replacement of it.
+	synced := 0
+	old := syncFile
+	t.Cleanup(func() { syncFile = old })
+	syncFile = func(f *os.File) error {
+		if named, _ := os.ReadFile(p); len(named) != 0 {
+			t.Error("the chain file had its new bytes before they were synced")
+		}
+		synced++
+		return old(f)
+	}
+	os.Remove(p)
+	if _, repaired, err := OpenRecordedChain(ctx, p, h.src, all[:3], "main"); err != nil || repaired == "" || synced != 1 {
+		t.Fatalf("made again: %q, %v, %d syncs", repaired, err, synced)
+	}
+}
+
+// Where a chain file ends. The recorded chain followed by a bare C4 ID is
+// that chain with a changeset's first line after it and nothing more (an
+// append cut after its first line), or a file written before 2026-11-09,
+// which ended with its head: both resolve to the recorded head, and both
+// are written again in the form the format allows before anything is
+// appended. A chain with no sections is its base's ID alone, and is left.
+func TestWhereAChainFileEnds(t *testing.T) {
+	ctx := context.Background()
+	h := newHistory(t, 4)
+	m := h.recorded(t, "main", 3)
+	p := filepath.Join(t.TempDir(), "main.c4m")
+	recorded := h.chainFile(t, p, 3)
+	for name, tail := range map[string]string{
+		"a bare C4 ID":                      h.views[3].String() + "\n",
+		"a bare C4 ID with no newline":      h.views[3].String(),
+		"its last line without its newline": "",
+	} {
+		file := append(append([]byte(nil), recorded...), tail...)
+		if tail == "" {
+			file = recorded[:len(recorded)-1]
+		}
+		os.WriteFile(p, file, 0o644)
+		ch, repaired, err := OpenRecordedChain(ctx, p, h.src, m, "main")
+		now, _ := os.ReadFile(p)
+		if err != nil || repaired == "" || ch.Sections != 3 || ch.Head != h.views[3] || !bytes.Equal(now, recorded) {
+			t.Errorf("a file that ends with %s: %+v, made again %q, %v; the file is the recorded chain: %v", name, ch, repaired, err, bytes.Equal(now, recorded))
+		}
+	}
+	os.WriteFile(p, recorded, 0o644)
+	ch, _, err := OpenRecordedChain(ctx, p, h.src, m, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ch.Rebase(h.views[3]); err != nil {
+		t.Fatal(err)
+	}
+	if ch, repaired, err := OpenRecordedChain(ctx, p, h.src, m, "main"); err != nil || repaired != "" || ch.Sections != 0 {
+		t.Fatalf("a chain of its base alone: %+v, %q, %v", ch, repaired, err)
+	}
+	// And the next changeset goes on from it.
+	if err := ch.Append(h.changesets[3], h.views[3], h.views[4]); err != nil {
+		t.Fatal(err)
 	}
 }
