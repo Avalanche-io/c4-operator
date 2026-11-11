@@ -72,8 +72,23 @@ test:
 # tiers, views, git imports and the import service, the queue, capture.
 # The queue and the operator's commands run against envtest too.
 RACE_PKGS ?= ./internal/tier/... ./internal/fill/... ./internal/objcache/... ./internal/view/... ./internal/gitimport/... ./cmd/c4-operator/ ./internal/work/queue/... ./internal/capture/...
+# The race detector multiplies a package's time, and go test's default
+# timeout (10m) once ended the queue's run 4 s past it. Measured in CI's
+# race step before TestReplayLibraryPort skipped under race (8 runs, both
+# Linux legs, 2026-11-11, seconds): the queue 368 to 604, gitimport 75 to
+# 98, views 26 to 45, the operator's commands 20 to 28, tiers 11 to 13,
+# fill, objcache and capture 1. With the replay skipped under race, the
+# queue's race run took 222 s on a Mac where it took 367, every block of
+# the package still reached. A package's budget is RACE_BUDGET, half the
+# timeout: one past it is named in a warning, so it is looked at before
+# it reaches the timeout.
+RACE_TIMEOUT ?= 20m
+RACE_BUDGET ?= 600
 test-race:
-	KUBEBUILDER_ASSETS="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(CURDIR)/bin/k8s -p path)" go test -race -count=1 $(RACE_PKGS)
+	@mkdir -p bin; rm -f bin/test-race.status
+	{ KUBEBUILDER_ASSETS="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(CURDIR)/bin/k8s -p path)" go test -race -count=1 -timeout $(RACE_TIMEOUT) $(RACE_PKGS) 2>&1; echo $$? > bin/test-race.status; } | tee bin/test-race.txt
+	@awk '/^(ok|FAIL)[ \t]/ { t = $$3; sub(/s$$/, "", t); if (t + 0 > $(RACE_BUDGET)) printf "::warning::%s took %ss under the race detector, past its %ss budget\n", $$2, t, $(RACE_BUDGET) }' bin/test-race.txt
+	@exit $$(cat bin/test-race.status 2>/dev/null || echo 1)
 
 # Overlay mounts, whiteouts and capture need root on Linux. The test
 # binaries are cross-compiled here and run in a privileged container on a

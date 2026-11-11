@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
@@ -109,5 +110,69 @@ func TestSessionsPolicyKeepsSessionAndOffersNext(t *testing.T) {
 	}
 	if sg.NextSession == nil || !sg.NextSession.Time.Equal(want.Add(4*time.Hour)) {
 		t.Fatalf("next session %v, want 14:00", sg.NextSession)
+	}
+}
+
+// An information point moves an at-risk suggestion once. A render job's
+// units run six times their estimate: when the first one finishes (the
+// first information point) the suggestion, now at risk, moves later; the
+// next unit then runs on until it is at risk again, and at the same count
+// it moves no further, since that point has been used. Before
+// this, only TestReplayLibraryPort reached the line that records the
+// point used; it skips under the race detector, and this keeps the line
+// there.
+func TestAnInformationPointMovesASuggestionOnce(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 1, 1)
+	ctx := context.Background()
+	j := job(ns, "sh040", "render", "cpu-"+ns, map[string]string{"frames": "1001-1016", "estimateSeconds": "600"}, time.Time{})
+	if err := k8s.Create(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	if sg := get(t, ns, "sh040").Status.Suggestion; sg == nil || len(sg.History) != 1 {
+		t.Fatalf("no first suggestion: %+v", sg)
+	}
+	var p corev1.Pod
+	for _, u := range unitPods(t, ns, "sh040") {
+		if u.Status.Phase == "" || u.Status.Phase == corev1.PodPending {
+			p = u
+			break
+		}
+	}
+	if p.Name == "" {
+		t.Fatal("no unit pod to run")
+	}
+	run(t, &p, *now)
+	*now = now.Add(time.Hour)
+	finish(t, &p, corev1.PodSucceeded, *now, time.Hour, nil)
+	tick(t, q)
+	sg := get(t, ns, "sh040").Status.Suggestion
+	if sg == nil || len(sg.History) != 2 || sg.History[1].Reason != forecast.ReasonAtRisk || sg.History[1].UnitsMeasured != 1 {
+		t.Fatalf("after the first unit, six times its estimate: %+v, want one at-risk move at 1 finished", sg)
+	}
+	// The next unit runs on and on, so the suggestion is at risk again
+	// while the count stays at one: not an information point, and the
+	// one at one has been used, so it does not move.
+	var next corev1.Pod
+	for _, u := range unitPods(t, ns, "sh040") {
+		if u.Name != p.Name && (u.Status.Phase == "" || u.Status.Phase == corev1.PodPending) {
+			next = u
+			break
+		}
+	}
+	if next.Name == "" {
+		t.Fatal("no second unit pod to run")
+	}
+	run(t, &next, *now)
+	for i := 0; i < 12; i++ {
+		*now = now.Add(30 * time.Minute)
+		tick(t, q)
+	}
+	got := get(t, ns, "sh040").Status
+	if len(got.Suggestion.History) != 2 {
+		t.Fatalf("ticks at one finished moved it again: %+v", got.Suggestion.History)
+	}
+	if !got.Suggestion.AtRisk {
+		t.Fatalf("the suggestion is not at risk six hours into the second unit, so this tests nothing: %+v", got.Suggestion)
 	}
 }

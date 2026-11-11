@@ -118,7 +118,19 @@ func replayPort(t *testing.T, ns string, q *Queue, now *time.Time, put func(stri
 // the first rework verdict; a second job of the kind, its reviews not
 // marked, starts from what the first one's reviews did. REPLAY_OUT names
 // a directory for the curves (CSV).
+//
+// Under the race detector it is skipped: it was 44% of the package's time
+// there (160 of 367 s), and with it CI's race step ran the package to
+// within seconds of its timeout. It adds nothing the race detector
+// watches that the package's other tests do not run: measured by line
+// coverage, every block it reached was reached by another test but one
+// (suggest.go, the information point used), which
+// TestAnInformationPointMovesASuggestionOnce now reaches and pins. It
+// still runs on every leg of the plain test step.
 func TestReplayLibraryPort(t *testing.T) {
+	if raceDetector {
+		t.Skip("under the race detector: every block it reaches is reached by the package's other tests (see above)")
+	}
 	ns, q, now := farm(t, "cpu", 1, 1) // the run's one slot
 	st, err := storeurl.OpenSharded([]storeurl.Spec{{Name: "s0", URL: t.TempDir()}}, storeurl.Credentials{})
 	if err != nil {
