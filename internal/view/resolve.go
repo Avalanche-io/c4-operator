@@ -34,8 +34,10 @@ type Resolved struct {
 	// SourceID is the ID of the description itself: the c4m text, the
 	// stored record, or the changeset.
 	SourceID c4.ID
-	// RootID is the ID of the top description's root listing as recorded
-	// (the snapshot ID `c4 id` reports for a full description).
+	// RootID is the description's C4 ID, the one `c4 id -q` reports for it
+	// (for a changeset, for the state it resolves to): the ID of its root
+	// listing once the library's normaliser has re-derived every directory
+	// whose children it lists.
 	RootID c4.ID
 	// Chain holds the most recent views of the changeset chain (at most
 	// KeepLevels), base first. The last one is what pods see. A plain
@@ -112,6 +114,12 @@ type resolver struct {
 	// seal is the bare ID that ended the description being resolved, when
 	// it is a changeset or chain in the old form (splitSeal).
 	seal c4.ID
+	// descs holds, for each level resolved, its description as a c4m, as
+	// written: a c4m or record as decoded (a directory known only by its
+	// ID stays one line), a changeset applied over its parent's with the
+	// library's ApplyPatch. Levels are appended to it as they are resolved,
+	// so it runs beside them, base first.
+	descs []*c4m.Manifest
 }
 
 func newResolver(st Store, f Filter) *resolver {
@@ -131,7 +139,7 @@ func (r *resolver) finish(levels [][]item) (*Resolved, error) {
 		}
 		res.Chain = append(res.Chain, FromNode(root))
 	}
-	res.RootID = rootID(levels[len(levels)-1])
+	res.RootID = descriptionID(r.descs[len(r.descs)-1])
 	// A changeset or chain in the old form ends with the ID of what it
 	// resolves to, and two writers wrote that line. This system's wrote
 	// the view's ID. The c4 CLI's diff (through 1.0.24) wrote the ID of
@@ -175,65 +183,30 @@ func buildNode(items []item, f Filter) (*Node, error) {
 	return root, nil
 }
 
-// rootID is the description's ID, the one `c4 id -q` reports: the C4 ID
-// of the canonical text of the top-level entries, each top-level
-// directory whose children the description lists taking its size, time and
-// C4 ID from the library's normaliser over them (which corrects a stale
-// size or ID, keeps a stated time and fills a null one). One with none
-// listed (known only by its ID) is its line as recorded, nulls kept. Never
-// recomputed with ComputeC4ID: through c4 50ba056 that reads a directory
-// known only by its ID as empty and hashes a size of 0 the description
-// does not state.
-func rootID(items []item) c4.ID {
-	m := c4m.NewManifest()
-	for i, it := range items {
-		if strings.Count(strings.TrimSuffix(it.path, "/"), "/") != 0 {
-			continue
-		}
-		cp := *it.entry
-		cp.Depth = 0
-		if it.isDir && it.hasChildren {
-			derive(&cp, it.path, items[i+1:])
-		}
-		m.AddEntry(&cp)
-	}
-	return c4.Identify(strings.NewReader(m.Canonical()))
-}
-
-// derive sets d's size, time and C4 ID to what the library's normaliser
-// derives from the entries the description lists under dir (the items
-// that follow it). Entries read from the store under a directory known
-// only by its ID are not the description's and are left out, so that
-// directory counts as the line it is.
-func derive(d *c4m.Entry, dir string, after []item) {
-	sub := c4m.NewManifest()
-	top := *d
-	sub.AddEntry(&top)
-	var collapsed []string // directories whose items came from the store
-	for _, it := range after {
-		if !strings.HasPrefix(it.path, dir) {
-			break
-		}
-		under := false
-		for _, c := range collapsed {
-			if strings.HasPrefix(it.path, c) {
-				under = true
-				break
-			}
-		}
-		if under {
-			continue
-		}
-		cp := *it.entry
-		cp.Depth = strings.Count(strings.TrimSuffix(it.path, "/"), "/")
-		sub.AddEntry(&cp)
-		if it.isDir && !it.hasChildren {
-			collapsed = append(collapsed, it.path)
+// descriptionID is a description's C4 ID, the one c4 reports for it
+// (`c4 id -q`): the library's normaliser over the description (every
+// directory whose children it lists re-derived from them), then the C4 ID
+// of its root listing's canonical text. A top-level directory known only
+// by its ID keeps a null size, except that the empty listing's ID says
+// the directory is empty, size 0, as c4 50ba056 has it. Not ComputeC4ID:
+// on the pinned library that reads every directory known only by its ID
+// as empty and hashes a 0 the description does not state; once the pin
+// carries 50ba056 this is Normalize and ComputeC4ID.
+func descriptionID(m *c4m.Manifest) c4.ID {
+	cp := m.Copy()
+	c4m.Normalize(cp)
+	for _, e := range cp.Entries {
+		// After the normaliser a directory with listed children has their
+		// ID, never the empty listing's.
+		if e.Depth == 0 && e.IsDir() && e.Size < 0 && e.C4ID == emptyID {
+			e.Size = 0
 		}
 	}
-	c4m.Normalize(sub)
-	got := sub.Entries[0]
-	d.Size, d.Timestamp, d.C4ID = got.Size, got.Timestamp, got.C4ID
+	var b bytes.Buffer
+	if err := cp.WriteCanonical(&b); err != nil {
+		return c4.ID{}
+	}
+	return c4.Identify(&b)
 }
 
 func (r *resolver) resolveID(id c4.ID, depth int) ([][]item, error) {
@@ -241,6 +214,7 @@ func (r *resolver) resolveID(id c4.ID, depth int) ([][]item, error) {
 		return nil, fmt.Errorf("description cycle at %s", id)
 	}
 	if id == emptyID {
+		r.descs = append(r.descs, c4m.NewManifest())
 		return [][]item{nil}, nil
 	}
 	data, err := ReadObject(r.st, id)
@@ -280,6 +254,7 @@ func (r *resolver) resolveData(data []byte, depth int) ([][]item, error) {
 		if err := r.walk(m, "", true, &items); err != nil {
 			return nil, err
 		}
+		r.descs = append(r.descs, m)
 		return [][]item{items}, nil
 	}
 	if depth >= MaxChain {
@@ -296,6 +271,7 @@ func (r *resolver) resolveData(data []byte, depth int) ([][]item, error) {
 	if err != nil {
 		return nil, err
 	}
+	r.descs = append(r.descs, c4m.ApplyPatch(r.descs[len(r.descs)-1].Copy(), m.Copy()))
 	return append(chain, top), nil
 }
 
@@ -313,11 +289,13 @@ func (r *resolver) resolveSections(sections []*c4m.PatchSection, depth int) ([][
 		return nil, fmt.Errorf("chain base %s: %w", sections[0].BaseID, err)
 	}
 	for _, sec := range sections {
-		top, err := r.applyPatch(levels[len(levels)-1], &c4m.Manifest{Version: "1.0", Entries: sec.Entries})
+		patch := &c4m.Manifest{Version: "1.0", Entries: sec.Entries}
+		top, err := r.applyPatch(levels[len(levels)-1], patch)
 		if err != nil {
 			return nil, err
 		}
 		levels = append(levels, top)
+		r.descs = append(r.descs, c4m.ApplyPatch(r.descs[len(r.descs)-1].Copy(), patch.Copy()))
 	}
 	return levels, nil
 }

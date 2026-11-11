@@ -235,8 +235,8 @@ spec:
                 type: string
               rootID:
                 description: |-
-                  RootID is the ID of the top description's root listing as recorded
-                  (the snapshot ID).
+                  RootID is the description's C4 ID, the one `c4 id -q` reports for it
+                  (for a changeset, for the state it resolves to).
                 type: string
               sourceID:
                 description: SourceID identifies the exact description resolved.
