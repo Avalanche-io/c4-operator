@@ -110,13 +110,21 @@ func TestGetWritesWhatThePlatformHolds(t *testing.T) {
 	getOS = "windows"
 	dir = t.TempDir()
 	out.Reset()
-	if err := Get(ctx, fakeViewDirs(t, files, []api.ViewLink{{Path: `l\ink`, Target: "shots/ok.exr"}}, []string{"empty:dir/", "fine/"}), Out{W: &out}, GetArgs{Ref: vid, Dir: dir}); err != nil {
+	links := []api.ViewLink{
+		{Path: `l\ink`, Target: "shots/ok.exr"},
+		{Path: "to-back", Target: `back\slash.txt`},
+		{Path: "to-stream", Target: "x:stream"},
+		{Path: "to-device", Target: "../CON"},
+		{Path: "fine-link", Target: "shots/ok.exr"},
+	}
+	if err := Get(ctx, fakeViewDirs(t, files, links, []string{"empty:dir/", "fine/"}), Out{W: &out}, GetArgs{Ref: vid, Dir: dir}); err != nil {
 		t.Fatal(err)
 	}
 	if b, err := os.ReadFile(filepath.Join(dir, "shots", "ok.exr")); err != nil || string(b) != "o\n" {
 		t.Errorf("the file Windows holds was not written: %q, %v", b, err)
 	}
-	for _, want := range []string{`skipped   back\slash.txt: this platform cannot hold the name`, "skipped   shots/a:b.exr:", "skipped   CON.txt:", `skipped   l\ink:`, "skipped   empty:dir:", "git v2.47.0"} {
+	for _, want := range []string{`skipped   back\slash.txt: this platform cannot hold the name`, "skipped   shots/a:b.exr:", "skipped   CON.txt:", `skipped   l\ink:`, "skipped   empty:dir:", "git v2.47.0",
+		`skipped   to-back -> back\slash.txt: this platform cannot hold the name "back\\slash.txt" in the link's target`, "skipped   to-stream -> x:stream: this platform cannot hold", "skipped   to-device -> ../CON: this platform cannot hold"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output does not say %q:\n%s", want, out.String())
 		}
@@ -124,7 +132,7 @@ func TestGetWritesWhatThePlatformHolds(t *testing.T) {
 	if fi, err := os.Stat(filepath.Join(dir, "fine")); err != nil || !fi.IsDir() {
 		t.Errorf("the empty directory Windows holds was not made: %v", err)
 	}
-	for _, p := range []string{`back\slash.txt`, "back", "shots/a:b.exr", "CON.txt", `l\ink`, "empty:dir", "empty"} {
+	for _, p := range []string{`back\slash.txt`, "back", "shots/a:b.exr", "CON.txt", `l\ink`, "empty:dir", "empty", "to-back", "to-stream", "to-device"} {
 		if _, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(p))); err == nil {
 			t.Errorf("%s was written", p)
 		}

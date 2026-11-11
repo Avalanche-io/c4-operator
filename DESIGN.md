@@ -225,7 +225,10 @@ protect a git repository, not the filesystem, and are not taken. Linux
 refuses nothing; macOS (APFS) refuses a name that is not UTF-8 (measured).
 
 The one writer that runs on Windows is `c4-farm get`; checkout, layers and
-the object cache do not build there. A trailing space or dot and the device
+the object cache do not build there. A link whose target holds a name the
+platform cannot hold is refused the same way: on Windows a backslash in a
+target is a separator, and the link would point at another entry. A
+trailing space or dot and the device
 names are refused by git's rule and not yet measured: a writer can make
 them through `\\?\` paths, and a Windows measurement that they read back
 exactly would drop those refusals. Two names a folder takes for one (case

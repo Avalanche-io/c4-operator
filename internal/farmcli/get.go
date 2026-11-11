@@ -153,7 +153,8 @@ func Get(ctx context.Context, c *Client, o Out, a GetArgs) error {
 // says of the rest which and why. An entry whose name the platform cannot
 // hold (fsname.Refusal: on Windows, git's rule) is left out, and so is
 // everything under a directory left out; it is never renamed, mapped or
-// joined into a path. The rest of the view is written. Names that differ
+// joined into a path; so is a link whose target holds a name the platform
+// cannot hold. The rest of the view is written. Names that differ
 // only in case (or in Unicode form) on a folder that takes them for one
 // are not looked for here.
 func writable(goos string, files []api.ViewFile, dirs []string, links []api.ViewLink) ([]api.ViewFile, []string, []api.ViewLink, []string) {
@@ -181,9 +182,17 @@ func writable(goos string, files []api.ViewFile, dirs []string, links []api.View
 	}
 	var kl []api.ViewLink
 	for _, l := range links {
-		if keep(l.Path) {
-			kl = append(kl, l)
+		if !keep(l.Path) {
+			continue
 		}
+		// A link's target is a path the filesystem resolves, so it is held
+		// to the same rule: on Windows a backslash in it is a separator, and
+		// the link would point at another entry than the view's.
+		if seg, r := fsname.PathRefusal(goos, l.Target); r != "" {
+			left = append(left, fmt.Sprintf("%s -> %s: this platform cannot hold the name %q in the link's target as it is: %s", l.Path, l.Target, seg, r))
+			continue
+		}
+		kl = append(kl, l)
 	}
 	return kf, kd, kl, left
 }
