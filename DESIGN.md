@@ -236,29 +236,37 @@ measured: a writer can make them through `\\?\` paths, and a Windows
 measurement that they read back exactly would drop those refusals. Two names
 a folder takes for one (case on NTFS and APFS, Unicode form on APFS:
 README.md and readme.md, ß and ss, σ and ς, é and e + U+0301, İ and I +
-U+0307, measured on this Mac) are measured, not predicted, and measured in a
-scratch folder of the get's own, never in the user's tree: for each
-directory of the view its names are made as empty files in a fresh probe
-folder, in byte order, and a name whose making lands on one made before it
-is taken for that one. A folder that tells A from a and é from e + U+0301 is
-taken to take none for one, and nothing more is measured. The probe folder
-is made at the get's folder, so a directory deeper in it with a rule of its
-own (an ext4 casefold directory, NTFS per-directory case sensitivity) is not
-measured. Of each set, the last in byte order is the one written, whole: its
-exact spelling and its bytes. The others, everything under them, and every
-link that points into one, are not written at all, and are reported with it;
-nothing the folder already holds is removed. **This is where c4 goes past
-git:** git's checkout leaves the first spelling on disk holding the last
-one's bytes, an entry that is neither of the two, which a scan of the folder
-would read as a wrong one; here a scan reads the winner exactly and nothing
-of the losers. After the writes, an entry the folder lists under another
-spelling than the view's (one an earlier get or anything else left) is
-renamed in place to the view's exactly; nothing is removed for it. The
-measuring costs a made and removed empty file per name, about 90 µs a name
-on this Mac (20,000 names in one directory, 1.8 s), first run and re-run
-alike. Until the operator's c4m pin carries c4 PR #98, a name or link target
-that ends in a backslash is refused at import by the round-trip guard
-(section 2.3), since the pinned library reads it back with one more.
+U+0307, measured on this Mac) are measured, not predicted, and never in the
+user's tree: for each directory of the view, from the top and none under a
+loser, its names are made as empty files in byte order in a probe folder
+made where the directory is, or in the nearest folder above it that exists
+(case rules can be set per directory, and a directory can be another
+volume), and a name whose making lands on one made before it is taken for
+that one. A place that tells A from a and é from e + U+0301 is taken to take
+none for one. Where no probe folder can be made (a read-only folder), the
+names already there are grouped by the entry each one is. A probe folder a
+crashed get left is removed by the next. Of each set the last in byte order
+is written, whole: its exact spelling and its bytes. The others, everything
+under them, and every link pointing into one are not written, and are
+reported with it. For files that is what git does (it writes the last of the
+set and warns that the paths collided, measured with git 2.56.0); for
+directories c4 goes past git, which merges the set under the first spelling:
+here the winner is written alone, its own children and nothing of the
+losers'. The reason is the c4m's: one entry written exactly as the view has
+it, so that a scan of what this get wrote agrees with the view. Nothing the
+folder already holds is removed. Before anything is fetched, an entry the
+folder lists under another spelling than the view's (one an earlier get or
+anything else left) is renamed in place, top-down, to the view's exactly;
+and what a written directory holds under a name that belongs to a losing
+spelling of it (Docs/a, left by an older get, in the folder that is now the
+view's docs/) is reported as kept, with that spelling, and left as it is:
+deleting a user's file is not a get's to do. Nothing is written through a
+link already in the folder where the view has a directory. Measuring costs a
+made and removed empty file per name, about 90 µs a name on this Mac (50,000
+names in one directory, 4 to 5 s), first run and re-run alike. Until the
+operator's c4m pin carries c4 PR #98, a name or link target that ends in a
+backslash is refused at import by the round-trip guard (section 2.3), since
+the pinned library reads it back with one more.
 
 ### 2.2 Records
 

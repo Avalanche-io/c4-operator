@@ -470,3 +470,143 @@ func TestGetEdgesAroundCollisions(t *testing.T) {
 		t.Fatal("a file was written outside the folder")
 	}
 }
+
+// An older get left Docs/a; the view now has Docs/a and docs/b, and the
+// folder takes them for one directory, so docs/ is written and Docs/a is
+// not. The file the older get left stays where it is, reported as left
+// over from the spelling Docs; nothing is deleted. A view with only docs/b
+// takes the older folder's spelling over, and the file stays too.
+func TestLeftoversFromALosingSpelling(t *testing.T) {
+	ctx := context.Background()
+	old := getOS
+	t.Cleanup(func() { getOS = old })
+	getOS = "linux"
+	dir := t.TempDir()
+	if !collides(t, dir, "A", "a") {
+		t.Skip("this folder tells names apart by case")
+	}
+	vid := c4.Identify(strings.NewReader("v")).String()
+	os.MkdirAll(filepath.Join(dir, "Docs"), 0o755)
+	os.WriteFile(filepath.Join(dir, "Docs", "a"), []byte("older\n"), 0o644)
+	var out bytes.Buffer
+	if err := Get(ctx, fakeView(t, map[string]string{"Docs/a": "a\n", "docs/b": "b\n"}, nil), Out{W: &out}, GetArgs{Ref: vid, Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "docs", "a")); err != nil || string(b) != "older\n" {
+		t.Fatalf("the older get's file: %q, %v", b, err)
+	}
+	if want := "kept      docs/a: left over from the spelling Docs (the view's Docs/a, not written), and left as it is"; !strings.Contains(out.String(), want) {
+		t.Fatalf("the report does not say %q:\n%s", want, out.String())
+	}
+	ents, _ := os.ReadDir(dir)
+	if !hasName(ents, "docs") || hasName(ents, "Docs") {
+		t.Fatalf("the folder lists %v", ents)
+	}
+	// A name the winner has itself is the view's, not a leftover.
+	dir = t.TempDir()
+	out.Reset()
+	if err := Get(ctx, fakeView(t, map[string]string{"Docs/a": "loser\n", "docs/a": "winner\n", "docs/b": "b\n"}, nil), Out{W: &out}, GetArgs{Ref: vid, Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "left over") {
+		t.Fatalf("the winner's own entry was called a leftover:\n%s", out.String())
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "docs", "a")); string(b) != "winner\n" {
+		t.Fatalf("docs/a holds %q", b)
+	}
+	// Respelling takes the entry the view's name is, not another one beside
+	// it: the folder holds README.MD and twenty files the view does not have.
+	dir = t.TempDir()
+	os.WriteFile(filepath.Join(dir, "README.MD"), []byte("old\n"), 0o644)
+	for i := range 20 {
+		os.WriteFile(filepath.Join(dir, fmt.Sprintf("unrelated-%02d", i)), []byte("u\n"), 0o644)
+	}
+	out.Reset()
+	if err := Get(ctx, fakeView(t, map[string]string{"README.md": "new\n"}, nil), Out{W: &out}, GetArgs{Ref: vid, Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 20 {
+		if b, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("unrelated-%02d", i))); err != nil || string(b) != "u\n" {
+			t.Fatalf("unrelated-%02d: %q, %v", i, b, err)
+		}
+	}
+	ents, _ = os.ReadDir(dir)
+	if !hasName(ents, "README.md") || hasName(ents, "README.MD") {
+		t.Fatalf("the folder lists %v", ents)
+	}
+}
+
+// A probe folder a crashed get left is swept, and a get leaves none.
+// A read-only folder that already holds the view takes a get, measuring
+// what is there. Nothing is written through a link already in the folder.
+// A fetch that fails leaves no file under the view's name.
+func TestGetAroundTheProbe(t *testing.T) {
+	ctx := context.Background()
+	old := getOS
+	t.Cleanup(func() { getOS = old })
+	getOS = "linux"
+	vid := c4.Identify(strings.NewReader("v")).String()
+	files := map[string]string{"README.md": "1\n", "readme.md": "2\n", "d/x": "x\n"}
+
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, probePrefix+"crashed", "d0"), 0o755)
+	var out bytes.Buffer
+	if err := Get(ctx, fakeView(t, files, nil), Out{W: &out}, GetArgs{Ref: vid, Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, probePrefix+"*")); len(left) != 0 {
+		t.Fatalf("probe folders left: %v", left)
+	}
+
+	// Read-only, already holding the view.
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o755) })
+	out.Reset()
+	if err := Get(ctx, fakeView(t, files, nil), Out{W: &out}, GetArgs{Ref: vid, Dir: dir}); err != nil {
+		t.Fatalf("a read-only folder holding the view: %v\n%s", err, out.String())
+	}
+	if collides(t, t.TempDir(), "A", "a") && !strings.Contains(out.String(), "skipped   README.md: this folder takes it for readme.md") {
+		t.Errorf("a read-only folder does not report the collision:\n%s", out.String())
+	}
+	os.Chmod(dir, 0o755)
+
+	// A link already in the folder where the view has a directory.
+	dir = t.TempDir()
+	elsewhere := t.TempDir()
+	if err := os.Symlink(elsewhere, filepath.Join(dir, "d")); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := Get(ctx, fakeView(t, map[string]string{"d/x": "x\n", "y": "y\n"}, nil), Out{W: &out}, GetArgs{Ref: vid, Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	if ents, _ := os.ReadDir(elsewhere); len(ents) != 0 {
+		t.Fatalf("written through a link: %v", ents)
+	}
+	if !strings.Contains(out.String(), "skipped   d/x: d is a link in the folder where the view has a directory") {
+		t.Fatalf("the report:\n%s", out.String())
+	}
+
+	// A fetch that fails.
+	dir = t.TempDir()
+	c := fakeView(t, map[string]string{"ok": "o\n"}, nil)
+	broken := &Client{Base: c.Base, HTTP: c.HTTP}
+	ls := api.ViewListing{Files: []api.ViewFile{{Path: "missing", ID: c4.Identify(strings.NewReader("never served")).String(), Size: 1}}}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/files") {
+			json.NewEncoder(w).Encode(ls)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	broken.Base = srv.URL
+	if err := Get(ctx, broken, Out{W: &out}, GetArgs{Ref: vid, Dir: dir}); err == nil {
+		t.Fatal("a get whose fetch failed succeeded")
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "missing")); err == nil {
+		t.Fatal("a failed fetch left a file under the view's name")
+	}
+}

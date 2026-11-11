@@ -87,8 +87,31 @@ func Get(ctx context.Context, c *Client, o Out, a GetArgs) error {
 	if err != nil {
 		return err
 	}
+	allFiles, allDirs, allLinks := files, dirs, links
 	files, dirs, links, lostLeft := withoutLosers(lost, files, dirs, links)
 	left = append(left, lostLeft...)
+	// Nothing is written through a link already in the folder.
+	files, dirs, links, linked := notThroughLinks(a.Dir, files, dirs, links)
+	left = append(left, linked...)
+	// Every name to be written, with the folders above it, takes the view's
+	// spelling before anything is fetched: an entry an earlier get left
+	// under another is renamed in place, top-down.
+	var names []string
+	for _, f := range files {
+		names = append(names, f.Path)
+	}
+	for _, d := range dirs {
+		names = append(names, d)
+	}
+	for _, l := range links {
+		names = append(names, l.Path)
+	}
+	for _, p := range append([]string(nil), names...) {
+		for d := path.Dir(strings.TrimSuffix(p, "/")); d != "." && d != "/"; d = path.Dir(d) {
+			names = append(names, d)
+		}
+	}
+	left = append(left, respell(a.Dir, names)...)
 	var (
 		next        atomic.Int64
 		wrote, kept atomic.Int64
@@ -140,23 +163,7 @@ func Get(ctx context.Context, c *Client, o Out, a GetArgs) error {
 	if err != nil {
 		return err
 	}
-	// Every name the view has, in the folder's listing as it is spelled.
-	var names []string
-	for _, f := range files {
-		names = append(names, f.Path)
-	}
-	for _, d := range dirs {
-		names = append(names, d)
-	}
-	for _, l := range links {
-		names = append(names, l.Path)
-	}
-	for _, p := range append([]string(nil), names...) {
-		for d := path.Dir(strings.TrimSuffix(p, "/")); d != "." && d != "/"; d = path.Dir(d) {
-			names = append(names, d)
-		}
-	}
-	left = append(left, respell(a.Dir, names)...)
+	over := leftovers(a.Dir, lost, allFiles, allDirs, allLinks)
 	line := fmt.Sprintf("%s · %s · every ID checked", plural(int(wrote.Load()), "file", "files"), Bytes(bytes.Load()))
 	if k := kept.Load(); k > 0 {
 		line += fmt.Sprintf(" · %d already here", k)
@@ -167,6 +174,9 @@ func Get(ctx context.Context, c *Client, o Out, a GetArgs) error {
 	o.printf("%s\n", line)
 	for _, s := range append(left, skipped...) {
 		o.printf("skipped   %s\n", s)
+	}
+	for _, s := range over {
+		o.printf("kept      %s\n", s)
 	}
 	o.printf("view      %s\n", vid)
 	o.printf("in        %s\n", a.Dir)
