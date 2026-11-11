@@ -42,3 +42,6 @@ linux  internal/farmcli             TestGetsAtOnceMeasureApart                  
 linux  internal/farmcli             TestLeftoversFromALosingSpelling                   # a folder that folds case
 linux  internal/farmcli             TestProbeStaysInTheFolder                          # a folder that folds case
 linux  internal/farmcli             TestWinnersAreWhatIsWritten                        # a folder that folds case
+
+# Waits on a ruling; runs once the ruling comes, with the fix it brings.
+*      internal/view                TestTheReadersAgreeOnADirectoryWrittenByIDOverAFile # unruled: draft c4 #89
