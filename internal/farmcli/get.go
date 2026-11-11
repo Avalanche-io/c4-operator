@@ -81,10 +81,7 @@ func Get(ctx context.Context, c *Client, o Out, a GetArgs) error {
 	if len(files)+len(dirs)+len(links) == 0 {
 		return fmt.Errorf("nothing at %s in %s", strings.Join(a.Paths, ", "), vid)
 	}
-	files, dirs, links, left, err := writable(a.Dir, getOS, files, dirs, links)
-	if err != nil {
-		return err
-	}
+	files, dirs, links, left := writable(getOS, files, dirs, links)
 	var (
 		next        atomic.Int64
 		wrote, kept atomic.Int64
@@ -152,59 +149,23 @@ func Get(ctx context.Context, c *Client, o Out, a GetArgs) error {
 	return nil
 }
 
-// writable keeps of a listing what the folder at dir can hold as it is,
-// and says of the rest which and why. An entry whose name the platform
-// cannot hold (fsname.Refusal: on Windows, git's rule) is left out, and
-// so is everything under a directory left out; it is never renamed or
-// mapped. Where the folder does not tell names apart by case (measured,
-// by a probe file), of the paths that would land in one place the first
-// in byte order is written and the rest are left out, the same ones every
-// time. The rest of the view is written.
-func writable(dir, goos string, files []api.ViewFile, dirs []string, links []api.ViewLink) ([]api.ViewFile, []string, []api.ViewLink, []string, error) {
+// writable keeps of a listing what this platform can hold as it is, and
+// says of the rest which and why. An entry whose name the platform cannot
+// hold (fsname.Refusal: on Windows, git's rule) is left out, and so is
+// everything under a directory left out; it is never renamed, mapped or
+// joined into a path. The rest of the view is written. Names that differ
+// only in case (or in Unicode form) on a folder that takes them for one
+// are not looked for here.
+func writable(goos string, files []api.ViewFile, dirs []string, links []api.ViewLink) ([]api.ViewFile, []string, []api.ViewLink, []string) {
 	var left []string
-	out := map[string]string{} // path left out to why
-	refuse := func(p string) bool {
-		if why, ok := out[p]; ok {
-			return why != ""
-		}
-		why := ""
-		if seg, r := fsname.PathRefusal(goos, p); r != "" {
-			why = fmt.Sprintf("%s: this platform cannot hold the name %q as it is: %s", strings.TrimSuffix(p, "/"), seg, r)
-		}
-		out[p] = why
-		if why != "" {
-			left = append(left, why)
-		}
-		return why != ""
-	}
-	insensitive, err := caseInsensitive(dir)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	var all []string
-	for _, f := range files {
-		all = append(all, f.Path)
-	}
-	for _, d := range dirs {
-		all = append(all, strings.TrimSuffix(d, "/"))
-	}
-	for _, l := range links {
-		all = append(all, l.Path)
-	}
-	collides := map[string]string{}
-	if insensitive {
-		collides = fsname.Collisions(all)
-	}
 	keep := func(p string) bool {
 		p = strings.TrimSuffix(p, "/")
-		if refuse(p) {
-			return false
+		seg, r := fsname.PathRefusal(goos, p)
+		if r == "" {
+			return true
 		}
-		if kept, ok := collides[p]; ok {
-			left = append(left, fmt.Sprintf("%s: this folder does not tell it from %s, which is written", p, kept))
-			return false
-		}
-		return true
+		left = append(left, fmt.Sprintf("%s: this platform cannot hold the name %q as it is: %s", p, seg, r))
+		return false
 	}
 	var kf []api.ViewFile
 	for _, f := range files {
@@ -224,25 +185,7 @@ func writable(dir, goos string, files []api.ViewFile, dirs []string, links []api
 			kl = append(kl, l)
 		}
 	}
-	return kf, kd, kl, left, nil
-}
-
-// caseInsensitive reports whether the folder at dir (made if need be)
-// takes two names that differ only in case for one: a probe file is made
-// and looked for under its name lower-cased.
-func caseInsensitive(dir string) (bool, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return false, err
-	}
-	f, err := os.CreateTemp(dir, ".C4-CASE-PROBE-*")
-	if err != nil {
-		return false, err
-	}
-	name := f.Name()
-	f.Close()
-	defer os.Remove(name)
-	_, err = os.Lstat(filepath.Join(dir, strings.ToLower(filepath.Base(name))))
-	return err == nil, nil
+	return kf, kd, kl, left
 }
 
 // fetch writes one file unless it is already there with its ID.

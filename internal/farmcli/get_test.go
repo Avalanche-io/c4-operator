@@ -49,7 +49,13 @@ func TestMakeLinks(t *testing.T) {
 // fakeView serves a view's listing and its objects as the HUD does.
 func fakeView(t *testing.T, files map[string]string, links []api.ViewLink) *Client {
 	t.Helper()
-	ls := api.ViewListing{Links: links}
+	return fakeViewDirs(t, files, links, nil)
+}
+
+// fakeViewDirs is fakeView with empty directories in the listing too.
+func fakeViewDirs(t *testing.T, files map[string]string, links []api.ViewLink, dirs []string) *Client {
+	t.Helper()
+	ls := api.ViewListing{Links: links, Dirs: dirs}
 	objs := map[string][]byte{}
 	for p, body := range files {
 		id := c4.Identify(strings.NewReader(body)).String()
@@ -104,60 +110,23 @@ func TestGetWritesWhatThePlatformHolds(t *testing.T) {
 	getOS = "windows"
 	dir = t.TempDir()
 	out.Reset()
-	if err := Get(ctx, fakeView(t, files, []api.ViewLink{{Path: `l\ink`, Target: "shots/ok.exr"}}), Out{W: &out}, GetArgs{Ref: vid, Dir: dir}); err != nil {
+	if err := Get(ctx, fakeViewDirs(t, files, []api.ViewLink{{Path: `l\ink`, Target: "shots/ok.exr"}}, []string{"empty:dir/", "fine/"}), Out{W: &out}, GetArgs{Ref: vid, Dir: dir}); err != nil {
 		t.Fatal(err)
 	}
 	if b, err := os.ReadFile(filepath.Join(dir, "shots", "ok.exr")); err != nil || string(b) != "o\n" {
 		t.Errorf("the file Windows holds was not written: %q, %v", b, err)
 	}
-	for _, want := range []string{`skipped   back\slash.txt: this platform cannot hold the name`, "skipped   shots/a:b.exr:", "skipped   CON.txt:", `skipped   l\ink:`, "git v2.47.0"} {
+	for _, want := range []string{`skipped   back\slash.txt: this platform cannot hold the name`, "skipped   shots/a:b.exr:", "skipped   CON.txt:", `skipped   l\ink:`, "skipped   empty:dir:", "git v2.47.0"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output does not say %q:\n%s", want, out.String())
 		}
 	}
-	for _, p := range []string{`back\slash.txt`, "back", "shots/a:b.exr", "CON.txt", `l\ink`} {
+	if fi, err := os.Stat(filepath.Join(dir, "fine")); err != nil || !fi.IsDir() {
+		t.Errorf("the empty directory Windows holds was not made: %v", err)
+	}
+	for _, p := range []string{`back\slash.txt`, "back", "shots/a:b.exr", "CON.txt", `l\ink`, "empty:dir", "empty"} {
 		if _, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(p))); err == nil {
 			t.Errorf("%s was written", p)
-		}
-	}
-}
-
-// Where the folder does not tell names apart by case, of two paths that
-// would land in one place the first in byte order is written and the
-// other reported, the same every time; where it does, both are written.
-func TestGetCaseCollisions(t *testing.T) {
-	ctx := context.Background()
-	files := map[string]string{"README.md": "upper\n", "readme.md": "lower\n", "x.txt": "x\n"}
-	vid := c4.Identify(strings.NewReader("a view")).String()
-	old := getOS
-	t.Cleanup(func() { getOS = old })
-	getOS = "linux"
-	dir := t.TempDir()
-	insensitive, err := caseInsensitive(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out bytes.Buffer
-	if err := Get(ctx, fakeView(t, files, nil), Out{W: &out}, GetArgs{Ref: vid, Dir: dir}); err != nil {
-		t.Fatal(err)
-	}
-	ents, _ := os.ReadDir(dir)
-	if !insensitive {
-		if !hasName(ents, "README.md") || !hasName(ents, "readme.md") || strings.Contains(out.String(), "does not tell it from") {
-			t.Fatalf("a case-sensitive folder: %v\n%s", ents, out.String())
-		}
-		t.Log("this folder tells names apart by case; both written")
-		return
-	}
-	if !strings.Contains(out.String(), "skipped   readme.md: this folder does not tell it from README.md, which is written") {
-		t.Fatalf("output:\n%s", out.String())
-	}
-	if b, _ := os.ReadFile(filepath.Join(dir, "README.md")); string(b) != "upper\n" || !hasName(ents, "README.md") || hasName(ents, "readme.md") {
-		t.Fatalf("the folder holds %v, README.md is %q", ents, b)
-	}
-	for _, e := range ents {
-		if strings.HasPrefix(e.Name(), ".C4-CASE-PROBE-") {
-			t.Fatalf("the probe was left: %s", e.Name())
 		}
 	}
 }

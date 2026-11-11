@@ -14,18 +14,25 @@ package fsname
 
 import (
 	"fmt"
-	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // Refusal says why a filesystem on goos cannot hold name (one path
-// segment) as it is, or "" when it can. Off Windows that is never: Linux
-// and macOS hold every byte but "/" and NUL, which c4m names never have.
+// segment) as it is, or "" when it can. Linux holds every byte but "/"
+// and NUL, which c4m names never have. macOS (APFS) holds only names that
+// are UTF-8 (measured: "Illegal byte sequence" for any other). Windows is
+// git's rule.
 func Refusal(goos, name string) string {
-	if goos != "windows" {
-		return ""
+	switch goos {
+	case "windows":
+		return windows(name)
+	case "darwin", "ios":
+		if !utf8.ValidString(name) {
+			return "APFS holds only names that are UTF-8 (measured)"
+		}
 	}
-	return windows(name)
+	return ""
 }
 
 // PathRefusal applies Refusal to each segment of a slash-separated path,
@@ -90,27 +97,4 @@ func device(name string) string {
 		return stem
 	}
 	return ""
-}
-
-// Collisions returns, of paths a case-insensitive filesystem would put in
-// one place, every one but the first in byte order: the ones a writer
-// leaves out and reports. It is deterministic whatever the order paths
-// come in. Folding is Unicode lower-casing (strings.ToLower), close to but
-// not exactly the NTFS and APFS tables.
-func Collisions(paths []string) map[string]string {
-	first := map[string]string{} // folded path to the path kept
-	out := map[string]string{}   // left out to kept
-	sorted := append([]string(nil), paths...)
-	sort.Strings(sorted)
-	for _, p := range sorted {
-		k := strings.ToLower(p)
-		if kept, ok := first[k]; ok {
-			if kept != p {
-				out[p] = kept
-			}
-			continue
-		}
-		first[k] = p
-	}
-	return out
 }

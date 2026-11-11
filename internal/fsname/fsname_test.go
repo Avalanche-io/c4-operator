@@ -32,6 +32,9 @@ func TestWindowsRefusesWhatGitDoes(t *testing.T) {
 		{"con.txt", "git", true},
 		{"Nul", "git", true},
 		{"AUX ", "git", true},
+		{"CON .txt", "git", true},
+		{"CONIN$ .x", "git", true},
+		{"nul:stream", "git", true},
 		{"PRN.tar.gz", "git", true},
 		{"CONIN$", "git", true},
 		{"conout$.log", "git", true},
@@ -63,7 +66,7 @@ func TestWindowsRefusesWhatGitDoes(t *testing.T) {
 		if got != "" && !strings.Contains(got, "git v2.47.0") {
 			t.Errorf("%q: the refusal does not cite its rule: %q", c.name, got)
 		}
-		// Off Windows nothing is refused.
+		// Off Windows nothing that is UTF-8 is refused.
 		for _, goos := range []string{"linux", "darwin"} {
 			if r := Refusal(goos, c.name); r != "" {
 				t.Errorf("%q on %s: refused %q", c.name, goos, r)
@@ -84,25 +87,16 @@ func TestPathRefusalNamesTheSegment(t *testing.T) {
 	}
 }
 
-// One of each set of paths a case-insensitive filesystem would put in one
-// place is kept, the first in byte order, whatever order they come in.
-func TestCollisionsKeepTheFirstInByteOrder(t *testing.T) {
-	for _, order := range [][]string{
-		{"README.md", "readme.md", "Docs/a", "docs/a", "docs/b", "x"},
-		{"docs/b", "x", "readme.md", "docs/a", "README.md", "Docs/a"},
-	} {
-		got := Collisions(order)
-		want := map[string]string{"readme.md": "README.md", "docs/a": "Docs/a"}
-		if len(got) != len(want) {
-			t.Fatalf("%v: %v", order, got)
-		}
-		for k, v := range want {
-			if got[k] != v {
-				t.Fatalf("%v: %q kept %q, want %q", order, k, got[k], v)
-			}
-		}
+// Linux holds any bytes; APFS holds only UTF-8 names.
+func TestNamesThatAreNotUTF8(t *testing.T) {
+	bad := "caf\xe9.txt"
+	if r := Refusal("linux", bad); r != "" {
+		t.Fatalf("Linux: %q", r)
 	}
-	if got := Collisions([]string{"a", "a"}); len(got) != 0 {
-		t.Fatalf("the same path twice is not a collision: %v", got)
+	if r := Refusal("darwin", bad); !strings.Contains(r, "UTF-8") {
+		t.Fatalf("macOS: %q", r)
+	}
+	if r := Refusal("darwin", "café.txt"); r != "" {
+		t.Fatalf("macOS, UTF-8: %q", r)
 	}
 }
