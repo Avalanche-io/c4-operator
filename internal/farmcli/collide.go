@@ -236,9 +236,10 @@ func listsExactly(folder string, ids *identities) error {
 	if err != nil {
 		return fmt.Errorf("measuring names: %w", err)
 	}
-	// Fewer entries than made: one was removed. Every entry listed must be
-	// one made, which also rules out more.
-	if made := len(ids.byKey) + len(ids.names); len(ents) < made {
+	// As many entries as made (fewer: one was removed; more: one was added,
+	// a hard link to one made included, which its identity would not
+	// tell), and every entry listed one made.
+	if made := len(ids.byKey) + len(ids.names); len(ents) != made {
 		return fmt.Errorf("measuring names: the probe folder %s lists %d entries where this get made %d; something else changed it", folder, len(ents), made)
 	}
 	var byName map[string]bool

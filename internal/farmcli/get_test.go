@@ -859,6 +859,7 @@ func TestProbeListsExactlyWhatWasMade(t *testing.T) {
 			os.WriteFile(filepath.Join(f, "a"), nil, 0o644)
 			os.Remove(filepath.Join(f, "keep"))
 		}},
+		{"a hard link to one made added", func(f string) { os.Link(filepath.Join(f, "a"), filepath.Join(f, "x")) }},
 		{"the folder gone", func(f string) { os.RemoveAll(f) }},
 	} {
 		folder, ids := setup(t)
