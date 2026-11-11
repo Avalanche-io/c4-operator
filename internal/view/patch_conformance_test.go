@@ -317,3 +317,65 @@ func TestThePatchReadersAgree(t *testing.T) {
 		t.Fatalf("compared %d of %d vector cases in two forms", compared, len(cases))
 	}
 }
+
+// A directory written by its C4 ID alone over a file of that name, with no
+// line removing the file: one of the questions about patches open in draft
+// c4 #89. The two readers are to agree on it, whatever the ruling, and
+// this is the case that shows whether they do; until the ruling there is
+// no expected view to hold either to. Run unskipped on 2026-11-11 they do
+// not agree: one reader's view is not the other's (finding 27's 977 of
+// 4,915 generated cases are this shape), so the ruling comes with a fix
+// to one reader or both.
+func TestTheReadersAgreeOnADirectoryWrittenByIDOverAFile(t *testing.T) {
+	t.Skip("unruled: a directory written by its C4 ID over a file of that name (draft c4 #89)")
+	ctx := context.Background()
+	st := objStore{}
+	all, _ := NewFilter(nil)
+	inner := c4m.NewManifest()
+	inner.AddEntry(&c4m.Entry{Name: "in.txt", Size: 2, Timestamp: c4m.NullTimestamp(), C4ID: c4.Identify(strings.NewReader("in"))})
+	ib, err := c4m.Marshal(inner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ir, err := FromBytes(ib, st, all)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := ir.View()
+	recs, _ := dir.Records()
+	for _, r := range recs {
+		st[r.ID] = r.Data
+	}
+	bm := c4m.NewManifest()
+	bm.AddEntry(&c4m.Entry{Name: "x", Size: 1, Timestamp: c4m.NullTimestamp(), C4ID: c4.Identify(strings.NewReader("x"))})
+	bb, err := c4m.Marshal(bm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	br, err := FromBytes(bb, st, all)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := br.View()
+	recs, _ = base.Records()
+	for _, r := range recs {
+		st[r.ID] = r.Data
+	}
+	patch := c4m.NewManifest()
+	patch.AddEntry(&c4m.Entry{Name: "x/", Mode: os.ModeDir, Size: -1, Timestamp: c4m.NullTimestamp(), C4ID: dir.ID})
+	a, err := ApplyPatch(ctx, base.ID, patch, StoreRecords(st))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, err := EncodeChangeset(base.ID, patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr, err := FromBytes(cs, st, all)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rr.View().ID != a.ID {
+		t.Errorf("ApplyPatch made %s, the resolver %s", a.ID, rr.View().ID)
+	}
+}
