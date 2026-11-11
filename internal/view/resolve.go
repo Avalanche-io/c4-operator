@@ -115,12 +115,12 @@ type resolver struct {
 	// seal is the bare ID that ended the description being resolved, when
 	// it is a changeset or chain in the old form (splitSeal).
 	seal c4.ID
-	// descs holds, for each level resolved, its description as a c4m, as
-	// written: a c4m or record as decoded (a directory known only by its
-	// ID stays one line), a changeset applied over its parent's with the
-	// library's ApplyPatch. Levels are appended to it as they are resolved,
-	// so it runs beside them, base first.
-	descs []*c4m.Manifest
+	// desc is the root listing of the level last resolved, as written: the
+	// top-level lines of a c4m or record as decoded, or of a changeset
+	// applied over its parent's with the library's ApplyPatch. RootID reads
+	// nothing below the top level, so nothing below it is kept, and each
+	// level costs its own lines, not the chain's.
+	desc *c4m.Manifest
 }
 
 func newResolver(st Store, f Filter) *resolver {
@@ -140,7 +140,7 @@ func (r *resolver) finish(levels [][]item) (*Resolved, error) {
 		}
 		res.Chain = append(res.Chain, FromNode(root))
 	}
-	res.RootID = descriptionID(r.descs[len(r.descs)-1])
+	res.RootID = descriptionID(r.desc)
 	// A changeset or chain in the old form ends with the ID of what it
 	// resolves to, and two writers wrote that line. This system's wrote
 	// the view's ID. The c4 CLI's diff (through 1.0.24) wrote the ID of
@@ -201,6 +201,18 @@ func buildNode(items []item, f Filter) (*Node, error) {
 // would wrongly take as whole. Until c4 rules that a partial listing keeps
 // a stated size and ID and nulls an unstated one, the line is kept as
 // recorded, which is right for every changeset this system writes.
+// topLevel is a copy of m's top-level entries alone.
+func topLevel(m *c4m.Manifest) *c4m.Manifest {
+	out := c4m.NewManifest()
+	for _, e := range m.Entries {
+		if e.Depth == 0 {
+			cp := *e
+			out.AddEntry(&cp)
+		}
+	}
+	return out
+}
+
 func descriptionID(m *c4m.Manifest) c4.ID {
 	cp := m.Copy()
 	for _, e := range cp.Entries {
@@ -220,7 +232,7 @@ func (r *resolver) resolveID(id c4.ID, depth int) ([][]item, error) {
 		return nil, fmt.Errorf("description cycle at %s", id)
 	}
 	if id == emptyID {
-		r.descs = append(r.descs, c4m.NewManifest())
+		r.desc = c4m.NewManifest()
 		return [][]item{nil}, nil
 	}
 	data, err := ReadObject(r.st, id)
@@ -260,7 +272,7 @@ func (r *resolver) resolveData(data []byte, depth int) ([][]item, error) {
 		if err := r.walk(m, "", true, &items); err != nil {
 			return nil, err
 		}
-		r.descs = append(r.descs, m)
+		r.desc = topLevel(m)
 		return [][]item{items}, nil
 	}
 	if depth >= MaxChain {
@@ -277,7 +289,7 @@ func (r *resolver) resolveData(data []byte, depth int) ([][]item, error) {
 	if err != nil {
 		return nil, err
 	}
-	r.descs = append(r.descs, c4m.ApplyPatch(r.descs[len(r.descs)-1].Copy(), m.Copy()))
+	r.desc = topLevel(c4m.ApplyPatch(r.desc, m.Copy()))
 	return append(chain, top), nil
 }
 
@@ -301,7 +313,7 @@ func (r *resolver) resolveSections(sections []*c4m.PatchSection, depth int) ([][
 			return nil, err
 		}
 		levels = append(levels, top)
-		r.descs = append(r.descs, c4m.ApplyPatch(r.descs[len(r.descs)-1].Copy(), patch.Copy()))
+		r.desc = topLevel(c4m.ApplyPatch(r.desc, patch.Copy()))
 	}
 	return levels, nil
 }
