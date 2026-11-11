@@ -259,6 +259,9 @@ type Record struct {
 	ID    c4.ID
 	Data  []byte
 	depth int
+	// entries are the listing the record was written from, kept to name
+	// the one the library does not read back, if any (checkRecord).
+	entries []*c4m.Entry
 }
 
 // ParseRecord decodes a record into its entries, projected, and checks

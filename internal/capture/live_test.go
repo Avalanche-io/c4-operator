@@ -458,3 +458,41 @@ func TestConsumedCaptureRefusesWhatCannotBeRead(t *testing.T) {
 		t.Error("an object is stored under the nil C4 ID")
 	}
 }
+
+// A capture whose output holds what the c4m library cannot write in a form
+// it reads back (here a symlink whose target starts with "c4") fails,
+// naming the entry, and stores nothing: no record or changeset its readers
+// could not read.
+func TestCaptureRefusesWhatDoesNotReadBack(t *testing.T) {
+	f := newLiveFixture(t)
+	upper := filepath.Join(f.root, "upper")
+	writeUpper(t, upper, "#!/bin/sh\necho one\n")
+	f.sink.mu.Lock()
+	before := len(f.sink.objs)
+	f.sink.mu.Unlock()
+	target := c4.Identify(bytes.NewReader([]byte("x"))).String()
+	if err := os.Symlink(target, filepath.Join(upper, "bin", "latest")); err != nil {
+		t.Fatal(err)
+	}
+	in := f.input(upper, false)
+	in.Walk = func(u string) ([]overlay.Entry, error) {
+		out, err := plainWalk(u)
+		for i := range out {
+			if out[i].Path == "bin/latest" { // a walk of an upper reports a link as one
+				out[i] = overlay.Entry{Path: "bin/latest", Full: out[i].Full, Kind: overlay.Symlink, Target: target}
+			}
+		}
+		return out, err
+	}
+	_, err := Run(context.Background(), in)
+	var nr *view.NotReadBack
+	if !errors.As(err, &nr) || nr.Entry != "latest" {
+		t.Fatalf("the capture: %v", err)
+	}
+	f.sink.mu.Lock()
+	after := len(f.sink.objs)
+	f.sink.mu.Unlock()
+	if after != before {
+		t.Errorf("the store took %d objects from a refused capture", after-before)
+	}
+}

@@ -233,6 +233,24 @@ Whoever makes a changeset keeps the new view's ID beside it (a pod's
 `output-tree` annotation, a job's `status.output.view`, a commit's line in
 the import mapping), and anyone can recompute it by applying the patch.
 
+**Nothing is stored that does not read back as written.** Every record and
+changeset `view.Apply` makes, for a git import or a capture, is read the way
+every reader reads it (`ParseRecord`, `ReadChain`) and written again, and
+must come to the same bytes; otherwise the edits are refused with the entry
+that does not come back and why (`view.NotReadBack`), and nothing of them
+is stored. Checked, never trusted, applies to this system's own output: a
+record or changeset that its readers cannot read would stop every later read
+and import built on it, and an encoder and a decoder that disagree are found
+here whatever the shape. The c4m library the operator pins writes a symlink
+whose target starts with `c4` (with the null mode every view gives a link)
+in a form it reads back as a hard link, so a git commit holding such a link
+is refused, and each later push of its branch with it, until the operator
+is on a c4m library with the decoder fixed (c4 PR #92). A changeset stored
+before the guard that does not read is an error naming its mapping line: a
+library that reads it makes the chain again with no edit, and until then
+the cut is what is left. The cost is a decode and an encode of what a
+commit changes.
+
 A **chain** is changesets one after another: c4m's append-only patch chain
 (the c4m whitepaper's "Version History"). Every bare C4 ID line in it names
 the view before the section that follows, and must equal the ID of the

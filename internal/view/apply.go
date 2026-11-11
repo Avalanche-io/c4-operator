@@ -96,6 +96,15 @@ func (t *atree) applied(parent c4.ID) (*Applied, error) {
 	if res.Changeset, err = EncodeChangeset(parent, m); err != nil {
 		return nil, err
 	}
+	// Nothing is returned to be stored that does not read back as written.
+	for _, r := range res.Records {
+		if err := checkRecord(r.Data, r.entries); err != nil {
+			return nil, err
+		}
+	}
+	if err := checkChangeset(parent, res.Changeset, patch); err != nil {
+		return nil, err
+	}
 	res.ChangesetID = c4.Identify(bytes.NewReader(res.Changeset))
 	return res, nil
 }
@@ -281,7 +290,7 @@ func (t *atree) identify(n *anode, records *[]Record) *c4m.Entry {
 	m := listingOf(children)
 	n.entry = dirEntry(n.name, m)
 	if n.entry.C4ID != n.base {
-		*records = append(*records, Record{ID: n.entry.C4ID, Data: []byte(m.Canonical())})
+		*records = append(*records, Record{ID: n.entry.C4ID, Data: []byte(m.Canonical()), entries: m.Entries})
 	}
 	return n.entry
 }

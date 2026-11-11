@@ -3,10 +3,12 @@ package gitimport
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/Avalanche-io/c4"
+	"github.com/Avalanche-io/c4/c4m"
 
 	"github.com/Avalanche-io/c4-operator/internal/view"
 )
@@ -220,5 +222,36 @@ func TestRemakeComparesEveryKindOfLine(t *testing.T) {
 	old.Changeset = c4.Identify(strings.NewReader(string(data) + old.View.String()))
 	if err := Remake(ctx, opts, old); err == nil || strings.Contains(err.Error(), "before 2026-11-09") {
 		t.Fatalf("the earlier form without its last newline: %v", err)
+	}
+}
+
+// A ref stopped before the round-trip guard: a changeset the c4m library
+// wrote and does not read, stored, with its mapping line written. The
+// chain cannot be made from it, and the error says so and what gets the
+// ref out: a c4m library that reads it, with no edit, or the cut.
+func TestAChangesetStoredBeforeTheGuardThatDoesNotRead(t *testing.T) {
+	ctx := context.Background()
+	h := newHistory(t, 1)
+	link := c4m.NewManifest()
+	link.Entries = []*c4m.Entry{view.SymlinkEntry("link", c4.Identify(strings.NewReader("x")).String())}
+	poisoned, err := view.EncodeChangeset(h.views[0], link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := view.ReadChain(poisoned); err == nil {
+		t.Skip("this c4m library reads the changeset back: nothing is stopped")
+	}
+	h.put(t, poisoned)
+	m := []Commit{{Commit: "c1", Ref: "main", View: h.views[1], ParentView: h.views[0],
+		Changeset: c4.Identify(strings.NewReader(string(poisoned))), ChainBase: h.views[0], ChainSeq: 1}}
+	p := filepath.Join(t.TempDir(), "main.c4m")
+	_, _, err = OpenRecordedChain(ctx, p, h.src, m, "main")
+	for _, want := range []string{"(mapping line 1) is the object its C4 ID names and does not read with this c4m library", "a c4m library that reads it makes the chain again with no edit", "cut the mapping back to before line 1 and"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%v\nwant %q in it", err, want)
+		}
+	}
+	if _, err := RecordedChainBytes(ctx, p, h.src, m, "main"); err == nil {
+		t.Fatal("a reader was served a chain")
 	}
 }

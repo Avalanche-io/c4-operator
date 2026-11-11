@@ -418,8 +418,17 @@ func (rc RecordedChain) bytes(ctx context.Context, src view.RecordSource) ([]byt
 			return nil, lost
 		}
 		one, err := view.ReadChain(data)
-		if err != nil || len(one.Sections) != 1 {
-			return nil, fmt.Errorf("the stored object %s (mapping line %d) is not one changeset: %v", id, rc.Lines[i], err)
+		if err != nil {
+			// The bytes are the ones the C4 ID names, so this importer, or
+			// one before it, wrote them: the c4m library wrote what it does
+			// not read. Since the round-trip guard nothing is stored that
+			// does not read back; one written before it is read again by a
+			// c4m library that reads it, or else is cut back past.
+			return nil, fmt.Errorf("the stored changeset %s (mapping line %d) is the object its C4 ID names and does not read with this c4m library (%v). It was written before the importer checked that what it stores reads back; a c4m library that reads it makes the chain again with no edit, and until then what is left is to "+reimport,
+				id, rc.Lines[i], err, rc.Lines[i])
+		}
+		if len(one.Sections) != 1 {
+			return nil, fmt.Errorf("the stored object %s (mapping line %d) is not one changeset: it reads as %d", id, rc.Lines[i], len(one.Sections))
 		}
 		c.Sections = append(c.Sections, view.Section{Base: one.Base, Patch: one.Sections[0].Patch})
 		seals[i] = one.Seal

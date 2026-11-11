@@ -720,3 +720,45 @@ func (o *ordinary) refs() map[string]map[string]string {
 	}
 	return out
 }
+
+// A commit the c4m library cannot describe in a form it reads back is
+// refused before anything of it is stored: the push fails with the entry
+// and the reason, the mapping gains no line, and the ref is published as
+// it was. Before the round-trip guard the push answered 200 and stored the
+// changeset, and every later read and push of the ref failed. The commit
+// stays in the branch's first-parent history, so each later push of the
+// branch is refused the same way until the operator is on a c4m library
+// that reads it; other branches go on.
+func TestACommitTheLibraryCannotReadBackIsRefused(t *testing.T) {
+	o := newOrdinary(t, 0)
+	o.commit(map[string]string{"a.txt": "a\n"})
+	o.ok("the first commit", "main")
+	o.git(o.work, "branch", "dev")
+	mappingWas, _ := os.ReadFile(o.svc.out)
+	_, servedWas := o.head("refs/heads/main")
+
+	idText := c4.Identify(strings.NewReader("some content")).String()
+	if err := os.Symlink(idText, filepath.Join(o.work, "link")); err != nil {
+		t.Fatal(err)
+	}
+	o.git(o.work, "add", "-A")
+	o.git(o.work, "commit", "-q", "-m", "a link whose target is a C4 ID")
+	for i := range 2 {
+		code, body := o.push("main")
+		if code == http.StatusOK || !strings.Contains(body, `entry "link"`) || !strings.Contains(body, "so it is not stored") {
+			t.Fatalf("push %d: %d %s", i+1, code, body)
+		}
+		if now, _ := os.ReadFile(o.svc.out); !bytes.Equal(now, mappingWas) {
+			t.Fatalf("push %d: the mapping was written", i+1)
+		}
+		if code, served := o.head("refs/heads/main"); code != http.StatusOK || served != servedWas {
+			t.Fatalf("push %d: main is served as %d, %s, was %s", i+1, code, served, servedWas)
+		}
+		// A commit on top does not get past it.
+		o.commit(map[string]string{"b.txt": fmt.Sprint(i, "\n")})
+	}
+	// Another branch, without the commit, goes on.
+	o.git(o.work, "checkout", "-q", "dev")
+	o.commit(map[string]string{"dev.txt": "dev\n"})
+	o.ok("another branch", "dev")
+}
