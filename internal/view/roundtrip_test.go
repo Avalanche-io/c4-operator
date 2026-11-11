@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Avalanche-io/c4"
+	"github.com/Avalanche-io/c4/c4m"
 
 	"github.com/Avalanche-io/c4/store"
 )
@@ -75,5 +76,35 @@ func TestApplyRefusesALinkThatReadsAsAFlowLink(t *testing.T) {
 		} else {
 			t.Logf("a link to %q: %v", target, err)
 		}
+	}
+}
+
+// The changeset is checked as its readers read it: one section, over the
+// parent it was written over, that writes again to the same bytes. A link
+// the library cannot read back is named in a changeset as in a record.
+func TestAChangesetIsCheckedAsItIsRead(t *testing.T) {
+	parent := EmptyID()
+	ok := c4m.NewManifest()
+	ok.Entries = []*c4m.Entry{SymlinkEntry("link", "a.txt")}
+	good, err := EncodeChangeset(parent, ok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := checkChangeset(parent, good, ok.Entries); err != nil {
+		t.Fatalf("a changeset that reads back: %v", err)
+	}
+	var nr *NotReadBack
+	other := c4.Identify(strings.NewReader("another view"))
+	if err := checkChangeset(other, good, ok.Entries); !errors.As(err, &nr) || !strings.Contains(err.Error(), "sections over") {
+		t.Fatalf("a changeset over another parent than the one it was written over: %v", err)
+	}
+	bad := c4m.NewManifest()
+	bad.Entries = []*c4m.Entry{SymlinkEntry("link", "host:path")}
+	text, err := EncodeChangeset(parent, bad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := checkChangeset(parent, text, bad.Entries); !errors.As(err, &nr) || nr.What != "changeset" || nr.Entry != "link" {
+		t.Fatalf("a changeset the library does not read back as written: %v", err)
 	}
 }

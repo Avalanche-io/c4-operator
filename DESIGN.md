@@ -235,8 +235,9 @@ the import mapping), and anyone can recompute it by applying the patch.
 
 **Nothing is stored that does not read back as written.** Every record and
 changeset `view.Apply` makes, for a git import or a capture, is read the way
-every reader reads it (`ParseRecord`, `ReadChain`) and written again, and
-must come to the same bytes; otherwise the edits are refused with the entry
+every reader reads it (`ParseRecord`; `ReadChain` and each entry as the
+patch appliers project it) and written again, and must come to the same
+bytes; otherwise the edits are refused with the entry
 that does not come back and why (`view.NotReadBack`), and nothing of them
 is stored. Checked, never trusted, applies to this system's own output: a
 record or changeset that its readers cannot read would stop every later read

@@ -41,8 +41,12 @@ func checkRecord(data []byte, entries []*c4m.Entry) error {
 	return nil
 }
 
-// checkChangeset reads a changeset as every reader does (ReadChain) and
-// requires one section over parent that writes again to the same bytes.
+// checkChangeset reads a changeset as every reader does: ReadChain, then
+// each entry as the patch appliers take it (Project). It requires one
+// section over parent that writes again to the same bytes. The projection
+// matters: an entry the library reads as another kind (a link read as a
+// flow link) writes again unchanged as c4m text, and only the projection,
+// which keeps what a view holds, shows what a reader takes it for.
 func checkChangeset(parent c4.ID, data []byte, entries []*c4m.Entry) error {
 	c, err := ReadChain(data)
 	if err != nil {
@@ -51,7 +55,11 @@ func checkChangeset(parent c4.ID, data []byte, entries []*c4m.Entry) error {
 	if len(c.Sections) != 1 || c.Base != parent {
 		return notReadBack("changeset", entries, fmt.Sprintf("read back as %d sections over %s", len(c.Sections), c.Base))
 	}
-	again, err := EncodeChangeset(c.Base, c.Sections[0].Patch)
+	read := c4m.NewManifest()
+	for _, e := range c.Sections[0].Patch.Entries {
+		read.Entries = append(read.Entries, Project(e))
+	}
+	again, err := EncodeChangeset(c.Base, read)
 	if err != nil {
 		return notReadBack("changeset", entries, err.Error())
 	}
