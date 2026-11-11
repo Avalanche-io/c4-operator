@@ -190,7 +190,11 @@ func CaptureView(ctx context.Context, vs ViewStore, project, dir string) (c4.ID,
 			return c4.ID{}, fmt.Errorf("object %s: %w", o.ID, err)
 		}
 	}
-	for _, r := range v.Records() {
+	recs, rerr := v.Records()
+	if rerr != nil {
+		return c4.ID{}, rerr
+	}
+	for _, r := range recs {
 		if err := vs.PutBytes(ctx, project, r.ID, r.Data); err != nil {
 			return c4.ID{}, fmt.Errorf("record %s: %w", r.ID, err)
 		}

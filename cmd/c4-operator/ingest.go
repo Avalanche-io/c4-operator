@@ -126,7 +126,11 @@ func runIngest(args []string) error {
 	if first != nil {
 		return first
 	}
-	for _, r := range v.Records() {
+	recs, rerr := v.Records()
+	if rerr != nil {
+		return rerr
+	}
+	for _, r := range recs {
 		if _, err := st.PutBytes(ctx, r.Data); err != nil {
 			return fmt.Errorf("record %s: %w", r.ID, err)
 		}

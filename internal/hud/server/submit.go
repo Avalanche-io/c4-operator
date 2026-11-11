@@ -418,7 +418,12 @@ func (s *Server) handlePostView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v := c4view.FromNode(root)
-	for _, rec := range v.Records() {
+	recs, rerr := v.Records()
+	if rerr != nil {
+		fail(w, http.StatusUnprocessableEntity, "%v", rerr)
+		return
+	}
+	for _, rec := range recs {
 		if _, err := st.PutBytes(ctx, rec.Data); err != nil {
 			fail(w, http.StatusBadGateway, "store: %v", err)
 			return

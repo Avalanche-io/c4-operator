@@ -153,7 +153,11 @@ func (s *tree) ingest(t *testing.T, files map[string]string) *view.View {
 			t.Fatal(err)
 		}
 	}
-	for _, r := range v.Records() {
+	recs, rerr := v.Records()
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	for _, r := range recs {
 		if _, err := s.store.PutBytes(ctx, r.Data); err != nil {
 			t.Fatal(err)
 		}

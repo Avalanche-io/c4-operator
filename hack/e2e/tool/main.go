@@ -484,7 +484,11 @@ func objectsCmd(args []string) error {
 	for _, o := range v.Objects() {
 		fmt.Println(rendezvous.Rank(names, o.ID[:])[0], o.ID)
 	}
-	for _, r := range v.Records() {
+	recs, err := v.Records()
+	if err != nil {
+		return err
+	}
+	for _, r := range recs {
 		fmt.Println(rendezvous.Rank(names, r.ID[:])[0], r.ID)
 	}
 	return nil

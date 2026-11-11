@@ -85,7 +85,11 @@ func newLiveFixture(t *testing.T) *liveFixture {
 		data, _ := os.ReadFile(filepath.Join(src, f.Path))
 		cache.Put(f.ID, data)
 	}
-	for _, r := range v.Records() {
+	recs, rerr := v.Records()
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	for _, r := range recs {
 		cache.Put(r.ID, r.Data)
 		sink.PutBytes(context.Background(), "", r.ID, r.Data)
 	}
@@ -486,7 +490,7 @@ func TestCaptureRefusesWhatDoesNotReadBack(t *testing.T) {
 	}
 	_, err := Run(context.Background(), in)
 	var nr *view.NotReadBack
-	if !errors.As(err, &nr) || nr.Entry != "latest" {
+	if !errors.As(err, &nr) || nr.Entry != "bin/latest" {
 		t.Fatalf("the capture: %v", err)
 	}
 	f.sink.mu.Lock()

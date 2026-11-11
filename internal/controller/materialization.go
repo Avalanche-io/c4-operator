@@ -227,7 +227,11 @@ func publishRecords(ctx context.Context, st *storeurl.Sharded, chain []*view.Vie
 		} else if !errors.Is(err, storeurl.ErrNotFound) {
 			return err
 		}
-		for _, rec := range v.Records() {
+		recs, rerr := v.Records()
+		if rerr != nil {
+			return rerr
+		}
+		for _, rec := range recs {
 			if _, err := st.PutBytes(ctx, rec.Data); err != nil {
 				return err
 			}

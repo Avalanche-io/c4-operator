@@ -58,7 +58,11 @@ func TestCaptureLeavesACloneWorkspaceAlone(t *testing.T) {
 		data, _ := os.ReadFile(filepath.Join(src, f.Path))
 		cache.Put(f.ID, data)
 	}
-	for _, r := range v.Records() {
+	recs, rerr := v.Records()
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	for _, r := range recs {
 		cache.Put(r.ID, r.Data)
 		store.PutBytes(context.Background(), "", r.ID, r.Data)
 	}
@@ -187,7 +191,11 @@ func TestCloneCaptureTwiceKeepsASameSizeEdit(t *testing.T) {
 		data, _ := os.ReadFile(filepath.Join(src, f.Path))
 		cache.Put(f.ID, data)
 	}
-	for _, r := range v.Records() {
+	recs, rerr := v.Records()
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	for _, r := range recs {
 		cache.Put(r.ID, r.Data)
 		store.PutBytes(context.Background(), "", r.ID, r.Data)
 	}

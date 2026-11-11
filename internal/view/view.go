@@ -135,7 +135,7 @@ func (v *View) Totals() Totals {
 }
 
 // Records returns the view's directory records, deepest first.
-func (v *View) Records() []Record { return v.Root.Records() }
+func (v *View) Records() ([]Record, error) { return v.Root.Records() }
 
 // Manifest renders the whole view as one nested c4m (files first, then
 // directories, each in natural order).

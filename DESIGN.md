@@ -233,24 +233,36 @@ Whoever makes a changeset keeps the new view's ID beside it (a pod's
 `output-tree` annotation, a job's `status.output.view`, a commit's line in
 the import mapping), and anyone can recompute it by applying the patch.
 
-**Nothing is stored that does not read back as written.** Every record and
-changeset `view.Apply` makes, for a git import or a capture, is read the way
-every reader reads it (`ParseRecord`; `ReadChain` and each entry as the
-patch appliers project it) and written again, and must come to the same
-bytes; otherwise the edits are refused with the entry
-that does not come back and why (`view.NotReadBack`), and nothing of them
-is stored. Checked, never trusted, applies to this system's own output: a
-record or changeset that its readers cannot read would stop every later read
-and import built on it, and an encoder and a decoder that disagree are found
-here whatever the shape. The c4m library the operator pins writes a symlink
-whose target starts with `c4` (with the null mode every view gives a link)
-in a form it reads back as a hard link, so a git commit holding such a link
-is refused, and each later push of its branch with it, until the operator
-is on a c4m library with the decoder fixed (c4 PR #92). A changeset stored
-before the guard that does not read is an error naming its mapping line: a
-library that reads it makes the chain again with no edit, and until then
-the cut is what is left. The cost is a decode and an encode of what a
-commit changes.
+**No record or changeset is stored that does not read back as written.**
+Records and changesets are made in two places, `view.Apply` (a git import,
+a capture, a fold of a job's output through `ApplyPatchFrom`) and
+`View.Records` (ingest, the HUD's views, an agent's session view, a
+materialisation's records), and both check what they make before handing it
+to a writer. Each is read the way its readers read it (`ParseRecord`;
+`ReadChain`, with each entry projected as the patch appliers take it),
+written again, and must come to the same bytes; otherwise it is refused
+with the path of the entry that does not come back and what came back
+(`view.NotReadBack`). Checked, never trusted, applies to this system's own
+output: a record or changeset its readers cannot read would stop every
+later read and import built on it, and any disagreement between the c4m
+encoder and decoder over what such an object says is caught here. Objects
+uploaded before the check (a git import's or an ingest's file contents)
+stay in the store, named by nothing.
+
+The c4m library the operator pins writes a symlink whose target starts with
+`c4`, under the null mode every view gives a link, as a line it cannot parse
+(it takes the target for the C4 ID field), and reads a target that looks
+like a location (`host:path`, `C:foo`) back as a flow link with no target.
+Such a git commit is refused, and each later push of its branch with it,
+until the operator is on a c4m library with the decoder fixed (c4 PR #92);
+other branches go on; a capture or an ingest holding such a link is refused
+too. A changeset stored before the guard that does not read is an error
+naming its mapping line: a library that reads it makes the chain again with
+no edit, and until then the cut is what is left. The check decodes and
+encodes again every listing on a changed path, whole: measured by the
+branch's reviewer on a Mac, 5,000 new files cost 130 ms against 76 ms, one
+file changed in a 20,000-entry directory 532 ms against 417 ms, and 5,000
+files changed across 50 directories 1.23 s against 0.93 s.
 
 A **chain** is changesets one after another: c4m's append-only patch chain
 (the c4m whitepaper's "Version History"). Every bare C4 ID line in it names

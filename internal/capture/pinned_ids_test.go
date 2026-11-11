@@ -89,7 +89,11 @@ func TestIDsArePinned(t *testing.T) {
 		b, _ := os.ReadFile(filepath.Join(src, f.Path))
 		cache.Put(f.ID, b)
 	}
-	for _, r := range v.Records() {
+	recs, rerr := v.Records()
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	for _, r := range recs {
 		cache.Put(r.ID, r.Data)
 		sink.PutBytes(context.Background(), "", r.ID, r.Data)
 	}

@@ -150,7 +150,11 @@ func readFile(ctx context.Context, st *storeurl.Sharded, v *c4view.View, p strin
 
 // storeView writes a view's records into a store.
 func storeView(ctx context.Context, st *storeurl.Sharded, v *c4view.View) error {
-	for _, rec := range v.Records() {
+	recs, rerr := v.Records()
+	if rerr != nil {
+		return rerr
+	}
+	for _, rec := range recs {
 		if _, err := st.PutBytes(ctx, rec.Data); err != nil {
 			return err
 		}

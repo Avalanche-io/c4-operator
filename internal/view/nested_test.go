@@ -44,7 +44,11 @@ func TestViewIDEqualsNestedManifestID(t *testing.T) {
 		t.Fatalf("view %s, nested manifest %s", v.ID, got)
 	}
 	// Every record hashes to its ID and lists x/ with x's own entry.
-	for _, r := range v.Records() {
+	recs, rerr := v.Records()
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	for _, r := range recs {
 		if c4.Identify(strings.NewReader(string(r.Data))) != r.ID {
 			t.Fatalf("record %s does not hash to its ID", r.ID)
 		}
@@ -59,7 +63,11 @@ func TestViewIDEqualsNestedManifestID(t *testing.T) {
 
 	// The same holds for a view built by Apply.
 	st := newMemStore()
-	for _, r := range v.Records() {
+	recs, rerr = v.Records()
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	for _, r := range recs {
 		st.m[r.ID] = r.Data
 	}
 	res, err := Apply(context.Background(), v.ID, []Edit{

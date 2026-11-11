@@ -229,17 +229,20 @@ func (n *Node) Walk(prefix string, fn func(dir string, n *Node) error) error {
 // Records returns every directory record of the tree rooted at n,
 // deepest first, so that writing them in order leaves the root record
 // last: when the root record exists, the whole tree does. Identify must
-// have run.
-func (n *Node) Records() []Record {
+// have run. Each record is read back as its readers read it, and one the
+// c4m library does not read back as written is an error naming the entry
+// (NotReadBack): it is never handed to a writer to store.
+func (n *Node) Records() ([]Record, error) {
 	var out []Record
-	var visit func(d *Node, depth int)
-	visit = func(d *Node, depth int) {
-		for _, c := range d.Dirs {
-			visit(c, depth+1)
+	var visit func(d *Node, depth int, dir string)
+	visit = func(d *Node, depth int, dir string) {
+		for name, c := range d.Dirs {
+			visit(c, depth+1, dir+strings.TrimSuffix(name, "/")+"/")
 		}
-		out = append(out, Record{ID: d.Entry.C4ID, Data: d.Record(), depth: depth})
+		listing := d.listing()
+		out = append(out, Record{ID: d.Entry.C4ID, Data: []byte(listing.Canonical()), depth: depth, entries: listing.Entries, dir: dir})
 	}
-	visit(n, 0)
+	visit(n, 0, "")
 	sort.SliceStable(out, func(i, j int) bool { return out[i].depth > out[j].depth })
 	// Identical subtrees appear once.
 	seen := map[c4.ID]bool{}
@@ -251,7 +254,12 @@ func (n *Node) Records() []Record {
 		seen[r.ID] = true
 		dedup = append(dedup, r)
 	}
-	return dedup
+	for _, r := range dedup {
+		if err := checkRecord(r.Data, r.entries, r.dir); err != nil {
+			return nil, err
+		}
+	}
+	return dedup, nil
 }
 
 // Record is one directory record.
@@ -259,9 +267,11 @@ type Record struct {
 	ID    c4.ID
 	Data  []byte
 	depth int
-	// entries are the listing the record was written from, kept to name
-	// the one the library does not read back, if any (checkRecord).
+	// entries are the listing the record was written from, and dir its
+	// directory in the view, kept to name the entry the library does not
+	// read back, if any (checkRecord).
 	entries []*c4m.Entry
+	dir     string
 }
 
 // ParseRecord decodes a record into its entries, projected, and checks

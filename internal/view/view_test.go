@@ -149,7 +149,10 @@ func TestRecordsRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	ram := store.NewRAM()
-	recs := v.Records()
+	recs, rerr := v.Records()
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
 	if recs[len(recs)-1].ID != v.ID {
 		t.Fatal("the root record is not last")
 	}
@@ -382,7 +385,11 @@ func TestUnsafeNamesRefused(t *testing.T) {
 // publish stores a view's records in a RAM store.
 func publish(t *testing.T, s *store.RAM, v *View) {
 	t.Helper()
-	for _, r := range v.Records() {
+	recs, rerr := v.Records()
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	for _, r := range recs {
 		putBytes(t, s, r.ID, r.Data)
 	}
 }

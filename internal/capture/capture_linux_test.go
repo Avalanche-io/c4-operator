@@ -115,7 +115,11 @@ func newFixture(t *testing.T) *fixture {
 		data, _ := os.ReadFile(filepath.Join(src, file.Path))
 		cache.Put(file.ID, data)
 	}
-	for _, r := range v.Records() {
+	recs, rerr := v.Records()
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	for _, r := range recs {
 		cache.Put(r.ID, r.Data)
 		f.sink.PutBytes(context.Background(), "", r.ID, r.Data)
 	}

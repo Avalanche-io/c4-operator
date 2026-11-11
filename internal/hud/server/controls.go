@@ -1079,7 +1079,11 @@ func (s *Server) textView(ctx context.Context, project, text string) (string, er
 	root := c4view.NewNode("")
 	root.Files["reply.md"] = c4view.FileEntry("reply.md", int64(len(b)), id, false)
 	v := c4view.FromNode(root)
-	for _, rec := range v.Records() {
+	recs, rerr := v.Records()
+	if rerr != nil {
+		return "", rerr
+	}
+	for _, rec := range recs {
 		if _, err := st.PutBytes(ctx, rec.Data); err != nil {
 			return "", err
 		}

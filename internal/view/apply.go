@@ -80,7 +80,7 @@ func Apply(ctx context.Context, parent c4.ID, edits []Edit, src RecordSource) (*
 // that describes the edits.
 func (t *atree) applied(parent c4.ID) (*Applied, error) {
 	res := &Applied{Parent: parent}
-	rootEntry := t.identify(t.root, &res.Records)
+	rootEntry := t.identify(t.root, "", &res.Records)
 	res.ID = rootEntry.C4ID
 	if res.ID == parent {
 		res.Records = nil
@@ -98,7 +98,7 @@ func (t *atree) applied(parent c4.ID) (*Applied, error) {
 	}
 	// Nothing is returned to be stored that does not read back as written.
 	for _, r := range res.Records {
-		if err := checkRecord(r.Data, r.entries); err != nil {
+		if err := checkRecord(r.Data, r.entries, r.dir); err != nil {
 			return nil, err
 		}
 	}
@@ -267,7 +267,7 @@ func (t *atree) apply(e Edit) error {
 
 // identify recomputes the entries of dirty directories bottom-up and
 // collects their records, deepest first.
-func (t *atree) identify(n *anode, records *[]Record) *c4m.Entry {
+func (t *atree) identify(n *anode, dir string, records *[]Record) *c4m.Entry {
 	if !n.dirty {
 		if n.entry == nil {
 			// The untouched root.
@@ -285,12 +285,12 @@ func (t *atree) identify(n *anode, records *[]Record) *c4m.Entry {
 	}
 	sort.Strings(names)
 	for _, k := range names {
-		children = append(children, t.identify(n.dirs[k], records))
+		children = append(children, t.identify(n.dirs[k], dir+strings.TrimSuffix(k, "/")+"/", records))
 	}
 	m := listingOf(children)
 	n.entry = dirEntry(n.name, m)
 	if n.entry.C4ID != n.base {
-		*records = append(*records, Record{ID: n.entry.C4ID, Data: []byte(m.Canonical()), entries: m.Entries})
+		*records = append(*records, Record{ID: n.entry.C4ID, Data: []byte(m.Canonical()), entries: m.Entries, dir: dir})
 	}
 	return n.entry
 }

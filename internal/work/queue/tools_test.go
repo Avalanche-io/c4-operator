@@ -598,7 +598,11 @@ func storeToolTree(t *testing.T, st *storeurl.Sharded, doc string) string {
 	root := c4view.NewNode("")
 	root.Files["tool.yaml"] = c4view.FileEntry("tool.yaml", int64(len(doc)), id, false)
 	v := c4view.FromNode(root)
-	for _, rec := range v.Records() {
+	recs, rerr := v.Records()
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	for _, rec := range recs {
 		if _, err := st.PutBytes(ctx, rec.Data); err != nil {
 			t.Fatal(err)
 		}

@@ -93,7 +93,11 @@ func TestCaptureThroughAnyWalk(t *testing.T) {
 		data, _ := os.ReadFile(filepath.Join(src, f.Path))
 		cache.Put(f.ID, data)
 	}
-	for _, r := range v.Records() {
+	recs, rerr := v.Records()
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	for _, r := range recs {
 		cache.Put(r.ID, r.Data)
 		sink.PutBytes(context.Background(), "", r.ID, r.Data)
 	}
@@ -206,7 +210,11 @@ func TestMetadataOnlyChangeNeedsNoBytes(t *testing.T) {
 		data, _ := os.ReadFile(filepath.Join(src, f.Path))
 		sink.PutBytes(context.Background(), "", f.ID, data)
 	}
-	for _, r := range v.Records() {
+	recs, rerr := v.Records()
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	for _, r := range recs {
 		cache.Put(r.ID, r.Data)
 	}
 	var tool view.File

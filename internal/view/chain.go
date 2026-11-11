@@ -228,7 +228,7 @@ func ApplyPatch(ctx context.Context, base c4.ID, patch *c4m.Manifest, src Record
 		return nil, err
 	}
 	res := &Applied{Parent: base}
-	root := t.identify(t.root, &res.Records)
+	root := t.identify(t.root, "", &res.Records)
 	res.ID = root.C4ID
 	return res, nil
 }
