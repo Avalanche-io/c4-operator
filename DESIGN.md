@@ -795,8 +795,16 @@ credentials.
     own store is allowed. A hand-written ConfigMap c4m that lists another
     project's IDs resolves against this project's store, where those objects
     do not exist, and the Materialization fails;
-  - with scope `Grants`, the source (or, for a changeset, its base) must be a
-    granted tree, the include filter is intersected with the grant's paths,
+  - with scope `Grants`, the source must be a granted tree, matched only by
+    IDs computed from content, never by one a line states: the source's own
+    byte ID; for a changeset or a chain, the view it starts from (its root
+    record read and hashed) and the view its sections make (applied over the
+    base's records, each read hashed); for any other description, the view
+    it resolves to with no filter, whatever the include, remembered by the
+    source's byte ID since a source never changes. A description's root
+    lines as stated (RootID) are not one: a hand-made c4m can copy a granted
+    view's root lines over other content. The include filter is then
+    intersected with the grant's paths,
     and an include that the grant's paths do not reach is refused rather
     than mounted empty. A grant names a tree, not files: a c4m that lists
     exactly the granted files is a different tree and is refused. Removing

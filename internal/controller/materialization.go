@@ -52,6 +52,9 @@ type MaterializationReconciler struct {
 	Signer *provenance.Signer
 	// Roots are the farm's signing roots, for checking source records.
 	Roots *x509.CertPool
+	// views remembers the unfiltered view a description resolves to, for
+	// grant lookup (grantIDs).
+	views viewMemo
 }
 
 // Reconcile resolves one Materialization.
@@ -108,9 +111,26 @@ func (r *MaterializationReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	start := time.Now()
-	// With grants, the grant covering the source (or, for a changeset, its
-	// base) limits the paths; a source no grant covers is refused.
-	g := grantFor(p, sourceID)
+	// With grants, the grant covering the source limits the paths, and a
+	// source no grant covers is refused. A grant matches only IDs computed
+	// from content (grantIDs): the source's own, and the views it starts
+	// from and makes.
+	var g *c4v1.Grant
+	if p.Restricted() {
+		if len(p.Spec.Grants) == 0 {
+			return r.fail(ctx, orig, &mat, "NotGranted",
+				fmt.Errorf("project %s has scope Grants and no grants", p.Name), 0)
+		}
+		ids, err := r.grantIDs(ctx, store, data, sourceID)
+		if err != nil {
+			return r.fail(ctx, orig, &mat, "NotGranted",
+				fmt.Errorf("source %s could not be checked against the project's grants: %w", sourceID, err), r.Retry)
+		}
+		if g = grantFor(p, ids...); g == nil {
+			return r.fail(ctx, orig, &mat, "NotGranted",
+				fmt.Errorf("project %s may materialize only granted trees, and neither source %s nor a view it starts from or makes is one of them", p.Name, sourceID), 0)
+		}
+	}
 	f, err := intersect(include, g)
 	if err != nil {
 		return r.fail(ctx, orig, &mat, "NotGranted", err, 0)
@@ -118,23 +138,6 @@ func (r *MaterializationReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	res, err := resolve(f)
 	if err != nil {
 		return r.fail(ctx, orig, &mat, "ResolveFailed", err, r.Retry)
-	}
-	if p.Restricted() && g == nil {
-		g = grantFor(p, res.Chain[0].ID, res.RootID)
-		if g == nil && len(p.Spec.Grants) == 0 {
-			return r.fail(ctx, orig, &mat, "NotGranted",
-				fmt.Errorf("project %s has scope Grants and no grants", p.Name), 0)
-		}
-		if g == nil {
-			return r.fail(ctx, orig, &mat, "NotGranted",
-				fmt.Errorf("project %s may materialize only granted trees, and neither source %s nor its base %s is one of them", p.Name, sourceID, res.Chain[0].ID), 0)
-		}
-		if f, err = intersect(include, g); err != nil {
-			return r.fail(ctx, orig, &mat, "NotGranted", err, 0)
-		}
-		if res, err = resolve(f); err != nil {
-			return r.fail(ctx, orig, &mat, "ResolveFailed", err, r.Retry)
-		}
 	}
 
 	v := res.View()
