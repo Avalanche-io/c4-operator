@@ -128,8 +128,8 @@ func TestGrantsMatchOnlyComputedIDs(t *testing.T) {
 	})
 }
 
-// A store that serves the wrong bytes for an ID fails the grant check; it
-// never matches.
+// A store that serves the wrong bytes for an ID fails the grant check (a
+// resolve failure); it never matches.
 func TestGrantCheckRefusesBytesThatAreNotTheirID(t *testing.T) {
 	ctx := context.Background()
 	st := newStore(t)
@@ -167,7 +167,9 @@ func TestGrantCheckRefusesBytesThatAreNotTheirID(t *testing.T) {
 	ns := newNamespace(t, "swap")
 	putProject(t, "swap", []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: v.ID.String()}})
 	putMat(t, ns, "swapped", byID(csID))
-	m := waitMat(t, ns, "swapped", c4v1.PhaseFailed, "NotGranted")
+	// It fails as a resolve that read bad bytes does, not as a grant that
+	// did not match.
+	m := waitMat(t, ns, "swapped", c4v1.PhaseFailed, "ResolveFailed")
 	if !strings.Contains(readyMessage(m), "not this ID's") {
 		t.Fatalf("message %q", readyMessage(m))
 	}
@@ -203,14 +205,14 @@ func TestGrantIDsUnit(t *testing.T) {
 		t.Fatal(err)
 	}
 	reads := cs.n
-	if reads == 0 || first[1] != v.ID {
+	if reads == 0 || len(first) != 3 || first[2] != v.ID {
 		t.Fatalf("the first lookup read %d objects and gave %v; want reads and the view %s", reads, first, v.ID)
 	}
 	second, err := r.grantIDs(ctx, cs, desc, c4.Identify(bytes.NewReader(desc)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cs.n != reads || len(first) != 2 || first[1] != second[1] {
+	if cs.n != reads || first[2] != second[2] {
 		t.Fatalf("a second lookup read %d objects more and gave %v, after %v", cs.n-reads, second, first)
 	}
 
@@ -232,5 +234,89 @@ func TestGrantIDsUnit(t *testing.T) {
 	}
 	if len(ids) != 3 || ids[1] != view.EmptyID() || ids[2] != res.View().ID {
 		t.Fatalf("a changeset over the empty tree gave %v; its base %s and the view %s", ids, view.EmptyID(), res.View().ID)
+	}
+}
+
+// The grant is matched against what the resolver mounts, not against a
+// second reading of the patch. A changeset over an ungranted view B (a
+// granted G and one more file) that restates that file with another mode
+// and date is read by view.ApplyPatch as removing it, which would make G,
+// and by the resolver as keeping it, which mounts B (the independent
+// reader of this branch). It is refused.
+func TestAGrantIsMatchedAgainstWhatIsMounted(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	g := st.ingest(t, show("restate"))
+	secret := []byte("the unreleased cut")
+	sid, err := st.store.PutBytes(ctx, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := view.Apply(ctx, g.ID, []view.Edit{{Path: "secret.mov", Entry: view.FileEntry("", int64(len(secret)), sid, false)}}, view.StoreRecords(st.store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range b.Records {
+		st.store.PutBytes(ctx, r.Data)
+	}
+	patch := c4m.NewManifest()
+	patch.Base = b.ID
+	patch.AddEntry(&c4m.Entry{Name: "secret.mov", Mode: 0o644, Size: int64(len(secret)), Timestamp: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC), C4ID: sid})
+	cs, err := view.EncodeChangeset(b.ID, patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ns := newNamespace(t, "restate")
+	putProject(t, "restate", []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: g.ID.String()}})
+	putMat(t, ns, "restated", byConfigMap(t, ns, "restated", cs))
+	waitMat(t, ns, "restated", c4v1.PhaseFailed, "NotGranted")
+}
+
+// A changeset whose base is itself a stored changeset (the resolver
+// follows such a chain) is granted by the view it makes, as it was before.
+func TestAChangesetOverAStoredChangesetIsGrantedByItsView(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	g := st.ingest(t, show("stack"))
+	put := func(base c4.ID, path, body string) *view.Applied {
+		id, err := st.store.PutBytes(ctx, []byte(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, err := view.Apply(ctx, base, []view.Edit{{Path: path, Entry: view.FileEntry("", int64(len(body)), id, false)}}, view.StoreRecords(st.store))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range a.Records {
+			st.store.PutBytes(ctx, r.Data)
+		}
+		return a
+	}
+	one := put(g.ID, "shots/sh010/plates/sh010.1005.exr", "frame 1005")
+	c1, err := st.store.PutBytes(ctx, one.Changeset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The second changeset names the first, stored, as its base: its patch,
+	// written over that changeset's ID with the library's encoder.
+	two, err := view.ReadChain(put(one.ID, "shots/sh010/plates/sh010.1006.exr", "frame 1006").Changeset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs2, err := view.EncodeChangeset(c1, two.Sections[0].Patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, _ := view.NewFilter(nil)
+	res, err := view.FromBytes(cs2, st.store, all)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ns := newNamespace(t, "stack")
+	putProject(t, "stack", []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: res.View().ID.String()}})
+	putMat(t, ns, "stacked", byConfigMap(t, ns, "stacked", cs2))
+	m := waitMat(t, ns, "stacked", c4v1.PhaseReady, "Ready")
+	if m.Status.ViewID != res.View().ID.String() {
+		t.Fatalf("mounted %s, the view it makes is %s", m.Status.ViewID, res.View().ID)
 	}
 }

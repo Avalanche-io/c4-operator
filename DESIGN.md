@@ -797,13 +797,17 @@ credentials.
     do not exist, and the Materialization fails;
   - with scope `Grants`, the source must be a granted tree, matched only by
     IDs computed from content, never by one a line states: the source's own
-    byte ID; for a changeset or a chain, the view it starts from (its root
-    record read and hashed) and the view its sections make (applied over the
-    base's records, each read hashed); for any other description, the view
-    it resolves to with no filter, whatever the include, remembered by the
-    source's byte ID since a source never changes. A description's root
-    lines as stated (RootID) are not one: a hand-made c4m can copy a granted
-    view's root lines over other content. The include filter is then
+    byte ID, and the views the resolver makes of it with no filter,
+    whatever the include, every read hashed: the first of its chain (a
+    changeset's base) and the last (the view it makes, or a plain
+    description's own). The same resolver mounts it, so the grant is
+    matched against what is mounted: a second reading of a patch can differ
+    (`view.ApplyPatch` reads an entry restated with another mode or date as
+    a removal where the resolver keeps it). It is resolved once per source
+    and remembered by the source's byte ID, since a source never changes. A
+    description's root lines as stated (RootID) are not one: a hand-made
+    c4m can copy a granted view's root lines over other content. The
+    include filter is then
     intersected with the grant's paths,
     and an include that the grant's paths do not reach is refused rather
     than mounted empty. A grant names a tree, not files: a c4m that lists

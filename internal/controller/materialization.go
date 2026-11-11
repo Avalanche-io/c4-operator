@@ -113,8 +113,8 @@ func (r *MaterializationReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	start := time.Now()
 	// With grants, the grant covering the source limits the paths, and a
 	// source no grant covers is refused. A grant matches only IDs computed
-	// from content (grantIDs): the source's own, and the views it starts
-	// from and makes.
+	// from content (grantIDs): the source's own, and the views the resolver
+	// makes of it unfiltered, its first and its last.
 	var g *c4v1.Grant
 	if p.Restricted() {
 		if len(p.Spec.Grants) == 0 {
@@ -123,8 +123,8 @@ func (r *MaterializationReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 		ids, err := r.grantIDs(ctx, store, data, sourceID)
 		if err != nil {
-			return r.fail(ctx, orig, &mat, "NotGranted",
-				fmt.Errorf("source %s could not be checked against the project's grants: %w", sourceID, err), r.Retry)
+			return r.fail(ctx, orig, &mat, "ResolveFailed",
+				fmt.Errorf("resolving source %s, with every read checked, to match it against the project's grants: %w", sourceID, err), r.Retry)
 		}
 		if g = grantFor(p, ids...); g == nil {
 			return r.fail(ctx, orig, &mat, "NotGranted",
