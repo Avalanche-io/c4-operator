@@ -284,6 +284,20 @@ type Record struct {
 // ParseRecord decodes a record into its entries, projected, and checks
 // that every name is safe to create on disk.
 func ParseRecord(data []byte) ([]*c4m.Entry, error) {
+	raw, err := parseRecordRaw(data)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*c4m.Entry, len(raw))
+	for i, e := range raw {
+		out[i] = Project(e)
+	}
+	return out, nil
+}
+
+// parseRecordRaw is ParseRecord's decode and checks, with each entry as
+// the record holds it.
+func parseRecordRaw(data []byte) ([]*c4m.Entry, error) {
 	m, err := c4m.NewDecoder(bytes.NewReader(data)).Decode()
 	if err != nil {
 		return nil, fmt.Errorf("parse record: %w", err)
@@ -302,7 +316,7 @@ func ParseRecord(data []byte) ([]*c4m.Entry, error) {
 		if e.IsSequence {
 			return nil, fmt.Errorf("record entry %q is a sequence", e.Name)
 		}
-		out = append(out, Project(e))
+		out = append(out, e)
 	}
 	return out, nil
 }

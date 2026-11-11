@@ -2,6 +2,7 @@ package view
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -100,6 +101,37 @@ func loadInto(ctx context.Context, n *Node, id c4.ID, src RecordSource, workers 
 		level = next
 	}
 	return nil
+}
+
+// ErrNotAView is the error for a record edited as a view's that holds an
+// entry a view does not: a date, a mode other than the executable bit, a
+// link's size or C4 ID. Such a record is a description's, and a patch over
+// a description is read as the description records it, by the resolver.
+var ErrNotAView = errors.New("not a view's record")
+
+// fetchViewRecord is fetchRecord for a tree edited as a view (Apply,
+// ApplyPatch, ApplyPatchFrom), which compares a patch entry with the
+// record's entries as projected: it refuses a record any of whose entries
+// is not already projected, since the comparison would then be against
+// what the record does not hold. It checks only the records the edit
+// loads, the ones along its paths, one field comparison per entry.
+func fetchViewRecord(ctx context.Context, src RecordSource, id c4.ID) ([]*c4m.Entry, error) {
+	data, err := src.Record(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("record %s: %w", id, err)
+	}
+	raw, err := parseRecordRaw(data)
+	if err != nil {
+		return nil, fmt.Errorf("record %s: %w", id, err)
+	}
+	out := make([]*c4m.Entry, len(raw))
+	for i, e := range raw {
+		out[i] = Project(e)
+		if !entriesIdentical(e, out[i]) {
+			return nil, fmt.Errorf("record %s: %w: %q is not as a view holds it", id, ErrNotAView, e.Name)
+		}
+	}
+	return out, nil
 }
 
 func fetchRecord(ctx context.Context, src RecordSource, id c4.ID) ([]*c4m.Entry, error) {

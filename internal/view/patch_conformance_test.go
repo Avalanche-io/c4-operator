@@ -3,6 +3,7 @@ package view
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -236,5 +237,83 @@ func TestAChangesetOverADescriptionReadsItAsRecorded(t *testing.T) {
 		if _, ok := res.View().Root.Dirs["sub/"]; !ok {
 			t.Errorf("restated %s: sub/ is gone", c.name)
 		}
+		// ApplyPatch takes only a view as its base, and says so.
+		if _, err := ApplyPatch(context.Background(), rootID, p, StoreRecords(st)); !errors.Is(err, ErrNotAView) {
+			t.Errorf("restated %s: ApplyPatch over a description: %v, want ErrNotAView", c.name, err)
+		}
+	}
+}
+
+// The two patch readers agree: every case of c4's apply-from vector, its
+// patch applied over its own base, written as a view's changeset
+// (projected) and as the vector has it (dates and all), goes through
+// ApplyPatch and the resolver, and the two views must be one. Each reader
+// is held to the vector's expected views as well (above, and the restated
+// cases compare the two too); this holds them to each other on every
+// input, so a change to one that no expected view sees still shows.
+func TestThePatchReadersAgree(t *testing.T) {
+	ctx := context.Background()
+	st := objStore{}
+	all, _ := NewFilter(nil)
+	cases, _ := filepath.Glob(filepath.Join("testdata", "apply-from-vector", "*", "patch.c4m"))
+	sort.Strings(cases)
+	compared := 0
+	for _, pf := range cases {
+		dir := filepath.Dir(pf)
+		name := filepath.Base(dir)
+		read := func(n string) []byte {
+			b, err := os.ReadFile(filepath.Join(dir, n))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return b
+		}
+		res, err := FromBytes(read("base.c4m"), st, all)
+		if err != nil {
+			t.Fatal(err)
+		}
+		base := res.View()
+		recs, _ := base.Records()
+		for _, r := range recs {
+			st[r.ID] = r.Data
+		}
+		ch, err := ReadChain(read("patch.c4m"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		projected, raw := c4m.NewManifest(), c4m.NewManifest()
+		for _, e := range ch.Sections[0].Patch.Entries {
+			pe := Project(e)
+			pe.Depth = e.Depth
+			projected.AddEntry(pe)
+			cp := *e
+			raw.AddEntry(&cp)
+		}
+		for _, form := range []struct {
+			name  string
+			patch *c4m.Manifest
+		}{{"projected", projected}, {"as written", raw}} {
+			a, err := ApplyPatch(ctx, base.ID, form.patch, StoreRecords(st))
+			if err != nil {
+				t.Errorf("%s, %s: ApplyPatch: %v", name, form.name, err)
+				continue
+			}
+			cs, err := EncodeChangeset(base.ID, form.patch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rr, err := FromBytes(cs, st, all)
+			if err != nil {
+				t.Errorf("%s, %s: the resolver: %v", name, form.name, err)
+				continue
+			}
+			if rr.View().ID != a.ID {
+				t.Errorf("%s, %s: ApplyPatch made %s, the resolver %s", name, form.name, a.ID, rr.View().ID)
+			}
+			compared++
+		}
+	}
+	if compared != 2*len(cases) || len(cases) < 7 {
+		t.Fatalf("compared %d of %d vector cases in two forms", compared, len(cases))
 	}
 }

@@ -164,7 +164,7 @@ func (t *atree) load(n *anode) error {
 	if n.base.IsNil() || n.base == emptyID {
 		return nil
 	}
-	entries, err := fetchRecord(t.ctx, t.src, n.base)
+	entries, err := fetchViewRecord(t.ctx, t.src, n.base)
 	if err != nil {
 		return err
 	}
@@ -379,7 +379,7 @@ func (t *atree) recall(n *anode, was c4.ID) error {
 	if was.IsNil() || was == emptyID {
 		return nil
 	}
-	entries, err := fetchRecord(t.ctx, t.src, was)
+	entries, err := fetchViewRecord(t.ctx, t.src, was)
 	if err != nil {
 		return err
 	}
