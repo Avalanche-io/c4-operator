@@ -709,11 +709,16 @@ func (im *importer) wait() error {
 // belong to the commit before, which a failed import can leave behind (its
 // changes uploaded, then a record found lost from the store, before Remake
 // imports the parent again), so they finish first, and the switch is made
-// under the lock their counting takes.
+// under the lock their counting takes. Their error, if one failed, is that
+// attempt's, which has already returned its own result: it is cleared, so
+// it is not reported against c. A commit that imports whole waits for its
+// writes before it ends (finish), so in an import that runs on there is
+// nothing to clear.
 func (im *importer) begin(c *Commit) {
 	im.up.wg.Wait()
 	im.up.mu.Lock()
 	im.cur = c
+	im.up.err = nil
 	im.up.mu.Unlock()
 }
 
