@@ -314,7 +314,7 @@ func (im *importer) close() {
 // importBase imports one commit in full from ls-tree, over the empty view.
 func (im *importer) importBase(c commit) (*Commit, error) {
 	start := time.Now()
-	im.cur = &Commit{Commit: c.sha, Ref: im.opts.Ref, Parent: c.parent, Base: true, ParentView: view.EmptyID()}
+	im.begin(&Commit{Commit: c.sha, Ref: im.opts.Ref, Parent: c.parent, Base: true, ParentView: view.EmptyID()})
 	list, err := lsTree(im.ctx, im.opts.Repo, c.sha)
 	if err != nil {
 		return nil, err
@@ -374,7 +374,7 @@ func (im *importer) importDiffs(history []commit, prev c4.ID) (c4.ID, error) {
 				return prev, err
 			}
 		}
-		im.cur = &Commit{Commit: c.sha, Ref: im.opts.Ref, Parent: c.parent, ParentView: prev}
+		im.begin(&Commit{Commit: c.sha, Ref: im.opts.Ref, Parent: c.parent, ParentView: prev})
 		edits, err := im.changes(c.sha, changes)
 		if err != nil {
 			return prev, err
@@ -703,6 +703,18 @@ func (im *importer) wait() error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	return u.err
+}
+
+// begin makes c the commit writes count toward. Writes still in flight
+// belong to the commit before, which a failed import can leave behind (its
+// changes uploaded, then a record found lost from the store, before Remake
+// imports the parent again), so they finish first, and the switch is made
+// under the lock their counting takes.
+func (im *importer) begin(c *Commit) {
+	im.up.wg.Wait()
+	im.up.mu.Lock()
+	im.cur = c
+	im.up.mu.Unlock()
 }
 
 // count adds one object to the commit's stats. The caller holds im.up.mu.
