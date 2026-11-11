@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/Avalanche-io/c4"
@@ -47,6 +48,10 @@ type indexWatch struct {
 	// Book is the last head of the farm book this machine checked, on a
 	// farm that keeps one (farmbook.CheckPage).
 	Book farmbook.LastHead `json:"book"`
+	// pending is how many entries the last page read held waiting for
+	// the book's seal: never read as the farm's record, only as a reason
+	// to look again (CheckOwner). Not kept.
+	pending int
 	// Seen are the devices the index booked that this machine has read,
 	// so a renewal is not a new device; Owner is the farm's owner key as
 	// the index books it, its first device enrolled on the installer.
@@ -292,6 +297,7 @@ func readBook(ctx context.Context, c *Client, roots *x509.CertPool, farm string,
 		}
 		w.Book = last
 		if !p.More {
+			w.pending = len(p.Pending)
 			return out, nil
 		}
 	}
@@ -302,13 +308,23 @@ func readBook(ctx context.Context, c *Client, roots *x509.CertPool, farm string,
 // checked as each run's reading is, without moving what this machine
 // keeps. "" when the index books none.
 func FarmOwner(ctx context.Context, c *Client, st keystore.Store, cfg *people.Config) (string, error) {
+	owner, _, err := farmOwner(ctx, c, st, cfg)
+	return owner, err
+}
+
+// farmOwner is FarmOwner, and how many entries the farm book held pending
+// its seal when it was read (0 on a farm without a book). A device entry
+// whose record does not load is an error, not an entry that books no
+// owner: when no owner is found it is the answer, so a read that failed
+// never reads as a farm with no owner.
+func farmOwner(ctx context.Context, c *Client, st keystore.Store, cfg *people.Config) (string, int, error) {
 	mine, err := LoadCert(st, keystore.Device)
 	if err != nil || mine == nil {
-		return "", err
+		return "", 0, err
 	}
 	roots, err := farmRoots(mine, cfg.Farm)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	w := &indexWatch{}
 	var entries []*people.Entry
@@ -318,30 +334,59 @@ func FarmOwner(ctx context.Context, c *Client, st keystore.Store, cfg *people.Co
 		entries, err = readIndex(ctx, c, roots, cfg.Farm, w)
 	}
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
+	var unread error
 	for _, e := range entries {
 		if e.Kind != people.KindDevice || e.TouchFor != "" {
 			continue
 		}
-		if d, err := deviceRecord(ctx, c, roots, e.Record); err == nil && d.Evidence == schema.EvidenceInstaller && d.TouchFor == "" {
-			return e.Device, nil
+		d, err := deviceRecord(ctx, c, roots, e.Record)
+		if err != nil {
+			if unread == nil {
+				unread = fmt.Errorf("device %.16s: %w", e.Device, err)
+			}
+			continue
+		}
+		if d.Evidence == schema.EvidenceInstaller && d.TouchFor == "" {
+			return e.Device, w.pending, nil
 		}
 	}
-	return "", nil
+	return "", w.pending, unread
 }
 
 // CheckOwner checks the farm's owner key, as its index books it, against
 // the one this machine pinned when up enrolled it: a farm whose owner key
 // is another is refused, whatever its HUD says. Nothing is pinned on a
 // farm up didn't make.
+//
+// On a farm with a farm book, an entry is the farm's record only once the
+// book seals it, seconds after it is written (farmbook.DefaultSealEvery):
+// up checks the owner it has just enrolled before the seal, and a farm
+// that books no owner yet while entries wait for the seal is read again
+// until it seals them, for at most ownerSealWait. The entries waiting are
+// never read as the record, only as the reason to look again; a farm that
+// books another owner, or none with nothing waiting, is refused at once.
 func CheckOwner(ctx context.Context, c *Client, st keystore.Store, cfg *people.Config, pinned string) error {
 	if pinned == "" {
 		return nil
 	}
-	owner, err := FarmOwner(ctx, c, st, cfg)
+	deadline := time.Now().Add(ownerSealWait)
+	owner, pending, err := farmOwner(ctx, c, st, cfg)
+	for err == nil && owner == "" && pending > 0 && time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(ownerSealPoll):
+		}
+		owner, pending, err = farmOwner(ctx, c, st, cfg)
+	}
 	if err != nil {
 		return fmt.Errorf("the farm's owner key: %w", err)
+	}
+	if owner == "" && pending > 0 {
+		return fmt.Errorf("%w: its farm book sealed no owner within %s, with %d entries still waiting for its seal, and this machine pinned %s when up enrolled it; run up again once the book has sealed",
+			ErrOwnerKey, ownerSealWait, pending, pinned)
 	}
 	if owner != pinned {
 		if owner == "" {
@@ -352,6 +397,14 @@ func CheckOwner(ctx context.Context, c *Client, st keystore.Store, cfg *people.C
 	}
 	return nil
 }
+
+// ownerSealWait is how long CheckOwner waits for a farm book to seal the
+// entries it holds pending: twice the longest seal interval a farm may
+// set. ownerSealPoll is how often it looks.
+var (
+	ownerSealWait = 2 * farmbook.MaxSealEvery
+	ownerSealPoll = 250 * time.Millisecond
+)
 
 // certFarm is the farm a certificate was issued at: its CA's farm ID,
 // from the chain itself, never the HUD's word.
