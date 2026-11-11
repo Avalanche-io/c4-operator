@@ -586,30 +586,55 @@ func TestALostChangesetThatStaysLost(t *testing.T) {
 // back either, to before the line that recorded the parent, so that the
 // next import goes on from a view it can read.
 func TestTheCutLeft(t *testing.T) {
-	// p1 has three lines before c: imported under dev with a window of one
-	// commit, moved to on release, imported again under main. The parent
-	// stays known while any of them is left, so the cut is to before the
-	// first.
-	prior := []gitimport.Commit{
-		{Commit: "p0", Ref: "refs/heads/main"},
-		{Commit: "p1", Ref: "refs/heads/dev", Base: true},
-		{Commit: "p1", Ref: "refs/heads/release", RefOnly: true},
-		{Commit: "p1", Ref: "refs/heads/main", Parent: "p0"},
-		{Commit: "c", Ref: "refs/heads/main", Parent: "p1"},
-		{Commit: "p1", Ref: "refs/heads/later", RefOnly: true},
+	v := func(s string) c4.ID { return c4.Identify(strings.NewReader(s)) }
+	pv := v("the parent's view")
+	main := func(commit, parent string, view c4.ID) gitimport.Commit {
+		return gitimport.Commit{Commit: commit, Ref: "refs/heads/main", Parent: parent, View: view}
 	}
-	lost := &gitimport.CannotRemake{Commit: "c", Line: 5}
-	for _, c := range []struct {
-		name string
-		err  error
-		line int
+	c := main("c", "p1", v("c"))
+	c.ParentView = pv
+	gone := fmt.Errorf("x: %w", &gitimport.ParentNotRemade{Parent: "p1"})
+	for _, k := range []struct {
+		name  string
+		prior []gitimport.Commit
+		err   error
+		line  int
 	}{
-		{"the commit is gone", errors.New("commit c is not in the repository"), 5},
-		{"the parent could not be put back", fmt.Errorf("x: %w", &gitimport.ParentNotRemade{Parent: "p1"}), 2},
-		{"a parent no line records", &gitimport.ParentNotRemade{Parent: "elsewhere"}, 5},
+		{"the commit is gone: before its own line",
+			[]gitimport.Commit{main("p0", "", v("p0")), main("p1", "p0", pv), c},
+			errors.New("commit c is not in the repository"), 3},
+		{"the parent could not be put back: before its only line",
+			[]gitimport.Commit{main("p0", "", v("p0")), main("p1", "p0", pv), c}, gone, 2},
+		// The parent stays known while any line names it, so the cut is to
+		// before the first: imported under dev with a window of one commit,
+		// moved to on release, imported again under main.
+		{"before the first of the parent's lines, an import in full",
+			[]gitimport.Commit{main("p0", "", v("p0")),
+				{Commit: "p1", Ref: "refs/heads/dev", Base: true, View: pv},
+				{Commit: "p1", Ref: "refs/heads/release", RefOnly: true, View: pv},
+				main("p1", "p0", pv), c,
+				{Commit: "p1", Ref: "refs/heads/later", RefOnly: true, View: pv}}, gone, 2},
+		{"before the first of the parent's lines, one that moved a ref to it",
+			[]gitimport.Commit{main("p0", "", v("p0")),
+				{Commit: "p1", Ref: "refs/heads/release", RefOnly: true, View: pv},
+				main("p1", "p0", pv), c}, gone, 2},
+		// The parent changed nothing the view records (an empty commit, a
+		// submodule bump), so the commit before it has the same view, and
+		// an import would go on from that line: the cut is to before it.
+		{"before an earlier line with the parent's view",
+			[]gitimport.Commit{main("x", "", pv), main("p1", "x", pv), c}, gone, 1},
+		{"a parent no line names, a view no line has",
+			[]gitimport.Commit{main("p0", "", v("p0")), c},
+			&gitimport.ParentNotRemade{Parent: "elsewhere"}, 2},
 	} {
-		if got := cutLeft(prior, lost, c.err); !strings.Contains(got, fmt.Sprintf("cut the mapping back to before line %d and", c.line)) {
-			t.Errorf("%s: %q, want the cut to before line %d", c.name, got, c.line)
+		lost := &gitimport.CannotRemake{Commit: "c", Line: len(k.prior)}
+		for i, l := range k.prior {
+			if l.Commit == "c" {
+				lost.Line = i + 1
+			}
+		}
+		if got := cutLeft(k.prior, lost, k.err); !strings.Contains(got, fmt.Sprintf("cut the mapping back to before line %d and", k.line)) {
+			t.Errorf("%s: %q, want the cut to before line %d", k.name, got, k.line)
 		}
 	}
 }

@@ -240,7 +240,7 @@ type RecordedChain struct {
 // reimport is the way out when the mapping cannot be read from one line
 // on. The cut takes every ref's lines from there on with it, so every such
 // ref has to be imported again.
-const reimport = "cut the mapping back to before line %d and import again every ref that has a line from there on: their commits are imported again to the same changesets, and until a ref is imported again it is published as the shorter mapping has it"
+const reimport = "cut the mapping back to before line %d and import again every ref that has a line from there on: their commits are imported again, and until a ref is imported again it is published as the shorter mapping has it"
 
 // ChainRecorded returns what the mapping m records of ref's chain file,
 // and false when it records none. The mapping is the authority for a

@@ -1131,8 +1131,8 @@ import step, so import must be fast and push-driven.
     recorded chain and is taken, and everything served, sealed or exported
     from it is written again by the library, so no other form leaves the
     service. The store is not read for it. On a chain of 1,024 sections
-    (417 KB) it adds 14 ms to an open of 25 ms (measured on a Mac, by me
-    and by the reviewer).
+    (417 KB) it adds 14 ms to an open of 25 ms (measured twice, on a
+    Mac).
   - *A reader is served the same way,* from one read of the file, with
     nothing written, and by the ref's exact name when the mapping has it.
     That costs a read of the whole mapping for each request, as an import
@@ -1201,28 +1201,30 @@ import step, so import must be fast and push-driven.
     stay in the store, named by nothing. Each of those errors names what is
     left, the cut below, with what it costs the other refs: to before the
     changeset's line, or, when the parent's view could not be put back, to
-    before the first line that names the parent (it stays known by its view
-    while any line names it: an import under another ref, one in full, a line
-    that moved a ref to it), so the next import goes on from a view it can
-    read. That cut assumes the views before it can be read along the paths the
-    next commits change; a record of an earlier view lost from the store stops
-    the next import as it does on main, and nothing here makes it again. A
-    changeset that is still not in the store after it was made again (a store
-    that says it holds what it does not) is an error after one try, not a
-    loop.
+    before the first line that names the parent or has its view. The parent
+    stays known by its view while any line names it (an import under another
+    ref, one in full, a line that moved a ref to it), and a commit that
+    changed nothing the view records (an empty commit, a submodule bump) has
+    its parent's view, so an import could go on from either; cut before both,
+    the next import goes on from a view it can read. That cut assumes the
+    views before it can be read along the paths the next commits change; a
+    record of an earlier view lost from the store stops the next import as it
+    does on main, and nothing here makes it again. A changeset that is still
+    not in the store after it was made again (a store that says it holds what
+    it does not) is an error after one try, not a loop.
   - *A wrong object is not written over.* A store keeps the object it has
     under a C4 ID, so a changeset the store holds wrongly cannot be made
     again until the object is removed; the error says so, and the next
     import then makes it.
-  - *A mapping line that does not parse is the one cut left.* A whole line
-    that does not parse (zeros under later lines) stops every import and
-    reader of the repository, and names the line to cut the mapping back
-    to. The cut takes every ref's lines from there on, so every such ref
-    has to be imported again, and the error says so. Until one is, it is
-    published as the shorter mapping has it: at an earlier commit, or not
-    at all, and a ref deleted since shows again until its deletion is sent
-    again. Imported again, the commits come back to the same views and
-    changesets.
+  - *A mapping line that does not parse.* A whole line that does not parse
+    (zeros under later lines) stops every import and reader of the repository,
+    and names the line to cut the mapping back to. The cut takes every ref's
+    lines from there on, so every such ref has to be imported again, and the
+    error says so. Until one is, it is published as the shorter mapping has
+    it: at an earlier commit, or not at all, and a ref deleted since shows
+    again until its deletion is sent again. Imported again, the commits come
+    back to the same views and changesets, except where a c4git object has
+    arrived in or been lost from the stores since.
 - **c4git files** are 90-byte C4 IDs in git. The importer uses the ID
   directly, copies the object from the c4git store without rehashing (c4git
   verified it at `git add`), and takes its size from the store.
