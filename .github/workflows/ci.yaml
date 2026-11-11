@@ -83,6 +83,7 @@ jobs:
     # What runs only on macOS: APFS clone workspaces (checkout), capture
     # and the object cache on APFS. Skips are held to the allow-list.
     - name: checkout, capture and the object cache on APFS
+      shell: bash  # -eo pipefail, so a go test that fails to run fails the step
       run: go test -json -count=1 ./internal/checkout/... ./internal/capture/... ./internal/objcache/... | go run ./hack/skips -allow hack/skips/allowed.txt
 
   linux-privileged:

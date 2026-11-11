@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -942,5 +943,45 @@ func TestGetAsksForAPathAsItIs(t *testing.T) {
 	}
 	if len(asked) != 1 || asked[0] != want {
 		t.Fatalf("the farm was asked for %q, not %q", asked, want)
+	}
+}
+
+// The project a get names reaches the farm as one path segment, whatever
+// it holds: a slash or a space in it once split or changed the path.
+func TestGetNamesItsProjectAsItIs(t *testing.T) {
+	old := getOS
+	t.Cleanup(func() { getOS = old })
+	getOS = "linux"
+	project := "a b/c#d"
+	body := "x\n"
+	id := c4.Identify(strings.NewReader(body)).String()
+	var segments []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.TrimPrefix(r.URL.EscapedPath(), "/api/v1/"), "/")
+		if len(parts) > 1 {
+			seg, err := url.PathUnescape(parts[1])
+			if err != nil {
+				t.Errorf("%s: %v", r.URL.EscapedPath(), err)
+			}
+			segments = append(segments, seg)
+		}
+		if strings.HasSuffix(r.URL.Path, "/files") {
+			json.NewEncoder(w).Encode(api.ViewListing{Files: []api.ViewFile{{Path: "f.exr", ID: id, Size: int64(len(body))}}})
+			return
+		}
+		w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	var out bytes.Buffer
+	if err := Get(context.Background(), &Client{Base: srv.URL, HTTP: srv.Client()}, Out{W: &out}, GetArgs{Project: project, Ref: rvidOf("v"), Dir: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	if len(segments) != 2 {
+		t.Fatalf("the farm saw %d requests: %q", len(segments), segments)
+	}
+	for _, s := range segments {
+		if s != project {
+			t.Fatalf("the farm was asked for the project %q, not %q", s, project)
+		}
 	}
 }

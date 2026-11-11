@@ -87,3 +87,22 @@ func TestTheAllowListIsPerGOOS(t *testing.T) {
 		t.Fatal("a line without a test was taken")
 	}
 }
+
+func TestNoEventsIsNotAPass(t *testing.T) {
+	var out bytes.Buffer
+	if code := run(strings.NewReader(""), &out, map[string]bool{}, mod); code != 1 {
+		t.Fatalf("an empty stream: exit %d, want 1:\n%s", code, out.String())
+	}
+}
+
+func TestAReasonOnSeveralLinesIsKeptWhole(t *testing.T) {
+	got := reason([]string{
+		"=== RUN   TestX\n",
+		"    x_test.go:9: needs a machine\n",
+		"        set aside for it\n",
+		"--- SKIP: TestX (0.00s)\n",
+	})
+	if got != "needs a machine set aside for it" {
+		t.Fatalf("reason %q", got)
+	}
+}

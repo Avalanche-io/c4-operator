@@ -66,7 +66,7 @@ func Get(ctx context.Context, c *Client, o Out, a GetArgs) error {
 	}
 	for _, p := range prefixes {
 		var ls api.ViewListing
-		q := "/views/" + project + "/" + vid + "/files"
+		q := "/views/" + url.PathEscape(project) + "/" + vid + "/files"
 		if p != "" {
 			q += "?path=" + url.QueryEscape(strings.TrimPrefix(filepath.ToSlash(p), "/"))
 		}
@@ -259,7 +259,7 @@ func fetch(ctx context.Context, c *Client, project, dir string, f api.ViewFile) 
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return false, err
 	}
-	body, err := c.Get(ctx, "/objects/"+project+"/"+f.ID)
+	body, err := c.Get(ctx, "/objects/"+url.PathEscape(project)+"/"+f.ID)
 	if err != nil {
 		return false, err
 	}

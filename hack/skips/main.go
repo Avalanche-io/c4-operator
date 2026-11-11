@@ -93,6 +93,7 @@ func run(r io.Reader, w io.Writer, allowed map[string]bool, module string) int {
 	ran := map[string]bool{}        // packages in the stream
 	var skips []skip
 	failed := false
+	events := 0
 	dec := json.NewDecoder(r)
 	for {
 		var e event
@@ -102,6 +103,7 @@ func run(r io.Reader, w io.Writer, allowed map[string]bool, module string) int {
 			fmt.Fprintf(w, "skips: reading go test -json: %v\n", err)
 			return 1
 		}
+		events++
 		key := e.Package + " " + e.Test
 		if e.Package != "" {
 			ran[short(e.Package)] = true
@@ -147,6 +149,12 @@ func run(r io.Reader, w io.Writer, allowed map[string]bool, module string) int {
 			unlisted = append(unlisted, s)
 		}
 	}
+	if events == 0 {
+		// go test that crashed, or never ran, writes nothing: no tests is not
+		// a pass.
+		fmt.Fprintln(w, "skips: go test -json wrote no events")
+		return 1
+	}
 	fmt.Fprintf(w, "skips: %d tests skipped, %d of them allowed\n", len(skips), len(skips)-len(unlisted))
 	for _, s := range unlisted {
 		fmt.Fprintf(w, "skips: NOT ALLOWED %s %s: %s\n", s.pkg, s.test, s.reason)
@@ -168,20 +176,24 @@ func run(r io.Reader, w io.Writer, allowed map[string]bool, module string) int {
 	return 0
 }
 
-// reason is the line a skipping test gave as its reason: the last line of
-// its output that a t.Skip wrote (file:line: reason), else "".
+// reason is what a skipping test gave as its reason: the message a t.Skip
+// wrote (file:line: reason), with any lines it ran on to, else the last
+// line it printed.
 func reason(lines []string) string {
+	var msg []string
 	for i := len(lines) - 1; i >= 0; i-- {
-		s := strings.TrimSpace(lines[i])
+		raw := lines[i]
+		s := strings.TrimSpace(raw)
 		if strings.HasPrefix(s, "--- SKIP") || s == "" {
 			continue
 		}
 		if _, after, ok := strings.Cut(s, ".go:"); ok {
-			if _, msg, ok := strings.Cut(after, ": "); ok {
-				return msg
+			if _, m, ok := strings.Cut(after, ": "); ok {
+				return strings.Join(append([]string{m}, msg...), " ")
 			}
 		}
-		return s
+		// A line a multi-line reason ran on to (testing indents them).
+		msg = append([]string{s}, msg...)
 	}
-	return ""
+	return strings.Join(msg, " ")
 }

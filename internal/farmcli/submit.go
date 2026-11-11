@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,7 +142,7 @@ func missingIDs(ctx context.Context, c *Client, project string, objs []view.Obje
 			req.IDs = append(req.IDs, o.ID.String())
 		}
 		var resp api.MissingResponse
-		if err := c.Do(ctx, "POST", "/objects/"+project+"/missing", req, &resp); err != nil {
+		if err := c.Do(ctx, "POST", "/objects/"+url.PathEscape(project)+"/missing", req, &resp); err != nil {
 			return nil, err
 		}
 		for _, s := range resp.Missing {
@@ -189,7 +190,7 @@ func upload(ctx context.Context, c *Client, project, root string, v *view.View, 
 				o := todo[i]
 				f, err := os.Open(paths[o.ID])
 				if err == nil {
-					err = c.Put(ctx, "/objects/"+project+"/"+o.ID.String(), f, o.Size)
+					err = c.Put(ctx, "/objects/"+url.PathEscape(project)+"/"+o.ID.String(), f, o.Size)
 					f.Close()
 				}
 				if err != nil {
@@ -219,7 +220,7 @@ func recordView(ctx context.Context, c *Client, project string, v *view.View) er
 		req.Links = append(req.Links, api.ViewLink{Path: l.Path, Target: l.Target})
 	}
 	var vr api.ViewResponse
-	if err := c.Do(ctx, "POST", "/views/"+project, req, &vr); err != nil {
+	if err := c.Do(ctx, "POST", "/views/"+url.PathEscape(project), req, &vr); err != nil {
 		return fmt.Errorf("recording the tree: %w", err)
 	}
 	if vr.View != v.ID.String() {

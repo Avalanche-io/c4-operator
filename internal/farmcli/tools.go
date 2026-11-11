@@ -50,7 +50,7 @@ func printFieldErrors(o Out, errs []api.FieldError) error {
 // ListTools prints the tools a project can submit.
 func ListTools(ctx context.Context, c *Client, o Out, project string) error {
 	var r api.ToolListResponse
-	if err := c.Do(ctx, "GET", "/tools/"+project, nil, &r); err != nil {
+	if err := c.Do(ctx, "GET", "/tools/"+url.PathEscape(project), nil, &r); err != nil {
 		return err
 	}
 	if len(r.Tools) == 0 {
@@ -74,7 +74,7 @@ func ListTools(ctx context.Context, c *Client, o Out, project string) error {
 
 // LookupTool reads one published tool.
 func LookupTool(ctx context.Context, c *Client, project, name, version string) (*api.ToolDetail, error) {
-	p := "/tools/" + project + "/" + url.PathEscape(name)
+	p := "/tools/" + url.PathEscape(project) + "/" + url.PathEscape(name)
 	if version != "" {
 		p += "?version=" + url.QueryEscape(version)
 	}
@@ -164,7 +164,7 @@ func PublishTool(ctx context.Context, c *Client, o Out, a PublishArgs) error {
 	}
 	var r api.ToolPublishResponse
 	req := api.ToolPublishRequest{View: v.ID.String(), Farm: a.Farm, DryRun: a.DryRun}
-	if err := doChecked(ctx, c, "POST", "/tools/"+a.Project, req, &r); err != nil {
+	if err := doChecked(ctx, c, "POST", "/tools/"+url.PathEscape(a.Project), req, &r); err != nil {
 		return err
 	}
 	if len(r.Errors) > 0 {
