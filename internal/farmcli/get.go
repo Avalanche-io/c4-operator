@@ -296,16 +296,13 @@ func fetch(ctx context.Context, c *Client, project, dir string, f api.ViewFile) 
 // folder never reaches past it, and so is one this machine can't make
 // (Windows without the privilege); skipped says which and why.
 func makeLinks(dir string, links []api.ViewLink) (made int, skipped []string, err error) {
+	links, skipped = linksInside(links) // Get has left these out already
 	for _, l := range links {
 		rel := filepath.FromSlash(l.Path)
 		if !filepath.IsLocal(rel) {
 			return made, skipped, fmt.Errorf("%s: not a local path", l.Path)
 		}
 		target := filepath.FromSlash(l.Target)
-		if filepath.IsAbs(target) || !filepath.IsLocal(filepath.Join(filepath.Dir(rel), target)) {
-			skipped = append(skipped, fmt.Sprintf("%s -> %s: the link points outside the folder", l.Path, l.Target))
-			continue
-		}
 		dst := filepath.Join(dir, rel)
 		if have, err := os.Readlink(dst); err == nil {
 			if have == target {
