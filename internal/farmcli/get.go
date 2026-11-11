@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -67,7 +68,7 @@ func Get(ctx context.Context, c *Client, o Out, a GetArgs) error {
 		var ls api.ViewListing
 		q := "/views/" + project + "/" + vid + "/files"
 		if p != "" {
-			q += "?path=" + strings.TrimPrefix(filepath.ToSlash(p), "/")
+			q += "?path=" + url.QueryEscape(strings.TrimPrefix(filepath.ToSlash(p), "/"))
 		}
 		if err := c.Do(ctx, "GET", q, nil, &ls); err != nil {
 			return err

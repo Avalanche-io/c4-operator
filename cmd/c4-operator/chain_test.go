@@ -250,9 +250,14 @@ func c4LogIDs(t *testing.T, bin, file string) []c4.ID {
 	return ids
 }
 
+// run runs the c4 CLI with a home and a store of the test's own, so it
+// never reads the developer's c4 configuration or writes to their store.
 func run(t *testing.T, bin string, args ...string) string {
 	t.Helper()
-	out, err := exec.Command(bin, args...).CombinedOutput()
+	cmd := exec.Command(bin, args...)
+	home := t.TempDir()
+	cmd.Env = append(os.Environ(), "HOME="+home, "USERPROFILE="+home, "C4_STORE="+filepath.Join(home, "store"), "C4_STORE_AUTO=false")
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s %s: %v: %s", bin, strings.Join(args, " "), err, out)
 	}

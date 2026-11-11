@@ -37,14 +37,33 @@ jobs:
       with:
         go-version-file: go.mod
     - run: make tools
+    # The c4 CLI of the suite release, checksum checked, so the tests that
+    # read chains with it (TestChainsReadByC4CLI) run here, not skip. On
+    # both legs: the skip allow-list is per GOOS, not per architecture.
+    - name: c4 CLI 1.0.25
+      env:
+        ARCH: ${{ matrix.arch }}
+      run: |
+        case "$ARCH" in
+          amd64) sum=38566171f6f38ed2287b0bedf69c47393fdfae978bdfa0e932530731f1bc0393 ;;
+          arm64) sum=cdaf75941f711af8ba099d495fec92cad26ca2d61773629e72c33a59c67e70b0 ;;
+        esac
+        f=c4_v1.0.25_linux_$ARCH.tar.gz
+        curl -fsSL -o "$RUNNER_TEMP/$f" "https://github.com/Avalanche-io/c4toolkit/releases/download/v1.0.25/$f"
+        echo "$sum  $RUNNER_TEMP/$f" | sha256sum -c -
+        tar -xzf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP"
+        mkdir -p "$HOME/.local/bin"
+        install -m 0755 "$RUNNER_TEMP/c4_v1.0.25_linux_$ARCH/c4" "$HOME/.local/bin/c4"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
     # The controllers and the queue run against a real API server and etcd
-    # (envtest); setup-envtest downloads them.
+    # (envtest); setup-envtest downloads them. Every skip is reported, and
+    # one hack/skips/allowed.txt does not name fails the job.
     - run: make test
     # A bundle written on one machine replays to the same decisions here.
     - name: a diagnostic bundle replays
       run: go run ./hack/sim -bundle hack/sim/testdata/gpu-tight.tgz -replay decide
-    - name: cache tiers under the race detector
-      run: go test -race -count=1 ./internal/tier/... ./internal/fill/... ./internal/objcache/...
+    - name: cache tiers, views, imports, the queue and capture under the race detector
+      run: make test-race
 
   # c4-farm for macOS, with the Secure Enclave's Swift library: it builds for
   # both architectures, and the keystore's tests run. A hosted Mac runner
@@ -61,6 +80,10 @@ jobs:
         go-version-file: go.mod
     - run: make test-keystore-se
     - run: GOARCH=arm64 make c4-farm-mac && GOARCH=amd64 make c4-farm-mac
+    # What runs only on macOS: APFS clone workspaces (checkout), capture
+    # and the object cache on APFS. Skips are held to the allow-list.
+    - name: checkout, capture and the object cache on APFS
+      run: go test -json -count=1 ./internal/checkout/... ./internal/capture/... ./internal/objcache/... | go run ./hack/skips -allow hack/skips/allowed.txt
 
   linux-privileged:
     name: overlay, layers and capture (privileged container)

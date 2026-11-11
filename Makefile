@@ -21,7 +21,7 @@ JOB_IMAGES ?= oiio media usd ci train infer sim hydra
 RUNTIME_IMAGES ?= base python oiio torch
 LINUX_TEST_PKGS ?= ./internal/capture ./internal/checkout ./internal/layer ./internal/overlay ./internal/node
 
-.PHONY: all generate manifests test test-linux envtest build image images image-sync image-block sync-yaml demo-dailies demo-github demo-kitsu job-images job-images-dev runtime-images runtime-images-dev job-image-names runtime-image-names tool-locks tool-tests tested-tools job-image-hydra-blender install-yaml release-snapshot verify cross e2e e2e-down tools tutorials stress stress-quick
+.PHONY: all generate manifests test test-race test-linux envtest build image images image-sync image-block sync-yaml demo-dailies demo-github demo-kitsu job-images job-images-dev runtime-images runtime-images-dev job-image-names runtime-image-names tool-locks tool-tests tested-tools job-image-hydra-blender install-yaml release-snapshot verify cross e2e e2e-down tools tutorials stress stress-quick
 
 all: generate manifests test build
 
@@ -60,8 +60,20 @@ manifests:
 envtest:
 	$(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(CURDIR)/bin/k8s -p path
 
+# Every skip is reported, and one hack/skips/allowed.txt does not name
+# fails the run: a test that runs nowhere is noticed. The JSON stays in
+# bin/test.json for a closer look.
 test:
-	KUBEBUILDER_ASSETS="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(CURDIR)/bin/k8s -p path)" go test ./... -count=1
+	@mkdir -p bin
+	KUBEBUILDER_ASSETS="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(CURDIR)/bin/k8s -p path)" go test -json ./... -count=1 > bin/test.json; s=$$?; \
+	  go run ./hack/skips -allow hack/skips/allowed.txt < bin/test.json || exit 1; exit $$s
+
+# The packages with the most concurrency under the race detector: cache
+# tiers, views, git imports and the import service, the queue, capture.
+# The queue and the operator's commands run against envtest too.
+RACE_PKGS ?= ./internal/tier/... ./internal/fill/... ./internal/objcache/... ./internal/view/... ./internal/gitimport/... ./cmd/c4-operator/ ./internal/work/queue/... ./internal/capture/...
+test-race:
+	KUBEBUILDER_ASSETS="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(CURDIR)/bin/k8s -p path)" go test -race -count=1 $(RACE_PKGS)
 
 # Overlay mounts, whiteouts and capture need root on Linux. The test
 # binaries are cross-compiled here and run in a privileged container on a

@@ -1,0 +1,43 @@
+# Tests allowed to skip under make test, by GOOS ("*" for any), package
+# (relative to the module) and test, each with why. A skip not listed here
+# fails make test (hack/skips). Measured 2026-11-11: macOS (this repo's
+# developers, and CI's macOS leg for checkout and capture) and Linux (CI's
+# runners: non-root, 4 CPUs, Node and the c4 CLI on PATH). The NFS checkout
+# tests run nowhere yet: they mount, and wait for a Mac set aside for it.
+
+# Opt-in runs against live services, or helpers another test runs.
+*      internal/keystore            TestHelperMakeKey                                  # a subprocess of TestFirstRunsInProcessesMakeOneKey
+*      internal/source/huggingface  TestLiveSmallRepository                            # reads the Hub: C4_HF_LIVE=1
+*      internal/tracker/kitsu       TestLive                                           # a throwaway Kitsu: KITSU_LIVE and KITSU_LIVE_ADMIN
+*      internal/view                TestWriteChainForCLI                               # writes a chain for the c4 CLI to read: C4_CHAIN_OUT
+
+# NFS checkout mounts an export: macOS, C4_NFS_TESTS=1, a machine set aside for it.
+*      internal/checkout            TestNFSConformance                                 # mounts an NFS export
+*      internal/checkout            TestNFSEditsByAnotherSpelling                      # mounts an NFS export
+*      internal/checkout            TestNFSIndexSidecar                                # mounts an NFS export
+*      internal/checkout            TestNFSRefusesReservedNames                        # mounts an NFS export
+*      internal/checkout            TestNFSSymlinkStaysInTheWorkspace                  # mounts an NFS export
+darwin internal/checkout            TestNFSReportsTheHostsFolding                      # mounts an NFS export
+
+# A Mac without the c4 CLI; CI installs it, so on Linux this must run.
+darwin cmd/c4-operator              TestChainsReadByC4CLI                              # the c4 CLI on PATH
+
+# Root on Linux: the privileged job (make test-linux) runs these.
+linux  internal/capture             TestCaptureMatchesTheMountedTree                   # overlay mounts: C4_PRIVILEGED_TESTS=1
+linux  internal/capture             TestCaptureOfADirectoryMadeAgainInsideAReplacedOne # overlay mounts: C4_PRIVILEGED_TESTS=1
+linux  internal/capture             TestLayerObjectsAreSharedByInode                   # overlay mounts: C4_PRIVILEGED_TESTS=1
+linux  internal/capture             TestCaptureWithoutWalkReadsOverlay                 # covered by the privileged tests
+linux  internal/checkout            TestOverlayConformance                             # overlay mounts: C4_PRIVILEGED_TESTS=1
+
+# APFS clone workspaces: macOS only.
+linux  internal/checkout            TestCaptureLeavesACloneWorkspaceAlone              # clone workspaces need APFS
+linux  internal/checkout            TestCloneCaptureTwiceKeepsASameSizeEdit            # clone workspaces need APFS
+linux  internal/checkout            TestCloneConformance                               # clone workspaces need APFS
+
+# Names a folder takes for one: Linux's folders tell names apart by case.
+linux  internal/farmcli             TestCollisionsKeepWhatIsThere                      # a folder that folds case
+linux  internal/farmcli             TestCollisionsOfEveryKind                          # a folder that folds case
+linux  internal/farmcli             TestGetsAtOnceMeasureApart                         # a folder that folds case
+linux  internal/farmcli             TestLeftoversFromALosingSpelling                   # a folder that folds case
+linux  internal/farmcli             TestProbeStaysInTheFolder                          # a folder that folds case
+linux  internal/farmcli             TestWinnersAreWhatIsWritten                        # a folder that folds case

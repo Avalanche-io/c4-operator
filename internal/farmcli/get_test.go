@@ -916,3 +916,31 @@ func TestProbeListsExactlyWhatWasMade(t *testing.T) {
 		t.Error("respelled, in a folder that tells a from A: passed")
 	}
 }
+
+// A path asked for is sent to the farm as it is, whatever it holds: each
+// of # ? % & + and a space once ended or changed the query.
+func TestGetAsksForAPathAsItIs(t *testing.T) {
+	old := getOS
+	t.Cleanup(func() { getOS = old })
+	getOS = "linux"
+	want := "shots/a#b?c%d&e+f g/x.exr"
+	body := "x\n"
+	id := c4.Identify(strings.NewReader(body)).String()
+	var asked []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/files") {
+			asked = append(asked, r.URL.Query().Get("path"))
+			json.NewEncoder(w).Encode(api.ViewListing{Files: []api.ViewFile{{Path: want, ID: id, Size: int64(len(body))}}})
+			return
+		}
+		w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	var out bytes.Buffer
+	if err := Get(context.Background(), &Client{Base: srv.URL, HTTP: srv.Client()}, Out{W: &out}, GetArgs{Ref: rvidOf("v"), Dir: t.TempDir(), Paths: []string{want}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 1 || asked[0] != want {
+		t.Fatalf("the farm was asked for %q, not %q", asked, want)
+	}
+}
