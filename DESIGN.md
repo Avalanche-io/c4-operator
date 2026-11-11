@@ -205,6 +205,35 @@ need the executable bit, or a checkout of a repository would lose it and
 `./configure` would fail. `c4-operator tree-id DIR` computes the projection
 from a directory, and every e2e pod runs it against its own mount.
 
+**Names are c4m's, and only `/` separates.** Joshua, 2026-11-10: "C4m files
+only considers forward slash a path seperator. Everything else is a literal
+or encodable character". A view name is any bytes but `/` and NUL, other
+than `.` and `..`: a backslash, a colon, a trailing dot, `CON` are all
+names, imported, stored and served as they are (`view.CheckName` guards the
+c4m rules only). Where a filesystem cannot hold a name, the writer that
+puts the view there refuses that entry, saying which and why, and writes
+the rest; it never renames it, maps it or joins it into a path. That is
+git's behaviour, and git's set of names Git for Windows will not write
+(v2.47.0, `compat/mingw.c` `is_valid_win32_path` and `read-cache.c`
+`verify_path_internal`) is the most a writer refuses, not the rule: each
+refusal is cited (`internal/fsname`), and one a measurement beats is
+dropped (Joshua: "if git is over cautious in places where c4 can round
+trip successfuly then we should use ours"). Git's repository guards
+(`.git` look-alikes, `GIT~1`) protect a git repository, not the
+filesystem, and are not taken. Linux and macOS refuse nothing.
+
+The one writer that runs on Windows is `c4-farm get`; checkout, layers and
+the object cache do not build there. It refuses what Windows cannot hold
+and, where its folder does not tell names apart by case (measured, with a
+probe file), writes the first in byte order of names that would land in
+one place and reports the rest, the same ones every time. A trailing space
+or dot and the device names are refused by git's rule and not yet
+measured: a writer can make them through `\\?\` paths, and a Windows
+measurement that they read back exactly would drop those refusals. Until
+the operator's c4m pin carries c4 PR #98, a name or link target that ends
+in a backslash is refused at import by the round-trip guard (section 2.3),
+since the pinned library reads it back with one more.
+
 ### 2.2 Records
 
 A **record** is the one-level canonical c4m listing of a directory's direct

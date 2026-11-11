@@ -315,7 +315,7 @@ func (s *Server) handlePutObject(w http.ResponseWriter, r *http.Request) {
 
 // cleanViewPath accepts a relative, slash-separated file path.
 func cleanViewPath(p string) (string, error) {
-	if p == "" || strings.HasPrefix(p, "/") || strings.HasSuffix(p, "/") || strings.Contains(p, "\\") || path.Clean(p) != p ||
+	if p == "" || strings.HasPrefix(p, "/") || strings.HasSuffix(p, "/") || strings.Contains(p, "\x00") || path.Clean(p) != p ||
 		p == ".." || strings.HasPrefix(p, "../") {
 		return "", fmt.Errorf("%q is not a clean relative file path", p)
 	}

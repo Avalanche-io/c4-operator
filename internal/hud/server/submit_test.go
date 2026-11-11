@@ -1054,3 +1054,18 @@ func TestOwnerFor(t *testing.T) {
 		t.Errorf("a role on a shared farm: %q, want artist", got)
 	}
 }
+
+// A view path submitted to the HUD follows c4m's rules: a backslash or a
+// colon is part of a name, only "/" separates.
+func TestCleanViewPathTakesC4mNames(t *testing.T) {
+	for _, p := range []string{`back\slash.txt`, `dir/a:b.exr`, `d\x/f`, "CON.txt"} {
+		if got, err := cleanViewPath(p); err != nil || got != p {
+			t.Errorf("%q: %q, %v", p, got, err)
+		}
+	}
+	for _, p := range []string{"", "/abs", "dir/", "../up", "a/../b", "nul\x00"} {
+		if _, err := cleanViewPath(p); err == nil {
+			t.Errorf("%q was taken", p)
+		}
+	}
+}

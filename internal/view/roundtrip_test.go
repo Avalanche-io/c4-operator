@@ -215,3 +215,42 @@ func TestRecordsNameTheSameEntryEveryTime(t *testing.T) {
 		}
 	}
 }
+
+// A name or a link target ending in a backslash is a legal c4m name, and
+// the c4m library this operator pins writes it in a form it reads back
+// with one more backslash. So it is refused, naming the entry, until the
+// pin carries c4 PR #98; a backslash anywhere else reads back as written.
+// When the pin moves, this test fails, and the refusal is to go.
+func TestATrailingBackslashIsRefusedUntilThePinMoves(t *testing.T) {
+	ctx := context.Background()
+	ram := store.NewRAM()
+	src := StoreRecords(ram)
+	putBytes(t, ram, EmptyID(), nil)
+	var nr *NotReadBack
+	for _, e := range []Edit{fileEdit(`ends\`, "x"), {Path: "l", Entry: SymlinkEntry("", `t\`)}} {
+		if _, err := Apply(ctx, EmptyID(), []Edit{e}, src); !errors.As(err, &nr) {
+			t.Errorf("%s: %v", e.Path, err)
+		}
+	}
+	for _, p := range []string{`mid\dle`, `two\\in\\a\\row.txt`, `d\/x`} {
+		if _, err := Apply(ctx, EmptyID(), []Edit{fileEdit(p, "x")}, src); err != nil {
+			t.Errorf("%s: %v", p, err)
+		}
+	}
+}
+
+// The c4m name rules, and nothing more: a backslash, a colon, a trailing
+// dot and a device name are names; "/" and NUL are not, nor are "", "."
+// and "..".
+func TestCheckNameGuardsTheC4mRulesOnly(t *testing.T) {
+	for _, n := range []string{`back\slash`, `a:b`, "trailing.", "CON", "a b", `x\`, "dir/"} {
+		if err := CheckName(n); err != nil {
+			t.Errorf("%q: %v", n, err)
+		}
+	}
+	for _, n := range []string{"", "/", ".", "..", "a/b", "nul\x00", "./"} {
+		if err := CheckName(n); err == nil {
+			t.Errorf("%q was taken", n)
+		}
+	}
+}

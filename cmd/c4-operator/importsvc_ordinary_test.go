@@ -798,3 +798,49 @@ func TestAnIngestThatDoesNotReadBackStoresNothing(t *testing.T) {
 		t.Fatalf("the ingest without the link: %v, %d objects", err, count())
 	}
 }
+
+// A file named with a backslash, a colon or another byte only Windows
+// refuses is a literal c4m name (Joshua, 2026-11-10: only "/" separates).
+// A repository holding them imports, its chain verifies, the chain made
+// again from the mapping is the same chain, and the view holds the names
+// exactly.
+func TestNamesOnlyWindowsRefusesImport(t *testing.T) {
+	o := newOrdinary(t, 0)
+	names := []string{`back\slash.txt`, `dir\with\backslashes`, "a:b.exr", "CON.txt", "trailing.", `q"uote`}
+	files := map[string]string{"plain.txt": "p\n"}
+	for i, n := range names {
+		files[n] = fmt.Sprint(i, "\n")
+	}
+	o.commit(files)
+	o.ok("the names", "main")
+	o.commit(map[string]string{"plain.txt": "p2\n"})
+	o.ok("a commit after", "main")
+	_, head := o.head("refs/heads/main")
+
+	// The chain made again from the stored changesets is the same chain.
+	os.Remove(o.svc.chainPath("refs/heads/main"))
+	o.log.Reset()
+	if code, again := o.head("refs/heads/main"); code != http.StatusOK || again != head {
+		t.Fatalf("the chain made again: %d, %s, was %s", code, again, head)
+	}
+	o.commit(map[string]string{"plain.txt": "p3\n"})
+	if code, body := o.push("main"); code != http.StatusOK {
+		t.Fatalf("the push after the chain file went: %d %s", code, body)
+	}
+
+	// The view holds each name exactly, as one entry of the root.
+	m, _ := gitimport.ReadMapping(o.svc.out)
+	v, err := view.Load(context.Background(), m[0].View, o.svc.base.Records, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held := map[string]bool{}
+	for _, f := range v.Files {
+		held[f.Path] = true
+	}
+	for _, n := range names {
+		if !held[n] {
+			t.Errorf("the view does not hold %q: %v", n, held)
+		}
+	}
+}

@@ -307,10 +307,15 @@ func ParseRecord(data []byte) ([]*c4m.Entry, error) {
 	return out, nil
 }
 
-// CheckName refuses anything that could escape a directory.
+// CheckName guards the c4m name rules only: a name is one path segment,
+// so it holds no "/" (the only separator c4m has, Joshua, 2026-11-10) and
+// no NUL, and is not empty, "." or "..". Every other byte is a literal, a
+// backslash and a colon included. What a filesystem cannot hold as it is
+// (a backslash or a colon on Windows) is the writer's to refuse when it
+// writes there (internal/fsname), never this check's.
 func CheckName(name string) error {
 	base := strings.TrimSuffix(name, "/")
-	if base == "" || base == "." || base == ".." || strings.ContainsAny(base, "/\\\x00") {
+	if base == "" || base == "." || base == ".." || strings.ContainsAny(base, "/\x00") {
 		return fmt.Errorf("unsafe entry name %q", name)
 	}
 	return nil
