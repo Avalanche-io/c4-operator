@@ -236,8 +236,15 @@ func (n *Node) Records() ([]Record, error) {
 	var out []Record
 	var visit func(d *Node, depth int, dir string)
 	visit = func(d *Node, depth int, dir string) {
-		for name, c := range d.Dirs {
-			visit(c, depth+1, dir+strings.TrimSuffix(name, "/")+"/")
+		// In name order, so the records, the identical subtree kept of
+		// several and the entry an error names are the same every time.
+		names := make([]string, 0, len(d.Dirs))
+		for name := range d.Dirs {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			visit(d.Dirs[name], depth+1, dir+strings.TrimSuffix(name, "/")+"/")
 		}
 		listing := d.listing()
 		out = append(out, Record{ID: d.Entry.C4ID, Data: []byte(listing.Canonical()), depth: depth, entries: listing.Entries, dir: dir})

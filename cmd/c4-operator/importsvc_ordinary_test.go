@@ -762,3 +762,39 @@ func TestACommitTheLibraryCannotReadBackIsRefused(t *testing.T) {
 	o.commit(map[string]string{"dev.txt": "dev\n"})
 	o.ok("another branch", "dev")
 }
+
+// An ingest of a tree whose description the c4m library does not read back
+// is refused before anything is uploaded: the store is left as it was, and
+// the error names the entry. The same tree without that link is ingested.
+func TestAnIngestThatDoesNotReadBackStoresNothing(t *testing.T) {
+	tree, store := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(tree, "f"), []byte("f\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("c4studio", filepath.Join(tree, "latest")); err != nil {
+		t.Fatal(err)
+	}
+	count := func() int {
+		n := 0
+		filepath.Walk(store, func(_ string, fi os.FileInfo, err error) error {
+			if err == nil && !fi.IsDir() {
+				n++
+			}
+			return nil
+		})
+		return n
+	}
+	stdout := os.Stdout
+	devnull, _ := os.Open(os.DevNull)
+	os.Stdout = devnull
+	defer func() { os.Stdout = stdout; devnull.Close() }()
+	err := runIngest([]string{"-q", "-shard", "s0=" + store, tree})
+	var nr *view.NotReadBack
+	if !errors.As(err, &nr) || nr.Entry != "latest" || count() != 0 {
+		t.Fatalf("the ingest: %v, and the store holds %d objects", err, count())
+	}
+	os.Remove(filepath.Join(tree, "latest"))
+	if err := runIngest([]string{"-q", "-shard", "s0=" + store, tree}); err != nil || count() == 0 {
+		t.Fatalf("the ingest without the link: %v, %d objects", err, count())
+	}
+}

@@ -245,9 +245,10 @@ with the path of the entry that does not come back and what came back
 (`view.NotReadBack`). Checked, never trusted, applies to this system's own
 output: a record or changeset its readers cannot read would stop every
 later read and import built on it, and any disagreement between the c4m
-encoder and decoder over what such an object says is caught here. Objects
-uploaded before the check (a git import's or an ingest's file contents)
-stay in the store, named by nothing.
+encoder and decoder over what such an object says is caught here. Ingest
+makes its records before it uploads anything, so a refused tree leaves the
+store as it was; a git import uploads a commit's file contents as it reads
+them, so those of a refused commit stay in the store, named by nothing.
 
 The c4m library the operator pins writes a symlink whose target starts with
 `c4`, under the null mode every view gives a link, as a line it cannot parse

@@ -66,6 +66,12 @@ func runIngest(args []string) error {
 		return err
 	}
 	scanned := time.Since(start)
+	// The records first: a tree whose description does not read back is
+	// refused before any of its content is uploaded.
+	recs, err := v.Records()
+	if err != nil {
+		return err
+	}
 
 	// One path per unique object.
 	paths := map[c4.ID]string{}
@@ -125,10 +131,6 @@ func runIngest(args []string) error {
 	wg.Wait()
 	if first != nil {
 		return first
-	}
-	recs, rerr := v.Records()
-	if rerr != nil {
-		return rerr
 	}
 	for _, r := range recs {
 		if _, err := st.PutBytes(ctx, r.Data); err != nil {

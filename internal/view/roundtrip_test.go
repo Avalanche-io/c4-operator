@@ -74,7 +74,7 @@ func TestApplyRefusesALinkThatReadsAsAFlowLink(t *testing.T) {
 	for _, target := range []string{"host:path", "C:foo", "nas:plates/"} {
 		_, err := Apply(ctx, EmptyID(), []Edit{{Path: "link", Entry: SymlinkEntry("", target)}}, src)
 		var nr *NotReadBack
-		if !errors.As(err, &nr) || nr.Entry != "link" {
+		if !errors.As(err, &nr) || nr.Entry != "link" || nr.What != "record" {
 			t.Errorf("a link to %q: %v", target, err)
 		} else {
 			t.Logf("a link to %q: %v", target, err)
@@ -155,5 +155,59 @@ func TestRecordsOfAScannedTreeAreChecked(t *testing.T) {
 	v, _ = ScanDir(dir)
 	if recs, err := v.Records(); err != nil || len(recs) != 2 {
 		t.Fatalf("the records of an ordinary tree: %d, %v", len(recs), err)
+	}
+}
+
+// A changeset names the entry it does not read back by its path, from the
+// depths of the entries above it, and among other entries: the projection
+// and the naming reach every entry, not only the first.
+func TestAChangesetNamesItsEntryByPath(t *testing.T) {
+	parent := EmptyID()
+	dir := func(name string, depth int) *c4m.Entry {
+		e := &c4m.Entry{Name: name + "/", Size: -1, Timestamp: c4m.NullTimestamp(), Depth: depth}
+		return e
+	}
+	at := func(e *c4m.Entry, depth int) *c4m.Entry { e.Depth = depth; return e }
+	m := c4m.NewManifest()
+	m.Entries = []*c4m.Entry{
+		at(SymlinkEntry("a", "a.txt"), 0),
+		dir("x", 0),
+		at(SymlinkEntry("ok", "b.txt"), 1),
+		dir("y", 1),
+		at(SymlinkEntry("bad", "host:path"), 2),
+		at(SymlinkEntry("z", "c.txt"), 0),
+	}
+	text, err := EncodeChangeset(parent, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nr *NotReadBack
+	if err := checkChangeset(parent, text, m.Entries); !errors.As(err, &nr) || nr.Entry != "x/y/bad" || nr.What != "changeset" {
+		t.Fatalf("a changeset with a bad entry two levels down: %v", err)
+	}
+}
+
+// The entry a view's records name is the same every time, whichever of
+// several identical subtrees the records keep.
+func TestRecordsNameTheSameEntryEveryTime(t *testing.T) {
+	dir := t.TempDir()
+	for _, d := range []string{"d", "c", "b", "a"} {
+		if err := os.MkdirAll(filepath.Join(dir, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("c4studio", filepath.Join(dir, d, "l")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 20 {
+		v, err := ScanDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = v.Records()
+		var nr *NotReadBack
+		if !errors.As(err, &nr) || nr.Entry != "a/l" {
+			t.Fatalf("named %v, want a/l every time", err)
+		}
 	}
 }
