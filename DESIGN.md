@@ -804,7 +804,9 @@ credentials.
     matched against what is mounted: a second reading of a patch can differ
     (`view.ApplyPatch` reads an entry restated with another mode or date as
     a removal where the resolver keeps it). It is resolved once per source
-    and remembered by the source's byte ID, since a source never changes. A
+    and remembered by project and the source's byte ID, since a source
+    never changes; a hit reads nothing, so it is never carried from one
+    project's store to another's. A
     description's root lines as stated (RootID) are not one: a hand-made
     c4m can copy a granted view's root lines over other content. The
     include filter is then
