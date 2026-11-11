@@ -51,7 +51,12 @@ func Remake(ctx context.Context, opts Options, line Commit) error {
 	} else {
 		_, err = im.importDiffs([]commit{c}, line.ParentView)
 		if err != nil && line.Parent != "" && lostFromStore(err) {
-			if err = im.remakeParent(line); err == nil {
+			// The attempt's own writes finish first. One that failed is this
+			// commit's error, not its parent's: the blob it was writing is
+			// already marked present, and no import after would write it.
+			if werr := im.wait(); werr != nil {
+				err = werr
+			} else if err = im.remakeParent(line); err == nil {
 				_, err = im.importDiffs([]commit{c}, line.ParentView)
 			}
 		}
