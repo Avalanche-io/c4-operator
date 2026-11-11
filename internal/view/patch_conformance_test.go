@@ -99,7 +99,9 @@ func TestThePatchReadersMeetTheSharedVector(t *testing.T) {
 // holds secret.mov and a link; a changeset over it restates one of them
 // with one field changed (secret.mov with its ID and size and another mode
 // and date is the case that once mounted B under a grant of the smaller
-// view without it). The view it makes keeps the path, through ApplyPatch
+// view without it). A hard link's group and a flow link's operator and
+// target are part of the entry's line, so changing one of them changes
+// the entry too; a view records neither, so here the patch adds one. The view it makes keeps the path, through ApplyPatch
 // and through the resolver alike; an exact restatement removes it.
 func TestARestatedEntryIsAWrite(t *testing.T) {
 	ctx := context.Background()
@@ -151,6 +153,8 @@ func TestARestatedEntryIsAWrite(t *testing.T) {
 		{"another mode", file, restated(file, func(e *c4m.Entry) { e.Mode = 0o600 }), true},
 		{"another size", file, restated(file, func(e *c4m.Entry) { e.Size = 19 }), true},
 		{"another C4 ID", file, restated(file, func(e *c4m.Entry) { e.C4ID = other }), true},
+		{"a hard-link group", file, restated(file, func(e *c4m.Entry) { e.HardLink = 1 }), true},
+		{"a flow link", file, restated(file, func(e *c4m.Entry) { e.FlowDirection, e.FlowTarget = c4m.FlowNone+1, "nas:" }), true},
 		{"exactly as recorded", file, restated(file, func(*c4m.Entry) {}), false},
 		{"a link with another target", link, restated(link, func(e *c4m.Entry) { e.Target = "secret.mov" }), true},
 		{"a link exactly as recorded", link, restated(link, func(*c4m.Entry) {}), false},
@@ -211,6 +215,15 @@ func TestAChangesetOverADescriptionReadsItAsRecorded(t *testing.T) {
 	root := c4m.NewManifest()
 	dated := &c4m.Entry{Name: "a.txt", Mode: 0o644, Size: 4, Timestamp: when, C4ID: a}
 	root.AddEntry(dated)
+	flow := &c4m.Entry{Name: "fl.txt", Mode: 0o644, Size: 4, Timestamp: when, C4ID: a, FlowDirection: c4m.FlowNone + 1, FlowTarget: "nas:"}
+	root.AddEntry(flow)
+	hard := &c4m.Entry{Name: "hl.txt", Mode: 0o644, Size: 4, Timestamp: when, C4ID: a, HardLink: 1}
+	root.AddEntry(hard)
+	with := func(e *c4m.Entry, change func(*c4m.Entry)) *c4m.Entry {
+		cp := *e
+		change(&cp)
+		return &cp
+	}
 	root.AddEntry(&c4m.Entry{Name: "sub/", Mode: os.ModeDir | 0o755, Size: 4 + subSize, Timestamp: when, C4ID: subID})
 	rootID, _ := put(root)
 	for _, c := range []struct {
@@ -220,6 +233,11 @@ func TestAChangesetOverADescriptionReadsItAsRecorded(t *testing.T) {
 	}{
 		{"as the description records it", dated, false},
 		{"as its view records it", Project(dated), true},
+		{"with only the hard-link group changed", with(hard, func(e *c4m.Entry) { e.HardLink = 2 }), true},
+		{"with the hard-link group as recorded", hard, false},
+		{"with only the flow target changed", with(flow, func(e *c4m.Entry) { e.FlowTarget = "studio:plates/" }), true},
+		{"with only the flow direction changed", with(flow, func(e *c4m.Entry) { e.FlowDirection = c4m.FlowNone + 2 }), true},
+		{"with the flow link as recorded", flow, false},
 	} {
 		p := c4m.NewManifest()
 		cp := *c.entry
@@ -232,9 +250,9 @@ func TestAChangesetOverADescriptionReadsItAsRecorded(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, kept := res.View().Root.Files["a.txt"]
+		_, kept := res.View().Root.Files[c.entry.Name]
 		if kept != c.keeps {
-			t.Errorf("restated %s: a.txt kept %v, want %v", c.name, kept, c.keeps)
+			t.Errorf("restated %s: %s kept %v, want %v", c.name, c.entry.Name, kept, c.keeps)
 		}
 		if _, ok := res.View().Root.Dirs["sub/"]; !ok {
 			t.Errorf("restated %s: sub/ is gone", c.name)
