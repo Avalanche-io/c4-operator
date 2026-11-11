@@ -227,21 +227,28 @@ func measure(probe string, names []string) (map[string]string, error) {
 // listsExactly checks that folder lists the entries made in it and nothing
 // else, so no landing went unseen: one removed meanwhile would have let a
 // later name be made afresh, and one added, or the folder gone, would have
-// made a landing look like a refusal. An entry is matched by its identity
-// where that is cheap, since a folder may list a name in another form than
-// it was made in (HFS+ decomposes), and by name elsewhere (NTFS keeps names
-// as given).
+// made a landing look like a refusal. Each entry listed must be one made,
+// and each made entry is matched once. Where a file's identity is cheap,
+// an entry listed under the name it was made with must have that
+// identity; one listed under another name (HFS+ lists a name decomposed)
+// must have a made entry's identity and the folder must still take that
+// entry's made name for it. Identity alone is not enough: ext4 gives a
+// file made after a removal the inode the removed one had (measured, 10 of
+// 10). Elsewhere the name is matched (NTFS keeps names as given).
 func listsExactly(folder string, ids *identities) error {
 	ents, err := os.ReadDir(folder)
 	if err != nil {
 		return fmt.Errorf("measuring names: %w", err)
 	}
 	// As many entries as made (fewer: one was removed; more: one was added,
-	// a hard link to one made included, which its identity would not
-	// tell), and every entry listed one made.
+	// a hard link to one made included).
 	if made := len(ids.byKey) + len(ids.names); len(ents) != made {
 		return fmt.Errorf("measuring names: the probe folder %s lists %d entries where this get made %d; something else changed it", folder, len(ents), made)
 	}
+	notMade := func(name string) error {
+		return fmt.Errorf("measuring names: the probe folder %s holds %s, which this get did not make", folder, show(name))
+	}
+	matched := map[string]bool{} // made names matched so far
 	var byName map[string]bool
 	for _, e := range ents {
 		fi, err := os.Lstat(filepath.Join(folder, e.Name()))
@@ -249,9 +256,19 @@ func listsExactly(folder string, ids *identities) error {
 			return fmt.Errorf("measuring names: %w", err)
 		}
 		if _, ok := keyOf(fi); ok {
-			if ids.of(fi) == "" {
-				return fmt.Errorf("measuring names: the probe folder %s holds %s, which this get did not make", folder, show(e.Name()))
+			made := ids.of(fi)
+			if made == "" || matched[made] {
+				return notMade(e.Name())
 			}
+			if made != e.Name() {
+				// Listed under another spelling: the folder must take the
+				// made name for this very entry.
+				there, err := os.Lstat(filepath.Join(folder, made))
+				if err != nil || !os.SameFile(there, fi) {
+					return notMade(e.Name())
+				}
+			}
+			matched[made] = true
 			continue
 		}
 		if byName == nil {
@@ -260,9 +277,10 @@ func listsExactly(folder string, ids *identities) error {
 				byName[n] = true
 			}
 		}
-		if !byName[e.Name()] {
-			return fmt.Errorf("measuring names: the probe folder %s holds %s, which this get did not make", folder, show(e.Name()))
+		if !byName[e.Name()] || matched[e.Name()] {
+			return notMade(e.Name())
 		}
+		matched[e.Name()] = true
 	}
 	return nil
 }

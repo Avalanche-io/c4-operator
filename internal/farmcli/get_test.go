@@ -860,6 +860,15 @@ func TestProbeListsExactlyWhatWasMade(t *testing.T) {
 			os.Remove(filepath.Join(f, "keep"))
 		}},
 		{"a hard link to one made added", func(f string) { os.Link(filepath.Join(f, "a"), filepath.Join(f, "x")) }},
+		{"two made entries trading names", func(f string) {
+			os.Rename(filepath.Join(f, "a"), filepath.Join(f, "tmp"))
+			os.Rename(filepath.Join(f, "b"), filepath.Join(f, "a"))
+			os.Rename(filepath.Join(f, "tmp"), filepath.Join(f, "b"))
+		}},
+		{"one removed, a hard link to another in its place", func(f string) {
+			os.Remove(filepath.Join(f, "b"))
+			os.Link(filepath.Join(f, "a"), filepath.Join(f, "x"))
+		}},
 		{"the folder gone", func(f string) { os.RemoveAll(f) }},
 	} {
 		folder, ids := setup(t)
@@ -867,5 +876,21 @@ func TestProbeListsExactlyWhatWasMade(t *testing.T) {
 		if err := listsExactly(folder, ids); err == nil {
 			t.Errorf("%s: passed", c.name)
 		}
+	}
+	// One made entry the folder lists under another spelling (a folder
+	// that folds case lists A where a was made, as HFS+ lists a name
+	// decomposed): it passes where the folder still takes the made name for
+	// it, and not where it does not.
+	folder, ids = setup(t)
+	if err := os.Rename(filepath.Join(folder, "a"), filepath.Join(folder, "A")); err != nil {
+		t.Fatal(err)
+	}
+	err := listsExactly(folder, ids)
+	if collides(t, t.TempDir(), "A", "a") {
+		if err != nil {
+			t.Errorf("respelled, in a folder that takes a for A: %v", err)
+		}
+	} else if err == nil {
+		t.Error("respelled, in a folder that tells a from A: passed")
 	}
 }
