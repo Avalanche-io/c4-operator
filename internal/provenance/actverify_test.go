@@ -113,10 +113,38 @@ func TestDeviceKeySignsAlone(t *testing.T) {
 	if _, err := provenance.VerifyBundle(encode(t, b), f.Roots); !errors.Is(err, provenance.ErrUntrusted) {
 		t.Errorf("a device-signed act with two signatures: %v", err)
 	}
-	own.KeyID = "c4" + own.KeyID[2:]
+	orig := own.KeyID
+	own.KeyID = anotherKeyID(orig)
+	if own.KeyID == orig {
+		t.Fatal("the other key ID is the same one, so this test proves nothing")
+	}
 	b.DSSEEnvelope.Signatures = []provenance.Signature{own}
 	if _, err := provenance.VerifyBundle(encode(t, b), f.Roots); !errors.Is(err, provenance.ErrUntrusted) {
 		t.Errorf("a signature keyed by another key ID: %v", err)
+	}
+}
+
+// anotherKeyID returns a key ID that differs from id in its last hex
+// digit, whatever id is. Overwriting a prefix instead ("c4" + id[2:]) gave
+// the same ID back whenever a fingerprint began with those two digits, 1
+// time in 256, and then the test failed by chance.
+func anotherKeyID(id string) string {
+	last := id[len(id)-1]
+	other := byte('0')
+	if last == '0' {
+		other = '1'
+	}
+	return id[:len(id)-1] + string(other)
+}
+
+func TestAnotherKeyIDAlwaysDiffers(t *testing.T) {
+	for _, id := range []string{"c4" + strings.Repeat("0", 62), "c4" + strings.Repeat("f", 62), strings.Repeat("a", 64)} {
+		if "c4"+id[2:] == id && strings.HasPrefix(id, "c4") {
+			t.Logf("%.8s…: the old construction gives the same ID back", id)
+		}
+		if got := anotherKeyID(id); got == id || len(got) != len(id) {
+			t.Errorf("%.8s…: another key ID is %.8s…", id, got)
+		}
 	}
 }
 
