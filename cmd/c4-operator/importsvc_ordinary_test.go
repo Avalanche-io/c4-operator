@@ -586,21 +586,27 @@ func TestALostChangesetThatStaysLost(t *testing.T) {
 // back either, to before the line that recorded the parent, so that the
 // next import goes on from a view it can read.
 func TestTheCutLeft(t *testing.T) {
+	// p1 has three lines before c: imported under dev with a window of one
+	// commit, moved to on release, imported again under main. The parent
+	// stays known while any of them is left, so the cut is to before the
+	// first.
 	prior := []gitimport.Commit{
 		{Commit: "p0", Ref: "refs/heads/main"},
-		{Commit: "p1", Ref: "refs/heads/main"},
-		{Commit: "p1", Ref: "refs/heads/dev", RefOnly: true},
-		{Commit: "c", Ref: "refs/heads/main"},
+		{Commit: "p1", Ref: "refs/heads/dev", Base: true},
+		{Commit: "p1", Ref: "refs/heads/release", RefOnly: true},
+		{Commit: "p1", Ref: "refs/heads/main", Parent: "p0"},
+		{Commit: "c", Ref: "refs/heads/main", Parent: "p1"},
+		{Commit: "p1", Ref: "refs/heads/later", RefOnly: true},
 	}
-	lost := &gitimport.CannotRemake{Commit: "c", Line: 4}
+	lost := &gitimport.CannotRemake{Commit: "c", Line: 5}
 	for _, c := range []struct {
 		name string
 		err  error
 		line int
 	}{
-		{"the commit is gone", errors.New("commit c is not in the repository"), 4},
+		{"the commit is gone", errors.New("commit c is not in the repository"), 5},
 		{"the parent could not be put back", fmt.Errorf("x: %w", &gitimport.ParentNotRemade{Parent: "p1"}), 2},
-		{"a parent no line records", &gitimport.ParentNotRemade{Parent: "elsewhere"}, 4},
+		{"a parent no line records", &gitimport.ParentNotRemade{Parent: "elsewhere"}, 5},
 	} {
 		if got := cutLeft(prior, lost, c.err); !strings.Contains(got, fmt.Sprintf("cut the mapping back to before line %d and", c.line)) {
 			t.Errorf("%s: %q, want the cut to before line %d", c.name, got, c.line)
@@ -615,10 +621,29 @@ func TestTheCutLeft(t *testing.T) {
 // and that is said: in the log, the import's result and /refs, for that
 // ref and no other.
 func TestMissingLinesTheViewsReadAcross(t *testing.T) {
+	// With nothing between the gap and the next commit that changes
+	// something, and with one and two commits between that change nothing:
+	// the commit after a gap may be one with no changeset.
+	for empties := range 3 {
+		t.Run(fmt.Sprint(empties, " commits that change nothing after the gap"), func(t *testing.T) {
+			missingLinesAcross(t, empties)
+		})
+	}
+}
+
+func missingLinesAcross(t *testing.T, empties int) {
 	o := newOrdinary(t, 0)
-	for i, c := range []string{"1\n", "2\n", "1\n", "3\n", "4\n"} {
+	for i, c := range []string{"1\n", "2\n", "1\n"} {
 		o.commit(map[string]string{"a.txt": c})
 		o.ok(fmt.Sprint("commit ", i+1), "main")
+	}
+	for i := range empties {
+		o.empty()
+		o.ok(fmt.Sprint("commit that changes nothing ", i+1), "main")
+	}
+	for i, c := range []string{"3\n", "4\n"} {
+		o.commit(map[string]string{"a.txt": c})
+		o.ok(fmt.Sprint("commit after ", i+1), "main")
 	}
 	o.git(o.work, "checkout", "-q", "-b", "dev")
 	o.commit(map[string]string{"dev.txt": "dev\n"})
@@ -640,12 +665,6 @@ func TestMissingLinesTheViewsReadAcross(t *testing.T) {
 	rec, res := o.post(o.h, `{"ref":"refs/heads/main","after":"`+sha+`"}`, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("the next push: %d %s", rec.Code, rec.Body)
-	}
-	// The file held the two sections whose lines are gone, so it is made
-	// again as the chain the mapping still records, and the reason says
-	// why it is shorter.
-	if !strings.Contains(o.log.String(), "and lines of the chain are missing from the mapping before line 2") {
-		t.Fatalf("logged %q", o.log)
 	}
 	o.served("after the push", "main")
 	want := "lines of the chain of refs/heads/main are missing from the mapping before line 2: the commits they recorded are not published"

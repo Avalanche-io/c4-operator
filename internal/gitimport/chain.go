@@ -287,22 +287,32 @@ func ChainsRecorded(m []Commit) map[string]RecordedChain {
 // chainsRecorded reads the chains of every ref, or of only when it is set.
 //
 // Lines missing from the mapping are found two ways. A changeset that does
-// not apply to the view before it starts the chain again. And a changeset
-// line whose commit's git parent has no line before it: the importer
+// not apply to the view before it starts the chain again. And a line of an
+// imported commit whose git parent has no line before it: the importer
 // writes a line for a commit's parent before the commit (a parent not
 // imported yet is imported first, in full if need be), so a parent with no
 // line is a line gone. That second way finds a gap the views read across,
-// when the commits after it come back to a view from before it (a revert).
+// when the commits after it come back to a view from before it (a revert),
+// and it is checked on every imported commit's line, a commit that changes
+// nothing included, since the commit after a gap may be one. A commit
+// imported in full needs no parent, and a line that only moves a ref
+// imports nothing.
 func chainsRecorded(m []Commit, only string) map[string]*RecordedChain {
 	out := map[string]*RecordedChain{}
 	seen := map[string]bool{} // commits with a line so far, of any ref
 	for i := range m {
 		c := &m[i]
-		parentSeen := c.Parent == "" || seen[c.Parent]
+		gap := c.Commit != "" && !c.RefOnly && !c.Base && c.Parent != "" && !seen[c.Parent]
 		if c.Commit != "" {
 			seen[c.Commit] = true
 		}
-		if c.Ref == "" || only != "" && c.Ref != only || c.Changeset.IsNil() || c.ChainSeq < 1 {
+		if c.Ref == "" || only != "" && c.Ref != only {
+			continue
+		}
+		if c.Changeset.IsNil() || c.ChainSeq < 1 {
+			if cur := out[c.Ref]; gap && cur != nil {
+				cur.MissingBefore = i + 1
+			}
 			continue
 		}
 		cur := out[c.Ref]
@@ -313,7 +323,7 @@ func chainsRecorded(m []Commit, only string) map[string]*RecordedChain {
 			}
 			out[c.Ref] = cur
 		}
-		if c.ChainSeq != 1 && !parentSeen {
+		if gap {
 			cur.MissingBefore = i + 1
 		}
 		cur.Changesets = append(cur.Changesets, c.Changeset)

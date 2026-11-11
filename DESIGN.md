@@ -1140,33 +1140,36 @@ import step, so import must be fast and push-driven.
     parsed and reading only what was appended is to be done once for all
     three.
   - *A mapping cut at its end mends itself.* A cut line cannot pass for a
-    whole one (a JSON object without its end does not parse). A tail that
-    does not end a line, whether a cut line, lines that never reached the
-    disk, or zeros, is left out by a reader and taken off by the next
-    writer. Each commit lost that way is imported again when its ref is
-    next imported, and a lost line that only moved a ref is written again
-    then too; until then the ref is published as the shorter mapping has
-    it. An import is a function of the commit, so the commits come back to
-    the same views and changesets.
-  - *Lines gone from its middle stop nothing, and are said.* A changeset
-    that does not apply to the view before it starts the recorded chain
-    again from the view it does apply to, so the chain made and served is
-    the one from where the lines resume: as much as the mapping still
-    knows, every section of it checked. A gap the views read across (the
-    commits after it come back to a view from before it, as a revert does)
-    is found another way: the importer writes a line for a commit's parent
-    before the commit, so a changeset line whose commit's git parent has no
-    line is a line gone. Either way the commits whose lines are gone are
-    no longer published, and that is said in the reason the chain file is
-    made again, in a line the service logs on each import of the ref, in
-    the import's result (`chainMissingBefore`, the last mapping line before
-    which lines are missing) and in `GET /refs` for that ref, until the
-    importer starts the ref a new chain.
-    The same reading takes a mapping the importer before this one could
-    write: it took a file with a torn section on it as it stood and
-    counted the section, so its counts can skip a number with no line
-    missing. Read by views that is the whole chain, nothing is said to be
-    missing, and the file is made again once, without the torn section.
+    whole one (a JSON object without its end does not parse). A tail that does
+    not end a line, whether a cut line, lines that never reached the disk, or
+    zeros, is left out by a reader and taken off by the next writer. Each
+    commit lost that way is imported again when its ref is next imported, and
+    a lost line that only moved a ref is written again then too; until then
+    the ref is published as the shorter mapping has it. Imported again they
+    come back to the same views and changesets, except where a c4git object
+    has arrived in or been lost from the stores since (see what a remake
+    cannot do, below).
+  - *Lines gone from its middle stop nothing, and are said.* A changeset that
+    does not apply to the view before it starts the recorded chain again from
+    the view it does apply to, so the chain made and served is the one from
+    where the lines resume: as much as the mapping still knows, every section
+    of it checked. A gap the views read across (the commits after it come back
+    to a view from before it, as a revert does) is found another way: the
+    importer writes a line for a commit's parent before the commit, so the
+    line of an imported commit whose git parent has no line is a line gone.
+    That is checked on every imported commit's line, one that changes nothing
+    included, since the commit after a gap may be one; a commit imported in
+    full needs no parent, and a line that only moves a ref imports nothing.
+    Either way the commits whose lines are gone are no longer published, and
+    that is said in the reason the chain file is made again, in a line the
+    service logs on each import of the ref, in the import's result
+    (`chainMissingBefore`, the last mapping line before which lines are
+    missing) and in `GET /refs` for that ref, until the importer starts the
+    ref a new chain. The same reading takes a mapping the importer before this
+    one could write: it took a file with a torn section on it as it stood and
+    counted the section, so its counts can skip a number with no line missing.
+    Read by views that is the whole chain, nothing is said to be missing, and
+    the file is made again once, without the torn section.
   - *A changeset the store has lost is made again from the repository.*
     When a recorded chain cannot be made because the store does not hold
     one of its changesets, the next import of the ref imports that commit
@@ -1186,26 +1189,27 @@ import step, so import must be fast and push-driven.
     A file object the commit did not change is not put back either: a
     commit's import does not read it.
   - *What a remake cannot do.* The view a commit comes to depends on the
-    commit and, for c4git files, on which of their objects the c4git store
-    and the project store hold: an object missing at the first import and
-    there since, or there then and lost from both stores since, gives
-    another view. So it stays an error, saying which and why, when the
-    commit is not in the repository, when it comes to another view or
-    changeset than its line records (with c4git files, the error says the
-    stores may have changed), when its parent's view cannot be put back,
-    and when the line records its changeset in the form written before
-    2026-11-09, ending with the view's C4 ID, which is not written any
-    more. The objects a refused remake stored stay in the store, named by
-    nothing. Each of those errors names what is left, the cut below, with
-    what it costs the other refs: to before the changeset's line, or, when
-    the parent's view could not be put back, to before the line that
-    recorded the parent, so the next import goes on from a view it can
-    read. That cut assumes the views before it can be read along the
-    paths the next commits change; a record of an earlier view lost from
-    the store stops the next import as it does on main, and nothing here
-    makes it again. A changeset that is still not in the store after it
-    was made again (a store that says it holds what it does not) is an
-    error after one try, not a loop.
+    commit and, for c4git files, on which of their objects the c4git store and
+    the project store hold: an object missing at the first import and there
+    since, or there then and lost from both stores since, gives another view.
+    So it stays an error, saying which and why, when the commit is not in the
+    repository, when it comes to another view or changeset than its line
+    records (with c4git files, the error says the stores may have changed),
+    when its parent's view cannot be put back, and when the line records its
+    changeset in the form written before 2026-11-09, ending with the view's C4
+    ID, which is not written any more. The objects a refused remake stored
+    stay in the store, named by nothing. Each of those errors names what is
+    left, the cut below, with what it costs the other refs: to before the
+    changeset's line, or, when the parent's view could not be put back, to
+    before the first line that names the parent (it stays known by its view
+    while any line names it: an import under another ref, one in full, a line
+    that moved a ref to it), so the next import goes on from a view it can
+    read. That cut assumes the views before it can be read along the paths the
+    next commits change; a record of an earlier view lost from the store stops
+    the next import as it does on main, and nothing here makes it again. A
+    changeset that is still not in the store after it was made again (a store
+    that says it holds what it does not) is an error after one try, not a
+    loop.
   - *A wrong object is not written over.* A store keeps the object it has
     under a C4 ID, so a changeset the store holds wrongly cannot be made
     again until the object is removed; the error says so, and the next

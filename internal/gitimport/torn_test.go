@@ -519,6 +519,19 @@ func TestWhatTheMappingRecordsOfAChain(t *testing.T) {
 			t.Fatalf("with %s for the parent: %+v", name, rc)
 		}
 	}
+	// The commit after the gap may be one that changes nothing: its line
+	// has no changeset, and its parent is the one with no line. The next
+	// changeset's parent is that commit, which has a line.
+	empty := Commit{Commit: "e", Parent: "c3", Ref: "main", View: h.views[1], ParentView: h.views[1], ChainBase: h.views[0], ChainSeq: 1}
+	after := Commit{Commit: "c4", Parent: "e", Ref: "main", View: h.views[2], ParentView: h.views[1], Changeset: all[1].Changeset, ChainBase: h.views[0], ChainSeq: 4}
+	if rc, ok := ChainRecorded([]Commit{across[0], empty, after}, "main"); !ok || rc.MissingBefore != 2 || len(rc.Changesets) != 2 {
+		t.Fatalf("a gap then a commit that changes nothing: %+v", rc)
+	}
+	// A commit imported in full needs no parent line.
+	base := Commit{Commit: "b", Parent: "outside-the-window", Base: true, Ref: "main", View: h.views[1], ParentView: h.views[0], Changeset: all[0].Changeset, ChainBase: h.views[0], ChainSeq: 1}
+	if rc, ok := ChainRecorded([]Commit{base}, "main"); !ok || rc.MissingBefore != 0 {
+		t.Fatalf("a commit imported in full: %+v", rc)
+	}
 	// A chain the importer starts again clears it.
 	again := Commit{Commit: "c5", Parent: "c4", Ref: "main", View: h.views[3], ParentView: h.views[2], Changeset: all[2].Changeset, ChainBase: h.views[2], ChainSeq: 1}
 	if rc, _ := ChainRecorded(append(append([]Commit(nil), across...), again), "main"); rc.MissingBefore != 0 || len(rc.Changesets) != 1 {

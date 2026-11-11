@@ -244,16 +244,18 @@ func (s *importService) openChain(ctx context.Context, ref string, prior []gitim
 // made again from the repository. Cut back to before the changeset's line,
 // the next import goes on from the view of the ref's line before it, which
 // is the changeset's parent's. When the records of that view are lost too
-// and could not be put back, that would fail in turn, so the cut is to
-// before the line that recorded the parent: the import then goes on from
-// one view further back and imports the parent as well.
+// and could not be put back, that would fail in turn: the parent stays
+// known, by its view, while any line names it (an import under another
+// ref, an import in full, a line that moved a ref to it). So the cut is to
+// before the first line that names the parent, and the next import goes
+// on from a view further back and imports the parent as well.
 func cutLeft(prior []gitimport.Commit, lost *gitimport.CannotRemake, err error) string {
 	var pn *gitimport.ParentNotRemade
 	if !errors.As(err, &pn) {
 		return lost.CutBack()
 	}
-	for i := lost.Line - 2; i >= 0; i-- {
-		if prior[i].Commit == pn.Parent && !prior[i].RefOnly {
+	for i := 0; i < lost.Line-1; i++ {
+		if prior[i].Commit == pn.Parent {
 			return (&gitimport.CannotRemake{Line: i + 1}).CutBack()
 		}
 	}
