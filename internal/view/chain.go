@@ -217,11 +217,14 @@ func bareID(line string) (c4.ID, bool) {
 }
 
 // ApplyPatch applies a c4m patch to the view base, the view it was made
-// over, with c4m's patch semantics, matched by path: an entry identical to
-// the base's, with no children under it, removes that path; a differing
-// entry replaces it; a new path is added; a directory entry followed by
-// children merges them. It reads only the base's records along the patch's
-// paths.
+// over, with c4m's patch semantics, matched by path: an entry identical in
+// every field, as written, to the base's entry as recorded, with no
+// children under it, removes that path (entriesIdentical); any other entry
+// replaces it, projected as every view's entry is; a new path is added; a
+// directory entry followed by children merges them. It reads only the
+// base's records along the patch's paths. base must be a view: its records
+// are read projected, so a patch over a description with dates is read by
+// the resolver (FromBytes, FromID), which holds it as recorded.
 func ApplyPatch(ctx context.Context, base c4.ID, patch *c4m.Manifest, src RecordSource) (*Applied, error) {
 	t := &atree{ctx: ctx, src: src, root: &anode{base: base}}
 	if err := applyPatchFrom(t, t, patch, false); err != nil {
@@ -287,28 +290,6 @@ func ApplyPatchFrom(ctx context.Context, target, base c4.ID, patch *c4m.Manifest
 	return res, nil
 }
 
-// restatesExactly reports whether a patch entry, as written, restates the
-// entry its base records at that path exactly, which with no children under
-// it removes the path. c4m SPECIFICATION.md, "Patch Entry Semantics": "'All
-// fields identical' means: same name, mode, timestamp, size, C4 ID, and
-// target. This enables removal by restating an entry exactly — there is no
-// separate delete syntax." Any field that differs makes the entry a write,
-// whatever a view's projection later does with that field: compared as
-// projected, a file restated with another mode or date read as a removal
-// (the reader of the grant-ids branch). The base's entry is as its record
-// holds it, so a removal this system writes (from records) is exact.
-func restatesExactly(base, patch *c4m.Entry) bool {
-	return strings.TrimSuffix(base.Name, "/") == strings.TrimSuffix(patch.Name, "/") &&
-		base.Mode == patch.Mode &&
-		base.Timestamp.Equal(patch.Timestamp) &&
-		base.Size == patch.Size &&
-		base.C4ID == patch.C4ID &&
-		base.Target == patch.Target &&
-		base.HardLink == patch.HardLink &&
-		base.FlowDirection == patch.FlowDirection &&
-		base.FlowTarget == patch.FlowTarget
-}
-
 // applyPatchFrom walks a patch once. What each entry means is read from
 // tb, the tree the patch was made over; the edit is made in tt. They are
 // one tree when a patch is applied to its own base, and tb is never edited
@@ -348,7 +329,7 @@ func applyPatchFrom(tt, tb *atree, patch *c4m.Manifest, carried bool) error {
 			existing, had = from.orig[name]
 		}
 		path := strings.Join(stack, "")
-		if had && !hasChildren && restatesExactly(existing, e) {
+		if had && !hasChildren && entriesIdentical(existing, e) {
 			// An exact restatement: the patch removes the path. In another
 			// tree there may be nothing there to remove.
 			to := from

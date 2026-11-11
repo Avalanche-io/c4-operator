@@ -15,11 +15,9 @@ import (
 // it with no filter, whatever the Materialization's include: the first
 // view of its chain (a changeset's base) and the last (the view a
 // changeset makes, or a plain description's own). The same resolver mounts
-// it, so what a grant is matched against is what is mounted; a second
-// reading of the patch could differ from it (view.ApplyPatch takes an
-// entry restated with another mode or date as a removal, where the
-// resolver keeps it). A RootID, the description's root lines as stated, is
-// not one: a hand-made c4m can state any. Every read is hashed
+// it, so what a grant is matched against is what is mounted, never a
+// separate reading of the patch. A RootID, the description's root lines as
+// stated, is not one: a hand-made c4m can state any. Every read is hashed
 // (view.Checked), and the result is remembered by project and source byte
 // ID, since a source never changes: a hit reads nothing, so it is never
 // carried from one project's store to another's.

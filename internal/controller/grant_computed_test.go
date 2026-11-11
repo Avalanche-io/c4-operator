@@ -244,12 +244,12 @@ func TestGrantIDsUnit(t *testing.T) {
 	}
 }
 
-// The grant is matched against what the resolver mounts, not against a
-// second reading of the patch. A changeset over an ungranted view B (a
-// granted G and one more file) that restates that file with another mode
-// and date is read by view.ApplyPatch as removing it, which would make G,
-// and by the resolver as keeping it, which mounts B (the independent
-// reader of this branch). It is refused.
+// The grant is matched against what the resolver mounts. A changeset over
+// an ungranted view B (a granted G and one more file) that restates that
+// file with another mode and date is a write, never a removal (c4m
+// SPECIFICATION.md, "Patch Entry Semantics"), so it makes B, not G, and it
+// is refused. Before the operator had one patch reader, view.ApplyPatch
+// read it as a removal, which would have made G.
 func TestAGrantIsMatchedAgainstWhatIsMounted(t *testing.T) {
 	ctx := context.Background()
 	st := newStore(t)

@@ -1,6 +1,7 @@
 package view
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -13,13 +14,13 @@ import (
 	"github.com/Avalanche-io/c4/c4m"
 )
 
-// The operator's one patch reader (ApplyPatch, ApplyPatchFrom, and the
-// resolver, which applies changesets through it) meets c4's shared
-// apply-from vector, projected into view space: base, target and expected
-// are each case's views, and the patch is each entry projected, as a
-// changeset over a view is written. testdata/apply-from-vector/COPIED.md
+// Both of the operator's patch readers meet c4's shared apply-from vector,
+// projected into view space: ApplyPatchFrom, over a view's records, and the
+// resolver, where the patch's target is its base. base, target and
+// expected are each case's views, and the patch is each entry projected, as
+// a changeset over a view is written. testdata/apply-from-vector/COPIED.md
 // says where the vector came from and when it goes.
-func TestTheOnePatchReaderMeetsTheSharedVector(t *testing.T) {
+func TestThePatchReadersMeetTheSharedVector(t *testing.T) {
 	ctx := context.Background()
 	st := objStore{}
 	all, _ := NewFilter(nil)
@@ -89,13 +90,14 @@ func TestTheOnePatchReaderMeetsTheSharedVector(t *testing.T) {
 	}
 }
 
-// An entry restated with another mode and date is a write, never a
-// removal: c4m SPECIFICATION.md, "Patch Entry Semantics": "'All fields
-// identical' means: same name, mode, timestamp, size, C4 ID, and target."
-// A view B holding secret.mov, and a changeset over it restating secret.mov
-// with its ID and size and another mode and date: the view it makes keeps
-// secret.mov, through ApplyPatch and through the resolver alike; an exact
-// restatement removes it.
+// An entry restated with any field different is a write, never a removal:
+// c4m SPECIFICATION.md, "Patch Entry Semantics": "'All fields identical'
+// means: same name, mode, timestamp, size, C4 ID, and target." A view B
+// holds secret.mov and a link; a changeset over it restates one of them
+// with one field changed (secret.mov with its ID and size and another mode
+// and date is the case that once mounted B under a grant of the smaller
+// view without it). The view it makes keeps the path, through ApplyPatch
+// and through the resolver alike; an exact restatement removes it.
 func TestARestatedEntryIsAWrite(t *testing.T) {
 	ctx := context.Background()
 	st := objStore{}
@@ -104,7 +106,10 @@ func TestARestatedEntryIsAWrite(t *testing.T) {
 	kept := c4.Identify(strings.NewReader("kept"))
 	bm := c4m.NewManifest()
 	bm.AddEntry(&c4m.Entry{Name: "kept.txt", Mode: 0o644, Size: 4, Timestamp: c4m.NullTimestamp(), C4ID: kept})
-	bm.AddEntry(&c4m.Entry{Name: "secret.mov", Mode: 0o644, Size: 18, Timestamp: c4m.NullTimestamp(), C4ID: secret})
+	link := &c4m.Entry{Name: "link", Mode: os.ModeSymlink | 0o777, Size: 8, Timestamp: c4m.NullTimestamp(), Target: "kept.txt"}
+	bm.AddEntry(link)
+	file := &c4m.Entry{Name: "secret.mov", Mode: 0o644, Size: 18, Timestamp: c4m.NullTimestamp(), C4ID: secret}
+	bm.AddEntry(file)
 	bb, err := c4m.Marshal(bm)
 	if err != nil {
 		t.Fatal(err)
@@ -118,24 +123,36 @@ func TestARestatedEntryIsAWrite(t *testing.T) {
 	for _, r := range recs {
 		st[r.ID] = r.Data
 	}
-	hasSecret := func(v *View) bool {
-		_, ok := v.Root.Files["secret.mov"]
+	has := func(v *View, name string) bool {
+		_, ok := v.Root.Files[name]
 		return ok
 	}
-	restated := func(mode os.FileMode, when time.Time) *c4m.Manifest {
+	// restated is the entry as B's record holds it, with one change.
+	restated := func(e *c4m.Entry, change func(*c4m.Entry)) *c4m.Manifest {
+		cp := Project(e)
+		change(cp)
 		m := c4m.NewManifest()
-		m.AddEntry(&c4m.Entry{Name: "secret.mov", Mode: mode, Size: 18, Timestamp: when, C4ID: secret})
+		m.AddEntry(cp)
 		return m
 	}
+	date := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	other := c4.Identify(strings.NewReader("another cut"))
 	for _, c := range []struct {
 		name  string
+		entry *c4m.Entry
 		patch *c4m.Manifest
 		keeps bool
 	}{
-		{"another mode and date", restated(0o600, time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)), true},
-		{"another date", restated(0, time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)), true},
-		{"exactly as recorded", restated(0, c4m.NullTimestamp()), false},
+		{"another mode and date", file, restated(file, func(e *c4m.Entry) { e.Mode, e.Timestamp = 0o600, date }), true},
+		{"another date", file, restated(file, func(e *c4m.Entry) { e.Timestamp = date }), true},
+		{"another mode", file, restated(file, func(e *c4m.Entry) { e.Mode = 0o600 }), true},
+		{"another size", file, restated(file, func(e *c4m.Entry) { e.Size = 19 }), true},
+		{"another C4 ID", file, restated(file, func(e *c4m.Entry) { e.C4ID = other }), true},
+		{"exactly as recorded", file, restated(file, func(*c4m.Entry) {}), false},
+		{"a link with another target", link, restated(link, func(e *c4m.Entry) { e.Target = "secret.mov" }), true},
+		{"a link exactly as recorded", link, restated(link, func(*c4m.Entry) {}), false},
 	} {
+		name := c.entry.Name
 		a, err := ApplyPatch(ctx, b.ID, c.patch, StoreRecords(st))
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
@@ -147,8 +164,8 @@ func TestARestatedEntryIsAWrite(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if hasSecret(made) != c.keeps {
-			t.Errorf("%s: ApplyPatch kept secret.mov %v, want %v", c.name, hasSecret(made), c.keeps)
+		if has(made, name) != c.keeps {
+			t.Errorf("%s: ApplyPatch kept %s %v, want %v", c.name, name, has(made, name), c.keeps)
 		}
 		cs, err := EncodeChangeset(b.ID, c.patch)
 		if err != nil {
@@ -158,8 +175,66 @@ func TestARestatedEntryIsAWrite(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if hasSecret(rr.View()) != c.keeps || rr.View().ID != a.ID {
-			t.Errorf("%s: the resolver kept secret.mov %v (view %s), ApplyPatch made %s", c.name, hasSecret(rr.View()), rr.View().ID, a.ID)
+		if has(rr.View(), name) != c.keeps || rr.View().ID != a.ID {
+			t.Errorf("%s: the resolver kept %s %v (view %s), ApplyPatch made %s", c.name, name, has(rr.View(), name), rr.View().ID, a.ID)
+		}
+	}
+}
+
+// A changeset's base is what its base ID names, as recorded. Over a stored
+// description with dates (each level a one-level c4m, as c4 writes them),
+// an entry restated exactly as the description holds it, date and all, is
+// a removal, as a patch from c4 diff writes one, and the same entry
+// projected, as a view holds it, is a write. Read against the base's view
+// instead, the two swap, and c4 diff's removals would be kept.
+func TestAChangesetOverADescriptionReadsItAsRecorded(t *testing.T) {
+	st := objStore{}
+	all, _ := NewFilter(nil)
+	when := time.Date(2021, 3, 4, 5, 6, 7, 0, time.UTC)
+	put := func(m *c4m.Manifest) (c4.ID, int64) {
+		b, err := c4m.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id := c4.Identify(bytes.NewReader(b))
+		st[id] = b
+		return id, int64(len(b))
+	}
+	a := c4.Identify(strings.NewReader("aaaa"))
+	b := c4.Identify(strings.NewReader("bbbb"))
+	sub := c4m.NewManifest()
+	sub.AddEntry(&c4m.Entry{Name: "b.txt", Mode: 0o644, Size: 4, Timestamp: when, C4ID: b})
+	subID, subSize := put(sub)
+	root := c4m.NewManifest()
+	dated := &c4m.Entry{Name: "a.txt", Mode: 0o644, Size: 4, Timestamp: when, C4ID: a}
+	root.AddEntry(dated)
+	root.AddEntry(&c4m.Entry{Name: "sub/", Mode: os.ModeDir | 0o755, Size: 4 + subSize, Timestamp: when, C4ID: subID})
+	rootID, _ := put(root)
+	for _, c := range []struct {
+		name  string
+		entry *c4m.Entry
+		keeps bool
+	}{
+		{"as the description records it", dated, false},
+		{"as its view records it", Project(dated), true},
+	} {
+		p := c4m.NewManifest()
+		cp := *c.entry
+		p.AddEntry(&cp)
+		cs, err := EncodeChangeset(rootID, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := FromBytes(cs, st, all)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, kept := res.View().Root.Files["a.txt"]
+		if kept != c.keeps {
+			t.Errorf("restated %s: a.txt kept %v, want %v", c.name, kept, c.keeps)
+		}
+		if _, ok := res.View().Root.Dirs["sub/"]; !ok {
+			t.Errorf("restated %s: sub/ is gone", c.name)
 		}
 	}
 }

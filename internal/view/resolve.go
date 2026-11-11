@@ -2,10 +2,10 @@ package view
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/Avalanche-io/c4"
@@ -121,105 +121,10 @@ type resolver struct {
 	// nothing below the top level, so nothing below it is kept, and each
 	// level costs its own lines, not the chain's.
 	desc *c4m.Manifest
-	// made holds the records ApplyPatch made for the changesets resolved,
-	// read through st (madeStore) as if stored.
-	made map[c4.ID][]byte
-	// view is the view of the level last resolved, when it is known
-	// without resolving it again unfiltered: a stored record's own ID, the
-	// view a changeset made, the empty tree. plain is that level's
-	// description when it is a plain c4m and view is not known.
-	view  c4.ID
-	plain []byte
 }
 
 func newResolver(st Store, f Filter) *resolver {
-	made := map[c4.ID][]byte{}
-	return &resolver{st: madeStore{made, st}, f: f, seen: map[c4.ID]bool{}, made: made}
-}
-
-// madeStore serves the records a resolution made, then the store.
-type madeStore struct {
-	made map[c4.ID][]byte
-	st   Store
-}
-
-func (m madeStore) Open(id c4.ID) (io.ReadCloser, error) {
-	if b, ok := m.made[id]; ok {
-		return io.NopCloser(bytes.NewReader(b)), nil
-	}
-	if m.st == nil {
-		return nil, fmt.Errorf("%s: no store", id)
-	}
-	return m.st.Open(id)
-}
-
-// apply applies a changeset's patch over the view of the level resolved
-// before it, with the operator's one patch reader (ApplyPatch), and
-// returns the made view's items as the resolver walks any view: from its
-// records, under the filter. The made records are kept in r.made.
-func (r *resolver) apply(patch *c4m.Manifest) ([]item, error) {
-	base, err := r.baseView()
-	if err != nil {
-		return nil, err
-	}
-	a, err := ApplyPatch(context.Background(), base, patch, StoreRecords(r.st))
-	if err != nil {
-		return nil, err
-	}
-	for _, rec := range a.Records {
-		r.made[rec.ID] = rec.Data
-	}
-	r.view, r.plain = a.ID, nil
-	return r.viewItems(a.ID)
-}
-
-// baseView is the view of the level last resolved: known, or resolved
-// again with no filter when that level was a plain c4m.
-func (r *resolver) baseView() (c4.ID, error) {
-	if !r.view.IsNil() {
-		return r.view, nil
-	}
-	if r.plain == nil {
-		return c4.ID{}, errors.New("a changeset's base has no view")
-	}
-	all, err := NewFilter(nil)
-	if err != nil {
-		return c4.ID{}, err
-	}
-	res, err := FromBytes(r.plain, r.st, all)
-	if err != nil {
-		return c4.ID{}, err
-	}
-	v := res.View()
-	recs, err := v.Records()
-	if err != nil {
-		return c4.ID{}, err
-	}
-	for _, rec := range recs {
-		r.made[rec.ID] = rec.Data
-	}
-	r.view = v.ID
-	return v.ID, nil
-}
-
-// viewItems walks a view from its root record, under the filter.
-func (r *resolver) viewItems(id c4.ID) ([]item, error) {
-	if id == emptyID {
-		return nil, nil
-	}
-	data, err := ReadObject(r.st, id)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrIncomplete, err)
-	}
-	m, err := c4m.NewDecoder(bytes.NewReader(data)).Decode()
-	if err != nil {
-		return nil, fmt.Errorf("view %s: %w", id, err)
-	}
-	var items []item
-	if err := r.walk(m, "", true, &items); err != nil {
-		return nil, err
-	}
-	return items, nil
+	return &resolver{st: st, f: f, seen: map[c4.ID]bool{}}
 }
 
 func (r *resolver) finish(levels [][]item) (*Resolved, error) {
@@ -328,7 +233,6 @@ func (r *resolver) resolveID(id c4.ID, depth int) ([][]item, error) {
 	}
 	if id == emptyID {
 		r.desc = c4m.NewManifest()
-		r.view, r.plain = emptyID, nil
 		return [][]item{nil}, nil
 	}
 	data, err := ReadObject(r.st, id)
@@ -337,14 +241,7 @@ func (r *resolver) resolveID(id c4.ID, depth int) ([][]item, error) {
 	}
 	r.seen[id] = true
 	defer delete(r.seen, id)
-	levels, err := r.resolveData(data, depth)
-	if err == nil && r.view.IsNil() {
-		// A stored one-level record is a view, named by its own ID.
-		if _, rerr := ParseRecord(data); rerr == nil {
-			r.view, r.plain = id, nil
-		}
-	}
-	return levels, err
+	return r.resolveData(data, depth)
 }
 
 // resolveData returns the chain of item sets a description resolves to,
@@ -376,7 +273,6 @@ func (r *resolver) resolveData(data []byte, depth int) ([][]item, error) {
 			return nil, err
 		}
 		r.desc = topLevel(m)
-		r.view, r.plain = c4.ID{}, data
 		return [][]item{items}, nil
 	}
 	if depth >= MaxChain {
@@ -389,7 +285,7 @@ func (r *resolver) resolveData(data []byte, depth int) ([][]item, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parent %s: %w", m.Base, err)
 	}
-	top, err := r.apply(m)
+	top, err := r.applyPatch(chain[len(chain)-1], m)
 	if err != nil {
 		return nil, err
 	}
@@ -412,7 +308,7 @@ func (r *resolver) resolveSections(sections []*c4m.PatchSection, depth int) ([][
 	}
 	for _, sec := range sections {
 		patch := &c4m.Manifest{Version: "1.0", Entries: sec.Entries}
-		top, err := r.apply(patch)
+		top, err := r.applyPatch(levels[len(levels)-1], patch)
 		if err != nil {
 			return nil, err
 		}
@@ -485,6 +381,118 @@ func (r *resolver) expandRecord(id c4.ID, dir string, out *[]item) error {
 	r.seen[id] = true
 	defer delete(r.seen, id)
 	return r.walk(sub, dir, true, out)
+}
+
+// applyPatch folds a changeset block over its parent's items with c4m
+// patch semantics, matched by path (as c4m.ApplyPatch): an entry
+// identical to the parent's, with no children under it, removes that
+// path and everything below it; a differing entry replaces the parent's;
+// a new path is added. It works on sparse parents: only paths the filter
+// reached are present, and patch entries elsewhere are kept as given.
+func (r *resolver) applyPatch(parent []item, block *c4m.Manifest) ([]item, error) {
+	var patch []item
+	if err := r.walk(block, "", false, &patch); err != nil {
+		return nil, err
+	}
+	byPath := make(map[string]item, len(parent)+len(patch))
+	for _, it := range parent {
+		byPath[it.path] = it
+	}
+	removeUnder := func(dir string) {
+		for p := range byPath {
+			if p != dir && strings.HasPrefix(p, dir) {
+				delete(byPath, p)
+			}
+		}
+	}
+
+	// Removals first: an entry identical to the parent's at the same path,
+	// with nothing under it. Doing them first keeps a type change (file
+	// "a" replacing directory "a/") independent of entry order.
+	rest := patch[:0:0]
+	for _, p := range patch {
+		old, ok := byPath[p.path]
+		if !ok || p.hasChildren || !entriesIdentical(old.entry, p.entry) {
+			rest = append(rest, p)
+			continue
+		}
+		delete(byPath, old.path)
+		if old.isDir {
+			removeUnder(old.path)
+		}
+	}
+
+	for _, p := range rest {
+		old, exists := lookup(byPath, p.path)
+		switch {
+		case !exists:
+			byPath[p.path] = p
+			if !p.isDir || p.hasChildren || p.entry.C4ID.IsNil() || p.entry.C4ID == emptyID || !r.f.MayContain(p.path) {
+				continue
+			}
+			var sub []item
+			if err := r.expandRecord(p.entry.C4ID, p.path, &sub); err != nil {
+				return nil, err
+			}
+			for _, s := range sub {
+				byPath[s.path] = s
+			}
+		case !p.hasChildren && entriesIdentical(old.entry, p.entry):
+			delete(byPath, old.path)
+			if old.isDir {
+				removeUnder(old.path)
+			}
+		default:
+			if old.path != p.path {
+				// A file replaced a directory or the reverse.
+				delete(byPath, old.path)
+				if old.isDir {
+					removeUnder(old.path)
+				}
+			}
+			byPath[p.path] = p
+		}
+	}
+
+	out := make([]item, 0, len(byPath))
+	for _, it := range byPath {
+		out = append(out, it)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].path < out[j].path })
+	return out, nil
+}
+
+// lookup finds the parent's item at a path as a file or a directory.
+func lookup(m map[string]item, p string) (item, bool) {
+	if it, ok := m[p]; ok {
+		return it, true
+	}
+	alt := strings.TrimSuffix(p, "/")
+	if alt == p {
+		alt = p + "/"
+	}
+	it, ok := m[alt]
+	return it, ok
+}
+
+// entriesIdentical reports whether a patch entry, as written, restates the
+// entry its base records at that path exactly, which with no children under
+// it removes the path. c4m SPECIFICATION.md, "Patch Entry Semantics": "'All
+// fields identical' means: same name, mode, timestamp, size, C4 ID, and
+// target. This enables removal by restating an entry exactly — there is no
+// separate delete syntax." Any field that differs makes the entry a write,
+// whatever a view's projection later does with that field. Both patch
+// readers (the resolver's, and ApplyPatch over a view's records) use it.
+func entriesIdentical(a, b *c4m.Entry) bool {
+	return strings.TrimSuffix(a.Name, "/") == strings.TrimSuffix(b.Name, "/") &&
+		a.Mode == b.Mode &&
+		a.Timestamp.Equal(b.Timestamp) &&
+		a.Size == b.Size &&
+		a.C4ID == b.C4ID &&
+		a.Target == b.Target &&
+		a.HardLink == b.HardLink &&
+		a.FlowDirection == b.FlowDirection &&
+		a.FlowTarget == b.FlowTarget
 }
 
 // expandSequence turns frame.[0001-0100].exr into its member files using

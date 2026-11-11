@@ -302,6 +302,27 @@ Whoever makes a changeset keeps the new view's ID beside it (a pod's
 `output-tree` annotation, a job's `status.output.view`, a commit's line in
 the import mapping), and anyone can recompute it by applying the patch.
 
+**Reading a patch.** An entry restated exactly as the patch's base records
+it, with no children under it, is a removal; any other is a write. c4m
+SPECIFICATION.md, "Patch Entry Semantics": "'All fields identical' means:
+same name, mode, timestamp, size, C4 ID, and target." The patch entry is
+compared as written, every field, with the base's entry as recorded
+(`entriesIdentical`), and a directory restated with children under it is
+deepened, never removed. The base is what the patch's base ID names. The
+operator reads patches in two places, with that one comparison. The
+resolver (`FromBytes`, `FromID`: every mount, and grant lookup) holds a
+base as it is recorded, a view or a description with dates, so a patch
+from `c4 diff` over a stored description removes what it restates.
+`view.ApplyPatch` and `ApplyPatchFrom` (a git import's chain check, a fold
+of a job's output) take a view as their base and read only its records
+along the patch's paths; what they write is projected, as every view's
+entry is. A changeset this system writes over a view is projected already,
+so both read it alike. Both are held to c4's shared apply-from vector,
+projected into view space, to the restated-entry case, and the resolver to
+a changeset over a dated description
+(`internal/view/patch_conformance_test.go`); the vector is a local copy
+until c4's carries the restated case too.
+
 **No record or changeset is stored that does not read back as written.**
 Records and changesets are made in two places, `view.Apply` (a git import,
 a capture, a fold of a job's output through `ApplyPatchFrom`) and
@@ -801,9 +822,7 @@ credentials.
     whatever the include, every read hashed: the first of its chain (a
     changeset's base) and the last (the view it makes, or a plain
     description's own). The same resolver mounts it, so the grant is
-    matched against what is mounted: a second reading of a patch can differ
-    (`view.ApplyPatch` reads an entry restated with another mode or date as
-    a removal where the resolver keeps it). It is resolved once per source
+    matched against what is mounted. It is resolved once per source
     and remembered by project and the source's byte ID, since a source
     never changes; a hit reads nothing, so it is never carried from one
     project's store to another's. A
