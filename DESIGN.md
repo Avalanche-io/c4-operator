@@ -315,13 +315,22 @@ base as it is recorded, a view or a description with dates, so a patch
 from `c4 diff` over a stored description removes what it restates.
 `view.ApplyPatch` and `ApplyPatchFrom` (a git import's chain check, a fold
 of a job's output) take a view as their base and read only its records
-along the patch's paths; what they write is projected, as every view's
-entry is. A changeset this system writes over a view is projected already,
-so both read it alike. Both are held to c4's shared apply-from vector,
-projected into view space, to the restated-entry case, and the resolver to
-a changeset over a dated description
-(`internal/view/patch_conformance_test.go`); the vector is a local copy
-until c4's carries the restated case too.
+along the patch's paths, and refuse a record that holds anything a view
+does not; a file or link they write is projected. A changeset this system
+writes over a view is projected already, and on every such shape the two
+read it alike (the reviewer of `restated-entry`: 48,654 generated cases).
+Shapes no writer here produces still read differently in the two, on main
+as on the branch: a new directory written by its C4 ID alone with a size
+or record that is not its view's (`ApplyPatch` takes the line as stated,
+so its result may not verify; the resolver expands it), a file and a
+directory of one name in one patch, and a sequence entry. One reader
+removes them by construction, and is remaining work. `ApplyPatchFrom` is
+held to c4's shared apply-from vector, projected into view space, on
+every case; the resolver on the one whose target is its base; the two are
+compared with each other on all of them, and both are held to the
+restated-entry case and the resolver to a changeset over a dated
+description (`internal/view/patch_conformance_test.go`). The vector is a
+local copy until c4's carries the restated case too.
 
 **No record or changeset is stored that does not read back as written.**
 Records and changesets are made in two places, `view.Apply` (a git import,

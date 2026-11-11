@@ -15,9 +15,11 @@ import (
 	"github.com/Avalanche-io/c4/c4m"
 )
 
-// Both of the operator's patch readers meet c4's shared apply-from vector,
-// projected into view space: ApplyPatchFrom, over a view's records, and the
-// resolver, where the patch's target is its base. base, target and
+// The operator's patch readers meet c4's shared apply-from vector,
+// projected into view space: ApplyPatchFrom, over a view's records, on
+// every case, and the resolver on the one case whose target is its base
+// (own-base); TestThePatchReadersAgree compares the two on all of them.
+// base, target and
 // expected are each case's views, and the patch is each entry projected, as
 // a changeset over a view is written. testdata/apply-from-vector/COPIED.md
 // says where the vector came from and when it goes.
@@ -322,29 +324,42 @@ func TestThePatchReadersAgree(t *testing.T) {
 // line removing the file: one of the questions about patches open in draft
 // c4 #89. The two readers are to agree on it, whatever the ruling, and
 // this is the case that shows whether they do; until the ruling there is
-// no expected view to hold either to. Run unskipped on 2026-11-11 they do
-// not agree: one reader's view is not the other's (finding 27's 977 of
-// 4,915 generated cases are this shape), so the ruling comes with a fix
-// to one reader or both.
+// no expected view to hold either to. The directory line is exactly as a
+// view records it, true size and all, so nothing but the shape is in
+// question. Run unskipped on 2026-11-11 they do not agree, and the
+// resolver's view holds x/ empty, neither the file nor what the line names
+// (finding 27's 977 of 4,915 generated cases are this shape), so the
+// ruling comes with a fix to one reader or both.
 func TestTheReadersAgreeOnADirectoryWrittenByIDOverAFile(t *testing.T) {
 	t.Skip("unruled: a directory written by its C4 ID over a file of that name (draft c4 #89)")
 	ctx := context.Background()
 	st := objStore{}
 	all, _ := NewFilter(nil)
-	inner := c4m.NewManifest()
-	inner.AddEntry(&c4m.Entry{Name: "in.txt", Size: 2, Timestamp: c4m.NullTimestamp(), C4ID: c4.Identify(strings.NewReader("in"))})
-	ib, err := c4m.Marshal(inner)
+	// x/ as a view records it: the root record of a view holding it.
+	holder := c4m.NewManifest()
+	holder.AddEntry(&c4m.Entry{Name: "x/", Mode: os.ModeDir, Size: -1, Timestamp: c4m.NullTimestamp()})
+	holder.AddEntry(&c4m.Entry{Name: "in.txt", Depth: 1, Size: 2, Timestamp: c4m.NullTimestamp(), C4ID: c4.Identify(strings.NewReader("in"))})
+	hb, err := c4m.Marshal(holder)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ir, err := FromBytes(ib, st, all)
+	hr, err := FromBytes(hb, st, all)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir := ir.View()
-	recs, _ := dir.Records()
+	hv := hr.View()
+	recs, _ := hv.Records()
+	var line *c4m.Entry
 	for _, r := range recs {
 		st[r.ID] = r.Data
+		if r.ID != hv.ID {
+			continue
+		}
+		es, err := ParseRecord(r.Data)
+		if err != nil || len(es) != 1 {
+			t.Fatalf("the holder's root record: %v", err)
+		}
+		line = es[0]
 	}
 	bm := c4m.NewManifest()
 	bm.AddEntry(&c4m.Entry{Name: "x", Size: 1, Timestamp: c4m.NullTimestamp(), C4ID: c4.Identify(strings.NewReader("x"))})
@@ -362,10 +377,16 @@ func TestTheReadersAgreeOnADirectoryWrittenByIDOverAFile(t *testing.T) {
 		st[r.ID] = r.Data
 	}
 	patch := c4m.NewManifest()
-	patch.AddEntry(&c4m.Entry{Name: "x/", Mode: os.ModeDir, Size: -1, Timestamp: c4m.NullTimestamp(), C4ID: dir.ID})
+	patch.AddEntry(line)
 	a, err := ApplyPatch(ctx, base.ID, patch, StoreRecords(st))
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, r := range a.Records {
+		st[r.ID] = r.Data
+	}
+	if _, err := Load(ctx, a.ID, StoreRecords(st), 1); err != nil {
+		t.Fatalf("ApplyPatch's view does not load: %v", err)
 	}
 	cs, err := EncodeChangeset(base.ID, patch)
 	if err != nil {
@@ -377,5 +398,54 @@ func TestTheReadersAgreeOnADirectoryWrittenByIDOverAFile(t *testing.T) {
 	}
 	if rr.View().ID != a.ID {
 		t.Errorf("ApplyPatch made %s, the resolver %s", a.ID, rr.View().ID)
+	}
+}
+
+// The view check covers every record an edit reads, the ones it only
+// recalls as well: a directory made again inside one replaced wholesale is
+// compared with the old directory's record (recall), which nothing loads.
+// Here build/'s record is a view's, but the obj/ it names is a description
+// with dates, and the Apply that makes obj/ again is refused. The removals
+// it would write from that record would not restate it exactly. A record
+// with a mode beyond the executable bit, or a link with a size and C4 ID,
+// is refused too, dates or not.
+func TestApplyRefusesEveryRecordThatIsNotAView(t *testing.T) {
+	ctx := context.Background()
+	when := time.Date(2021, 3, 4, 5, 6, 7, 0, time.UTC)
+	old := c4.Identify(strings.NewReader("old"))
+	for _, c := range []struct {
+		name  string
+		entry *c4m.Entry
+	}{
+		{"a date", &c4m.Entry{Name: "old.o", Mode: 0o644, Size: 3, Timestamp: when, C4ID: old}},
+		{"a mode", &c4m.Entry{Name: "old.o", Mode: 0o644, Size: 3, Timestamp: c4m.NullTimestamp(), C4ID: old}},
+		{"a link's size and C4 ID", &c4m.Entry{Name: "old.o", Mode: os.ModeSymlink | 0o777, Size: 3, Timestamp: c4m.NullTimestamp(), C4ID: old, Target: "x"}},
+	} {
+		st := objStore{}
+		put := func(es ...*c4m.Entry) (c4.ID, int64) {
+			m := c4m.NewManifest()
+			for _, e := range es {
+				m.AddEntry(e)
+			}
+			b, err := c4m.Marshal(m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			id := c4.Identify(bytes.NewReader(b))
+			st[id] = b
+			return id, int64(len(b))
+		}
+		obj, objSize := put(c.entry)
+		build, buildSize := put(Project(&c4m.Entry{Name: "obj/", Mode: os.ModeDir, Size: objSize, C4ID: obj}))
+		root, _ := put(Project(&c4m.Entry{Name: "build/", Mode: os.ModeDir, Size: buildSize, C4ID: build}))
+		edits := []Edit{
+			{Path: "build/", Entry: &c4m.Entry{Name: "build/"}, Opaque: true},
+			{Path: "build/obj/", Entry: &c4m.Entry{Name: "obj/"}},
+			{Path: "build/obj/new.o", Entry: FileEntry("", 3, c4.Identify(strings.NewReader("new")), false)},
+		}
+		SortEdits(edits)
+		if _, err := Apply(ctx, root, edits, StoreRecords(st)); !errors.Is(err, ErrNotAView) {
+			t.Errorf("%s: Apply over a record that is not a view's: %v, want ErrNotAView", c.name, err)
+		}
 	}
 }

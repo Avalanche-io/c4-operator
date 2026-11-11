@@ -222,9 +222,11 @@ func bareID(line string) (c4.ID, bool) {
 // children under it, removes that path (entriesIdentical); any other entry
 // replaces it, projected as every view's entry is; a new path is added; a
 // directory entry followed by children merges them. It reads only the
-// base's records along the patch's paths. base must be a view: its records
-// are read projected, so a patch over a description with dates is read by
-// the resolver (FromBytes, FromID), which holds it as recorded.
+// base's records along the patch's paths. base must be a view: a record
+// it reads that holds anything a view does not (a date, a mode beyond the
+// executable bit, a link's size or C4 ID) is refused with ErrNotAView, and
+// a patch over a description with dates is read by the resolver
+// (FromBytes, FromID), which holds it as recorded.
 func ApplyPatch(ctx context.Context, base c4.ID, patch *c4m.Manifest, src RecordSource) (*Applied, error) {
 	t := &atree{ctx: ctx, src: src, root: &anode{base: base}}
 	if err := applyPatchFrom(t, t, patch, false); err != nil {
