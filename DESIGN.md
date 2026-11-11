@@ -213,8 +213,8 @@ names, imported, stored and served as they are (`view.CheckName` guards the
 c4m rules only). Where a filesystem cannot hold a name, the writer that
 puts the view there refuses that entry, saying which and why, and writes
 the rest; it never renames it, maps it or joins it into a path. Git also
-refuses such a name and never renames or maps it, but stops the checkout
-there rather than writing the rest. The set refused follows git's: what
+refuses such a name and never renames or maps it, but fails the whole
+checkout and writes none of it. The set refused follows git's: what
 Git for Windows will not write (v2.47.0, `compat/mingw.c`
 `is_valid_win32_path` and `read-cache.c` `verify_path_internal`) is the
 most a writer refuses, not the rule. Each refusal is cited
@@ -222,7 +222,10 @@ most a writer refuses, not the rule. Each refusal is cited
 git is over cautious in places where c4 can round trip successfuly then we
 should use ours"). Git's repository guards (`.git` look-alikes, `GIT~1`)
 protect a git repository, not the filesystem, and are not taken. Linux
-refuses nothing; macOS (APFS) refuses a name that is not UTF-8 (measured).
+refuses nothing; macOS (APFS) refuses a name that is not UTF-8 (measured),
+and an APFS write fails, loudly, on the few UTF-8 names it refuses too
+(noncharacters, unassigned code points). A link's target is held to the
+rule on Windows only: elsewhere its bytes are kept as they are.
 
 The one writer that runs on Windows is `c4-farm get`; checkout, layers and
 the object cache do not build there. A link whose target holds a name the

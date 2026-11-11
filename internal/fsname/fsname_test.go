@@ -87,7 +87,23 @@ func TestPathRefusalNamesTheSegment(t *testing.T) {
 	}
 }
 
-// Linux holds any bytes; APFS holds only UTF-8 names.
+// A link's target is held to Windows' rule on Windows only, on every
+// segment; elsewhere its bytes are kept as they are.
+func TestTargetRefusal(t *testing.T) {
+	if seg, r := TargetRefusal("windows", `a\b/c`); seg != `a\b` || r == "" {
+		t.Fatalf("a backslash in a middle segment: %q, %q", seg, r)
+	}
+	if seg, r := TargetRefusal("windows", "../shots/ok.exr"); seg != "" || r != "" {
+		t.Fatalf("an ordinary target: %q, %q", seg, r)
+	}
+	for _, goos := range []string{"darwin", "linux"} {
+		if seg, r := TargetRefusal(goos, "caf\xe9/a:b"); seg != "" || r != "" {
+			t.Fatalf("%s: %q, %q", goos, seg, r)
+		}
+	}
+}
+
+// Linux holds any bytes; APFS holds no name that is not UTF-8.
 func TestNamesThatAreNotUTF8(t *testing.T) {
 	bad := "caf\xe9.txt"
 	if r := Refusal("linux", bad); r != "" {

@@ -185,10 +185,12 @@ func writable(goos string, files []api.ViewFile, dirs []string, links []api.View
 		if !keep(l.Path) {
 			continue
 		}
-		// A link's target is a path the filesystem resolves, so it is held
-		// to the same rule: on Windows a backslash in it is a separator, and
-		// the link would point at another entry than the view's.
-		if seg, r := fsname.PathRefusal(goos, l.Target); r != "" {
+		// A link's target is a path Windows resolves, so there it is held
+		// to the same rule: a backslash in it is a separator, and the link
+		// would point at another entry than the view's. Elsewhere a target
+		// is bytes the filesystem keeps as they are (APFS takes any,
+		// measured), so it is not held to the name rule.
+		if seg, r := fsname.TargetRefusal(goos, l.Target); r != "" {
 			left = append(left, fmt.Sprintf("%s -> %s: this platform cannot hold the name %q in the link's target as it is: %s", l.Path, l.Target, seg, r))
 			continue
 		}

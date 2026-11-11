@@ -20,19 +20,31 @@ import (
 
 // Refusal says why a filesystem on goos cannot hold name (one path
 // segment) as it is, or "" when it can. Linux holds every byte but "/"
-// and NUL, which c4m names never have. macOS (APFS) holds only names that
-// are UTF-8 (measured: "Illegal byte sequence" for any other). Windows is
-// git's rule.
+// and NUL, which c4m names never have. macOS (APFS) holds no name that is
+// not UTF-8 (measured: "Illegal byte sequence"); it refuses some UTF-8 too
+// (noncharacters such as U+FFFE, unassigned code points), which is left
+// to the write to fail on, loudly. Windows is git's rule.
 func Refusal(goos, name string) string {
 	switch goos {
 	case "windows":
 		return windows(name)
 	case "darwin", "ios":
 		if !utf8.ValidString(name) {
-			return "APFS holds only names that are UTF-8 (measured)"
+			return "APFS holds no name that is not UTF-8 (measured)"
 		}
 	}
 	return ""
+}
+
+// TargetRefusal says why a link's target, a slash-separated path the
+// filesystem resolves, cannot be written as it is on goos: on Windows any
+// segment Refusal refuses; elsewhere never, since a target is bytes kept
+// as they are.
+func TargetRefusal(goos, target string) (segment, reason string) {
+	if goos != "windows" {
+		return "", ""
+	}
+	return PathRefusal(goos, target)
 }
 
 // PathRefusal applies Refusal to each segment of a slash-separated path,
