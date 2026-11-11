@@ -244,8 +244,8 @@ probe folder of the get's own, made in the user's tree where the directory
 is, or in the nearest folder above it that exists (case rules can be set per
 directory, and a directory can be another volume), and removed as soon as
 that directory is measured; a name whose making lands on one made before it
-is taken for that one, and a probe folder that does not list exactly what was
-made in it fails the get rather than leave a set unmeasured. A place that
+is taken for that one, and a probe folder that does not list exactly the
+entries made in it fails the get rather than leave a set unmeasured. A place that
 tells A from a and é from e + U+0301 is taken to take none for one. Where no
 probe folder can be made (no permission, or a read-only volume), the names
 already there are grouped by the entry each one is. A probe folder no get
@@ -265,9 +265,11 @@ anything else left) is renamed in place, top-down, to the view's exactly;
 and what a written directory lists under a name that belongs to a losing
 spelling of it (Docs/a, left by an older get, in the folder that is now the
 view's docs/) is reported as kept, with that spelling, and left as it is:
-deleting a user's file is not a get's to do. Measuring costs a
-made and removed empty file per name, about 90 µs a name on this Mac (50,000
-names in one directory, 4 to 5 s), first run and re-run alike. Until the
+deleting a user's file is not a get's to do. Measuring costs a made and removed empty file per name, about 90 µs a name on this Mac (50,000
+names in one directory, 4 to 5 s), and a probe folder per directory with two
+names or more, about 0.7 ms each (8,000 such directories, 5.4 s), first run
+and re-run alike; whether a place folds could be kept per volume where case
+rules are per volume (APFS), which is not built. Until the
 operator's c4m pin carries c4 PR #98, a name or link target that ends in a
 backslash is refused at import by the round-trip guard (section 2.3), since
 the pinned library reads it back with one more.

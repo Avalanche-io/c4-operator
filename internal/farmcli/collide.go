@@ -218,24 +218,52 @@ func measure(probe string, names []string) (map[string]string, error) {
 			group[name] = group[first]
 		}
 	}
-	// The folder lists exactly the entries made, so no landing went unseen:
-	// one removed meanwhile would have let a later name be made afresh, and
-	// one added, or the folder gone, would have made a landing look like a
-	// refusal.
-	made := 0
-	for name, g := range group {
-		if name == g {
-			made++
-		}
-	}
-	ents, err := os.ReadDir(folder)
-	if err != nil {
-		return nil, fmt.Errorf("measuring names: %w", err)
-	}
-	if len(ents) != made {
-		return nil, fmt.Errorf("measuring names: the probe folder %s lists %d entries where this get made %d; something else changed it", folder, len(ents), made)
+	if err := listsExactly(folder, &ids); err != nil {
+		return nil, err
 	}
 	return group, nil
+}
+
+// listsExactly checks that folder lists the entries made in it and nothing
+// else, so no landing went unseen: one removed meanwhile would have let a
+// later name be made afresh, and one added, or the folder gone, would have
+// made a landing look like a refusal. An entry is matched by its identity
+// where that is cheap, since a folder may list a name in another form than
+// it was made in (HFS+ decomposes), and by name elsewhere (NTFS keeps names
+// as given).
+func listsExactly(folder string, ids *identities) error {
+	ents, err := os.ReadDir(folder)
+	if err != nil {
+		return fmt.Errorf("measuring names: %w", err)
+	}
+	// Fewer entries than made: one was removed. Every entry listed must be
+	// one made, which also rules out more.
+	if made := len(ids.byKey) + len(ids.names); len(ents) < made {
+		return fmt.Errorf("measuring names: the probe folder %s lists %d entries where this get made %d; something else changed it", folder, len(ents), made)
+	}
+	var byName map[string]bool
+	for _, e := range ents {
+		fi, err := os.Lstat(filepath.Join(folder, e.Name()))
+		if err != nil {
+			return fmt.Errorf("measuring names: %w", err)
+		}
+		if _, ok := keyOf(fi); ok {
+			if ids.of(fi) == "" {
+				return fmt.Errorf("measuring names: the probe folder %s holds %s, which this get did not make", folder, show(e.Name()))
+			}
+			continue
+		}
+		if byName == nil {
+			byName = make(map[string]bool, len(ids.names))
+			for _, n := range ids.names {
+				byName[n] = true
+			}
+		}
+		if !byName[e.Name()] {
+			return fmt.Errorf("measuring names: the probe folder %s holds %s, which this get did not make", folder, show(e.Name()))
+		}
+	}
+	return nil
 }
 
 // measureThere groups the names already in folder by the entry each one

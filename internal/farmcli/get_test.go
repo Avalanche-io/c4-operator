@@ -83,7 +83,11 @@ func fakeViewDirs(t *testing.T, files map[string]string, links []api.ViewLink, d
 		}
 	}))
 	t.Cleanup(srv.Close)
-	return &Client{Base: srv.URL, HTTP: srv.Client()}
+	// As many idle connections as get's fetch workers, so a large view does
+	// not open a connection per file and run the machine out of ports.
+	hc := srv.Client()
+	hc.Transport.(*http.Transport).MaxIdleConnsPerHost = 8
+	return &Client{Base: srv.URL, HTTP: hc}
 }
 
 // A name holding a backslash or a colon is a literal c4m name (Joshua,
@@ -812,6 +816,55 @@ func TestCannotMake(t *testing.T) {
 	} {
 		if got := cannotMake(c.err); got != c.want {
 			t.Errorf("cannotMake(%v) = %v", c.err, got)
+		}
+	}
+}
+
+// A probe folder passes only when it lists exactly the entries made in it:
+// one removed, one added, or one swapped for another of the same count
+// fails it.
+func TestProbeListsExactlyWhatWasMade(t *testing.T) {
+	setup := func(t *testing.T) (string, *identities) {
+		folder := t.TempDir()
+		ids := &identities{}
+		for _, n := range []string{"a", "b", "é"} {
+			p := filepath.Join(folder, n)
+			if err := os.WriteFile(p, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			fi, err := os.Lstat(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ids.add(fi, n)
+		}
+		return folder, ids
+	}
+	folder, ids := setup(t)
+	if err := listsExactly(folder, ids); err != nil {
+		t.Fatalf("as made: %v", err)
+	}
+	for _, c := range []struct {
+		name   string
+		change func(folder string)
+	}{
+		{"one removed", func(f string) { os.Remove(filepath.Join(f, "b")) }},
+		{"one added", func(f string) { os.WriteFile(filepath.Join(f, "c"), nil, 0o644) }},
+		{"one swapped", func(f string) {
+			os.Remove(filepath.Join(f, "b"))
+			os.WriteFile(filepath.Join(f, "c"), nil, 0o644)
+		}},
+		{"one replaced under its own name", func(f string) {
+			os.Rename(filepath.Join(f, "a"), filepath.Join(f, "keep"))
+			os.WriteFile(filepath.Join(f, "a"), nil, 0o644)
+			os.Remove(filepath.Join(f, "keep"))
+		}},
+		{"the folder gone", func(f string) { os.RemoveAll(f) }},
+	} {
+		folder, ids := setup(t)
+		c.change(folder)
+		if err := listsExactly(folder, ids); err == nil {
+			t.Errorf("%s: passed", c.name)
 		}
 	}
 }
