@@ -1,8 +1,9 @@
 # Tests allowed to skip under make test, by GOOS ("*" for any), package
 # (relative to the module) and test, each with why. A skip not listed here
-# fails make test (hack/skips). Measured 2026-11-11: macOS (this repo's
-# developers, and CI's macOS leg for checkout and capture) and Linux (CI's
-# runners: non-root, 4 CPUs, Node and the c4 CLI on PATH). The NFS checkout
+# fails make test (hack/skips). Measured 2026-11-11 on a developer's Mac
+# (CI's macOS leg runs the same checkout and capture tests) and on Linux in
+# a container set up as CI's runners are (non-root, 4 CPUs; Node and the c4
+# CLI on PATH, which the container had to be given). The NFS checkout
 # tests run nowhere yet: they mount, and wait for a Mac set aside for it.
 
 # Opt-in runs against live services, or helpers another test runs.

@@ -91,6 +91,7 @@ func run(r io.Reader, w io.Writer, allowed map[string]bool, module string) int {
 	}
 	output := map[string][]string{} // "pkg test" to its output lines
 	ran := map[string]bool{}        // packages in the stream
+	open := map[string]bool{}       // packages started and not yet ended
 	var skips []skip
 	failed := false
 	events := 0
@@ -107,6 +108,14 @@ func run(r io.Reader, w io.Writer, allowed map[string]bool, module string) int {
 		key := e.Package + " " + e.Test
 		if e.Package != "" {
 			ran[short(e.Package)] = true
+		}
+		if e.Test == "" && e.Package != "" {
+			switch e.Action {
+			case "start":
+				open[e.Package] = true
+			case "pass", "fail", "skip":
+				delete(open, e.Package)
+			}
 		}
 		switch e.Action {
 		case "output", "build-output":
@@ -149,6 +158,16 @@ func run(r io.Reader, w io.Writer, allowed map[string]bool, module string) int {
 			unlisted = append(unlisted, s)
 		}
 	}
+	var cut []string
+	for p := range open {
+		cut = append(cut, short(p))
+	}
+	sort.Strings(cut)
+	for _, p := range cut {
+		// A test binary killed or cut off mid-run ends no package line.
+		fmt.Fprintf(w, "skips: %s started and never ended\n", p)
+		failed = true
+	}
 	if events == 0 {
 		// go test that crashed, or never ran, writes nothing: no tests is not
 		// a pass.
@@ -184,7 +203,7 @@ func reason(lines []string) string {
 	for i := len(lines) - 1; i >= 0; i-- {
 		raw := lines[i]
 		s := strings.TrimSpace(raw)
-		if strings.HasPrefix(s, "--- SKIP") || s == "" {
+		if strings.HasPrefix(s, "--- SKIP") || strings.HasPrefix(s, "=== ") || s == "" {
 			continue
 		}
 		if _, after, ok := strings.Cut(s, ".go:"); ok {

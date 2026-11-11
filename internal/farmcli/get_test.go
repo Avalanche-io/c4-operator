@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -983,5 +984,58 @@ func TestGetNamesItsProjectAsItIs(t *testing.T) {
 		if s != project {
 			t.Fatalf("the farm was asked for the project %q, not %q", s, project)
 		}
+	}
+}
+
+// Submit's three requests and the tool listing name the project as one path
+// segment too, whatever it holds.
+func TestSubmitAndToolsNameTheProjectAsItIs(t *testing.T) {
+	ctx := context.Background()
+	project := "a b/c#d"
+	var segments []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.TrimPrefix(r.URL.EscapedPath(), "/api/v1/"), "/")
+		if len(parts) > 1 {
+			seg, err := url.PathUnescape(parts[1])
+			if err != nil {
+				t.Errorf("%s: %v", r.URL.EscapedPath(), err)
+			}
+			segments = append(segments, parts[0]+" "+seg)
+		}
+		io.Copy(io.Discard, r.Body)
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/missing"):
+			w.Write([]byte(`{"missing":[]}`))
+		case strings.HasPrefix(r.URL.Path, "/api/v1/tools/"):
+			w.Write([]byte(`{"tools":[]}`))
+		default:
+			w.Write([]byte(`{}`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	c := &Client{Base: srv.URL, HTTP: srv.Client()}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "f.exr"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	v, err := view.ScanDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	objs := v.Objects()
+	if _, err := missingIDs(ctx, c, project, objs); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := upload(ctx, c, project, root, v, map[c4.ID]bool{objs[0].ID: true}); err != nil {
+		t.Fatal(err)
+	}
+	recordView(ctx, c, project, v) // the fake farm's reply is not a view's; the request is what is checked
+	var out bytes.Buffer
+	if err := ListTools(ctx, c, Out{W: &out}, project); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"objects " + project, "objects " + project, "views " + project, "tools " + project}
+	if strings.Join(segments, "|") != strings.Join(want, "|") {
+		t.Fatalf("the farm was asked %q, not %q", segments, want)
 	}
 }

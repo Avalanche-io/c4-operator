@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -475,7 +476,7 @@ func checkToken(ctx context.Context, c *Client, roots *x509.CertPool, cfg *peopl
 		return "the index books no provider key " + d.ProviderKey
 	}
 	var jwk json.RawMessage
-	if err := c.Issuer(ctx, http.MethodGet, "/v1/people/records/"+d.ProviderKey, nil, &jwk); err != nil {
+	if err := c.Issuer(ctx, http.MethodGet, "/v1/people/records/"+url.PathEscape(d.ProviderKey), nil, &jwk); err != nil {
 		return "its provider key: " + err.Error()
 	}
 	own, err := deviceRecord(ctx, c, roots, mine.Record)
@@ -497,7 +498,7 @@ func checkToken(ctx context.Context, c *Client, roots *x509.CertPool, cfg *peopl
 // issuer's.
 func deviceRecord(ctx context.Context, c *Client, roots *x509.CertPool, id string) (*schema.DevicePredicate, error) {
 	var raw json.RawMessage
-	if err := c.Issuer(ctx, http.MethodGet, "/v1/people/records/"+id, nil, &raw); err != nil {
+	if err := c.Issuer(ctx, http.MethodGet, "/v1/people/records/"+url.PathEscape(id), nil, &raw); err != nil {
 		return nil, err
 	}
 	v, err := provenance.VerifyBundle(raw, roots)

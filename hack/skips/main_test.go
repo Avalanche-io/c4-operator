@@ -88,6 +88,20 @@ func TestTheAllowListIsPerGOOS(t *testing.T) {
 	}
 }
 
+func TestAPackageThatNeverEndsFails(t *testing.T) {
+	var out bytes.Buffer
+	cut := `{"Action":"start","Package":"example.com/m/c"}` + "\n" + `{"Action":"run","Package":"example.com/m/c","Test":"TestHangs"}`
+	if code := run(strings.NewReader(events(cut)), &out, map[string]bool{"a TestNeedsRoot": true}, mod); code != 1 || !strings.Contains(out.String(), "c started and never ended") {
+		t.Fatalf("exit %d:\n%s", code, out.String())
+	}
+}
+
+func TestASkipWithoutAMessageHasNoReason(t *testing.T) {
+	if got := reason([]string{"=== RUN   TestX\n", "--- SKIP: TestX (0.00s)\n"}); got != "" {
+		t.Fatalf("reason %q", got)
+	}
+}
+
 func TestNoEventsIsNotAPass(t *testing.T) {
 	var out bytes.Buffer
 	if code := run(strings.NewReader(""), &out, map[string]bool{}, mod); code != 1 {
