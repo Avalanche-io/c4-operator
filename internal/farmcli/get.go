@@ -125,7 +125,7 @@ func Get(ctx context.Context, c *Client, o Out, a GetArgs) error {
 		mu          sync.Mutex
 		first       error
 	)
-	for range min(8, len(files)) {
+	for range min(farmWorkers, len(files)) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

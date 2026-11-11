@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -88,7 +90,7 @@ func fakeViewDirs(t *testing.T, files map[string]string, links []api.ViewLink, d
 	// As many idle connections as get's fetch workers, so a large view does
 	// not open a connection per file and run the machine out of ports.
 	hc := srv.Client()
-	hc.Transport.(*http.Transport).MaxIdleConnsPerHost = 8
+	hc.Transport.(*http.Transport).MaxIdleConnsPerHost = farmWorkers
 	return &Client{Base: srv.URL, HTTP: hc}
 }
 
@@ -1037,5 +1039,50 @@ func TestSubmitAndToolsNameTheProjectAsItIs(t *testing.T) {
 	want := []string{"objects " + project, "objects " + project, "views " + project, "tools " + project}
 	if strings.Join(segments, "|") != strings.Join(want, "|") {
 		t.Fatalf("the farm was asked %q, not %q", segments, want)
+	}
+}
+
+// A get of many files through the client NewClient makes reuses a
+// connection per fetch worker: Go's default transport keeps two a host,
+// and a get of 2,000 files opened 828, enough on a large view to run the
+// machine out of ports.
+func TestAGetReusesItsConnections(t *testing.T) {
+	ctx := context.Background()
+	old := getOS
+	t.Cleanup(func() { getOS = old })
+	getOS = "linux"
+	ls := api.ViewListing{}
+	objs := map[string][]byte{}
+	for i := range 2000 {
+		body := fmt.Sprintf("%d\n", i)
+		id := c4.Identify(strings.NewReader(body)).String()
+		ls.Files = append(ls.Files, api.ViewFile{Path: fmt.Sprintf("f%05d", i), ID: id, Size: int64(len(body))})
+		objs[id] = []byte(body)
+	}
+	var conns atomic.Int64
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/files") {
+			json.NewEncoder(w).Encode(ls)
+			return
+		}
+		w.Write(objs[path.Base(r.URL.Path)])
+	}))
+	srv.Config.ConnState = func(_ net.Conn, s http.ConnState) {
+		if s == http.StateNew {
+			conns.Add(1)
+		}
+	}
+	srv.Start()
+	t.Cleanup(srv.Close)
+	c, err := NewClient(Farm{HUD: srv.URL, As: "noor"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := Get(ctx, c, Out{W: &out}, GetArgs{Ref: rvidOf("v"), Dir: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	if n := conns.Load(); n > farmWorkers {
+		t.Fatalf("a get of 2,000 files opened %d connections; at most %d, one a fetch worker", n, farmWorkers)
 	}
 }

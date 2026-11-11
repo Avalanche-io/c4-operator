@@ -39,7 +39,21 @@ func NewClient(f Farm) (*Client, error) {
 		return nil, fmt.Errorf("the local farm's installer token: %w (c4 farm up makes it again)", err)
 	}
 	return &Client{Base: strings.TrimSuffix(f.HUD, "/"), As: f.As, Token: tok, Installer: inst,
-		HTTP: &http.Client{Timeout: 0}}, nil
+		HTTP: farmHTTP()}, nil
+}
+
+// farmWorkers is how many requests get and submit have in flight at once.
+const farmWorkers = 8
+
+// farmHTTP is the HTTP client a farm client uses: it keeps an idle
+// connection for each of farmWorkers, so a get of many files reuses a few
+// connections. Go's default keeps two a host, and a get of 2,000 files
+// opened 828 (measured), which on a large view runs a machine out of
+// ports ("can't assign requested address").
+func farmHTTP() *http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.MaxIdleConnsPerHost = farmWorkers
+	return &http.Client{Transport: tr}
 }
 
 // APIError is an error answer from the HUD.

@@ -178,7 +178,7 @@ func upload(ctx context.Context, c *Client, project, root string, v *view.View, 
 		mu    sync.Mutex
 		first error
 	)
-	for range min(8, max(len(todo), 1)) {
+	for range min(farmWorkers, max(len(todo), 1)) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
