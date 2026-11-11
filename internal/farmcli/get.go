@@ -87,16 +87,16 @@ func Get(ctx context.Context, c *Client, o Out, a GetArgs) error {
 	// names are measured, so it is never taken for the one written.
 	links, outside := linksInside(links)
 	left = append(left, outside...)
-	lost, err := losers(a.Dir, files, dirs, links)
+	// Nothing is written, or measured, through a link already in the folder.
+	files, dirs, links, linked := notThroughLinks(a.Dir, files, dirs, links)
+	left = append(left, linked...)
+	lost, strays, err := losers(a.Dir, files, dirs, links)
 	if err != nil {
 		return err
 	}
 	allFiles, allDirs, allLinks := files, dirs, links
 	files, dirs, links, lostLeft := withoutLosers(lost, files, dirs, links)
 	left = append(left, lostLeft...)
-	// Nothing is written through a link already in the folder.
-	files, dirs, links, linked := notThroughLinks(a.Dir, files, dirs, links)
-	left = append(left, linked...)
 	// Every name to be written, with the folders above it, takes the view's
 	// spelling before anything is fetched: an entry an earlier get left
 	// under another is renamed in place, top-down.
@@ -167,7 +167,7 @@ func Get(ctx context.Context, c *Client, o Out, a GetArgs) error {
 	if err != nil {
 		return err
 	}
-	over := leftovers(a.Dir, lost, allFiles, allDirs, allLinks)
+	over := append(leftovers(a.Dir, lost, allFiles, allDirs, allLinks), strays...)
 	line := fmt.Sprintf("%s · %s · every ID checked", plural(int(wrote.Load()), "file", "files"), Bytes(bytes.Load()))
 	if k := kept.Load(); k > 0 {
 		line += fmt.Sprintf(" · %d already here", k)

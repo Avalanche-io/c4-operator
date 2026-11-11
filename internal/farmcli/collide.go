@@ -10,37 +10,42 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/Avalanche-io/c4-operator/hud/api"
 )
 
 // Names a folder takes for one (case on APFS and NTFS, Unicode form on
 // APFS; none on a case-sensitive volume) are measured, never predicted
-// with a folding table, and measured in a scratch folder of the get's own,
-// never in the user's tree: for each directory of the view, its names are
-// made as empty files in a fresh probe folder, in byte order, and a name
-// whose making lands on one made before it is taken for that one. Of each
-// set, the last in byte order is the one written, whole: its exact
-// spelling and its bytes. The others, and everything under them, are not
-// written at all, and are reported with it; nothing already in the folder
-// is removed. For files that is what git does; for directories git merges a
+// with a folding table. For each directory of the view, its names are made
+// as empty files, in byte order, in a probe folder of the get's own, made
+// where the directory is (so in the user's tree) and removed as soon as
+// that directory is measured; a name whose making lands on one made before
+// it is taken for that one. Of each set, the last in byte order is the one
+// written, whole: its exact spelling and its bytes. The others, and
+// everything under them, are not written at all, and are reported with it.
+// Nothing a get did not make is removed, a probe folder another get left
+// included. For files that is what git does; for directories git merges a
 // set under its first spelling, and here the winner is written alone, so
 // that what this get writes is one c4m entry exactly.
 
-// probePrefix names a get's probe folders, so one left by a crash is
-// found and removed by the next get.
+// probePrefix names a get's probe folders, so one an interrupted get left
+// is recognised and reported by the next.
 const probePrefix = ".c4-names-"
 
 // losers measures which of a view's paths the folder at dir takes for
 // another of them, and returns each such path with the path written in its
-// place. Each directory of the view is measured where it is, or would be:
-// in a probe folder made in its own folder when that exists, or else in the
-// nearest folder above it that does, since case rules can be set per
-// directory (ext4 casefold, NTFS) and a directory can be another volume.
-// Where no probe folder can be made (a read-only folder), what is already
+// place, and lines to report: probe folders found that this get did not
+// make, and any of its own it could not remove. Each directory of the view
+// is measured where it is, or would be: in a probe folder made in its own
+// folder when that exists, or else in the nearest folder above it that
+// does, never through a link, since case rules can be set per directory
+// (ext4 casefold, NTFS) and a directory can be another volume. Where no
+// probe folder can be made (a read-only folder or volume), what is already
 // there is measured instead: names that are one entry there are one set.
-// Directories are measured from the top, and none under a loser.
-func losers(dir string, files []api.ViewFile, dirs []string, links []api.ViewLink) (map[string]string, error) {
+// Directories are measured from the top, and none under a loser. The
+// caller has left out everything under a link already in the folder.
+func losers(dir string, files []api.ViewFile, dirs []string, links []api.ViewLink) (map[string]string, []string, error) {
 	children := map[string][]string{} // view parent to its names
 	seen := map[string]bool{}
 	add := func(p string) {
@@ -67,48 +72,47 @@ func losers(dir string, files []api.ViewFile, dirs []string, links []api.ViewLin
 		}
 	}
 	if len(parents) == 0 {
-		return out, nil
+		return out, nil, nil
 	}
 	sort.Strings(parents)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	var notes []string
 	exact := map[string]bool{} // a probe place to whether it folds nothing
-	swept := map[string]bool{}
+	looked := map[string]bool{}
 	for _, parent := range parents {
 		if q, _ := lostTo(out, parent); q != "" {
 			continue // under a loser: not written, not measured
 		}
 		names := children[parent]
 		sort.Strings(names)
-		where := nearest(filepath.Join(dir, filepath.FromSlash(parent)))
-		if !swept[where] {
-			sweep(where)
-			swept[where] = true
+		where := nearest(dir, parent)
+		if !looked[where] {
+			notes = append(notes, strays(where)...)
+			looked[where] = true
 		}
 		probe, err := os.MkdirTemp(where, probePrefix)
 		var group map[string]string
 		if err != nil {
-			if !errors.Is(err, fs.ErrPermission) {
-				return nil, err
+			if !cannotMake(err) {
+				return nil, nil, err
 			}
 			group = measureThere(filepath.Join(dir, filepath.FromSlash(parent)), names)
 		} else {
 			folds, ok := exact[where]
 			if !ok {
 				folds, err = foldsAny(probe)
-				if err != nil {
-					os.RemoveAll(probe)
-					return nil, err
-				}
 				exact[where] = folds
 			}
-			if folds {
+			if err == nil && folds {
 				group, err = measure(probe, names)
 			}
-			os.RemoveAll(probe)
+			if rerr := os.RemoveAll(probe); rerr != nil {
+				notes = append(notes, fmt.Sprintf("%s: this get's probe folder, which it could not remove: %v", probe, rerr))
+			}
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 		last := map[string]string{} // first name of a set to its last
@@ -125,30 +129,45 @@ func losers(dir string, files []api.ViewFile, dirs []string, links []api.ViewLin
 			out[path.Join(parent, name)] = path.Join(parent, last[g])
 		}
 	}
-	return out, nil
+	return out, notes, nil
 }
 
-// nearest returns p, or the nearest folder above it that exists.
-func nearest(p string) string {
-	for {
-		if fi, err := os.Stat(p); err == nil && fi.IsDir() {
-			return p
-		}
-		up := filepath.Dir(p)
-		if up == p {
-			return p
-		}
-		p = up
+// nearest returns the folder at dir/rel, or the nearest folder above it
+// that exists, going down from dir and never through a link: an entry that
+// is not a folder (a link included) ends the walk.
+func nearest(dir, rel string) string {
+	at := dir
+	if rel == "." || rel == "" {
+		return at
 	}
+	for _, seg := range strings.Split(rel, "/") {
+		next := filepath.Join(at, seg)
+		fi, err := os.Lstat(next)
+		if err != nil || !fi.IsDir() {
+			return at
+		}
+		at = next
+	}
+	return at
 }
 
-// sweep removes probe folders an earlier get left in folder (a crash, an
-// interrupt).
-func sweep(folder string) {
-	old, _ := filepath.Glob(filepath.Join(folder, probePrefix+"*"))
-	for _, o := range old {
-		os.RemoveAll(o)
+// strays reports, and never removes, what folder holds under a probe
+// folder's name: one a get left when it was interrupted, one a get running
+// now is measuring in, or a user's own entry so named. No get can tell
+// these apart for certain, so none is touched.
+func strays(folder string) []string {
+	found, _ := filepath.Glob(filepath.Join(folder, probePrefix+"*"))
+	var out []string
+	for _, f := range found {
+		out = append(out, fmt.Sprintf("%s: named like a get's probe folder (an interrupted get leaves one; a get running now has one); left as it is", f))
 	}
+	return out
+}
+
+// cannotMake reports whether err says the folder takes no new entry at
+// all (permission, or a read-only volume), so what is there is measured.
+func cannotMake(err error) bool {
+	return errors.Is(err, fs.ErrPermission) || errors.Is(err, syscall.EROFS)
 }
 
 // foldsAny reports whether the folder probe sits in takes A for a, or é
@@ -166,7 +185,8 @@ func foldsAny(probe string) (bool, error) {
 // measure makes names, in byte order, as empty files in a fresh folder in
 // probe, and returns each name made or landed on with the first name of
 // its set. A name the folder will not make is left out: its write says
-// why.
+// why. Any other failure (the probe folder gone, say) is an error, never a
+// set left unmeasured.
 func measure(probe string, names []string) (map[string]string, error) {
 	folder, err := os.MkdirTemp(probe, "d")
 	if err != nil {
@@ -188,7 +208,7 @@ func measure(probe string, names []string) (map[string]string, error) {
 			continue
 		}
 		if !errors.Is(err, fs.ErrExist) {
-			continue
+			continue // a name the folder refuses, or the folder gone: see below
 		}
 		there, err := os.Lstat(full)
 		if err != nil {
@@ -197,6 +217,23 @@ func measure(probe string, names []string) (map[string]string, error) {
 		if first := ids.of(there); first != "" {
 			group[name] = group[first]
 		}
+	}
+	// The folder lists exactly the entries made, so no landing went unseen:
+	// one removed meanwhile would have let a later name be made afresh, and
+	// one added, or the folder gone, would have made a landing look like a
+	// refusal.
+	made := 0
+	for name, g := range group {
+		if name == g {
+			made++
+		}
+	}
+	ents, err := os.ReadDir(folder)
+	if err != nil {
+		return nil, fmt.Errorf("measuring names: %w", err)
+	}
+	if len(ents) != made {
+		return nil, fmt.Errorf("measuring names: the probe folder %s lists %d entries where this get made %d; something else changed it", folder, len(ents), made)
 	}
 	return group, nil
 }
@@ -275,8 +312,11 @@ func oneEntry(dir, a, b string) (bool, error) {
 	if err := os.WriteFile(filepath.Join(dir, a), nil, 0o644); err != nil {
 		return false, err
 	}
-	_, err := os.Lstat(filepath.Join(dir, b))
-	return err == nil, nil
+	if _, err := os.Lstat(filepath.Join(dir, b)); err == nil {
+		return true, nil
+	}
+	_, err := os.Lstat(filepath.Join(dir, a))
+	return false, err // a, gone, says nothing about b
 }
 
 // lostTo returns the loser p is or is under, and the path written in its
@@ -520,13 +560,25 @@ func leftovers(dir string, lost map[string]string, files []api.ViewFile, dirs []
 	for _, l := range links {
 		note(l.Path)
 	}
+	// What a folder lists, exactly: a name looked up would also find the
+	// winner's own entry under another spelling (docs/A for docs/a).
+	listing := map[string]map[string]bool{}
+	listed := func(folder, name string) bool {
+		names, ok := listing[folder]
+		if !ok {
+			names = map[string]bool{}
+			ents, _ := os.ReadDir(filepath.Join(dir, filepath.FromSlash(folder)))
+			for _, e := range ents {
+				names[e.Name()] = true
+			}
+			listing[folder] = names
+		}
+		return names[name]
+	}
 	var out []string
 	for loser, winner := range lost {
 		for name := range childrenOf[loser] {
-			if childrenOf[winner][name] {
-				continue
-			}
-			if _, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(winner), name)); err != nil {
+			if childrenOf[winner][name] || !listed(winner, name) {
 				continue
 			}
 			out = append(out, fmt.Sprintf("%s: left over from the spelling %s (the view's %s, not written), and left as it is", show(path.Join(winner, name)), show(loser), show(path.Join(loser, name))))

@@ -11,7 +11,10 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/Avalanche-io/c4"
 
@@ -536,10 +539,11 @@ func TestLeftoversFromALosingSpelling(t *testing.T) {
 	}
 }
 
-// A probe folder a crashed get left is swept, and a get leaves none.
-// A read-only folder that already holds the view takes a get, measuring
-// what is there. Nothing is written through a link already in the folder.
-// A fetch that fails leaves no file under the view's name.
+// A probe folder an interrupted get left, and a user's entry named like
+// one, are reported and left as they are; a get leaves no probe of its
+// own. A read-only folder that already holds the view takes a get,
+// measuring what is there. Nothing is written through a link already in
+// the folder. A fetch that fails leaves no file under the view's name.
 func TestGetAroundTheProbe(t *testing.T) {
 	ctx := context.Background()
 	old := getOS
@@ -550,12 +554,25 @@ func TestGetAroundTheProbe(t *testing.T) {
 
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, probePrefix+"crashed", "d0"), 0o755)
+	os.WriteFile(filepath.Join(dir, probePrefix+"mine.txt"), []byte("user\n"), 0o644)
 	var out bytes.Buffer
 	if err := Get(ctx, fakeView(t, files, nil), Out{W: &out}, GetArgs{Ref: vid, Dir: dir}); err != nil {
 		t.Fatal(err)
 	}
-	if left, _ := filepath.Glob(filepath.Join(dir, probePrefix+"*")); len(left) != 0 {
-		t.Fatalf("probe folders left: %v", left)
+	left, _ := filepath.Glob(filepath.Join(dir, probePrefix+"*"))
+	if len(left) != 2 {
+		t.Fatalf("probe-named entries after a get: %v", left)
+	}
+	if _, err := os.Stat(filepath.Join(dir, probePrefix+"crashed", "d0")); err != nil {
+		t.Fatalf("an earlier get's probe folder was removed: %v", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, probePrefix+"mine.txt")); string(b) != "user\n" {
+		t.Fatalf("a user's file named like a probe holds %q", b)
+	}
+	for _, n := range []string{"crashed", "mine.txt"} {
+		if want := "kept      " + filepath.Join(dir, probePrefix+n) + ": named like a get's probe folder"; !strings.Contains(out.String(), want) {
+			t.Fatalf("the report does not say %q:\n%s", want, out.String())
+		}
 	}
 
 	// Read-only, already holding the view.
@@ -645,5 +662,156 @@ func TestWinnersAreWhatIsWritten(t *testing.T) {
 			t.Fatalf("the report says %q twice:\n%s", l, out.String())
 		}
 		seen[l] = true
+	}
+}
+
+// Two gets into one folder at once never touch each other's probe folders,
+// and a probe folder that goes away mid-measure is an error, never a set
+// left unmeasured.
+func TestGetsAtOnceMeasureApart(t *testing.T) {
+	ctx := context.Background()
+	old := getOS
+	t.Cleanup(func() { getOS = old })
+	getOS = "linux"
+	if !collides(t, t.TempDir(), "A", "a") {
+		t.Skip("this folder tells names apart by case")
+	}
+	for _, delay := range []time.Duration{0, 20 * time.Millisecond, 100 * time.Millisecond} {
+		dir := t.TempDir()
+		big := map[string]string{}
+		for i := range 2000 {
+			big[fmt.Sprintf("x/F%05d", i)] = "upper\n"
+			big[fmt.Sprintf("x/f%05d", i)] = "lower\n"
+		}
+		c1, c2 := fakeView(t, big, nil), fakeView(t, map[string]string{"y/A": "1\n", "y/a": "2\n"}, nil)
+		var wg sync.WaitGroup
+		errs := make([]error, 2)
+		for i, c := range []*Client{c1, c2} {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if i == 1 {
+					time.Sleep(delay)
+				}
+				var out bytes.Buffer
+				errs[i] = Get(ctx, c, Out{W: &out}, GetArgs{Ref: rvidOf("v"), Dir: dir})
+			}()
+		}
+		wg.Wait()
+		if errs[0] != nil || errs[1] != nil {
+			t.Fatalf("delay %v: %v", delay, errs)
+		}
+		ents, _ := os.ReadDir(filepath.Join(dir, "x"))
+		bad := 0
+		for _, e := range ents {
+			b, _ := os.ReadFile(filepath.Join(dir, "x", e.Name()))
+			if strings.HasPrefix(e.Name(), "F") || string(b) != "lower\n" {
+				bad++
+			}
+		}
+		if len(ents) != 2000 || bad != 0 {
+			t.Fatalf("delay %v: x holds %d entries, %d of them wrong", delay, len(ents), bad)
+		}
+		if left, _ := filepath.Glob(filepath.Join(dir, probePrefix+"*")); len(left) != 0 {
+			t.Fatalf("delay %v: probe folders left: %v", delay, left)
+		}
+	}
+
+	// Something removes every probe folder while one get measures.
+	dir := t.TempDir()
+	id := c4.Identify(strings.NewReader("")).String()
+	var fs []api.ViewFile
+	n := 3000
+	for i := range n {
+		fs = append(fs, api.ViewFile{Path: fmt.Sprintf("d/F%05d", i), ID: id}, api.ViewFile{Path: fmt.Sprintf("d/f%05d", i), ID: id})
+	}
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				found, _ := filepath.Glob(filepath.Join(dir, probePrefix+"*")) // d is not there, so the probe is made here
+				for _, f := range found {
+					os.RemoveAll(f)
+				}
+				time.Sleep(time.Millisecond)
+			}
+		}
+	}()
+	lost, _, err := losers(dir, fs, nil, nil)
+	close(stop)
+	wg.Wait()
+	if err == nil && len(lost) != n {
+		t.Fatalf("%d of %d sets went unmeasured when the probe folder was removed, and no error", n-len(lost), n)
+	}
+}
+
+func rvidOf(s string) string { return c4.Identify(strings.NewReader(s)).String() }
+
+// A get never measures through a link already in the folder, so no probe
+// is made, and nothing named like one is touched, outside it. A leftover
+// is what the folder lists exactly: the winner's own docs/A is not one for
+// the loser's Docs/a.
+func TestProbeStaysInTheFolder(t *testing.T) {
+	ctx := context.Background()
+	old := getOS
+	t.Cleanup(func() { getOS = old })
+	getOS = "linux"
+	root := t.TempDir()
+	if !collides(t, root, "A", "a") {
+		t.Skip("this folder tells names apart by case")
+	}
+	dir, outside := filepath.Join(root, "folder"), filepath.Join(root, "outside")
+	os.Mkdir(dir, 0o755)
+	os.MkdirAll(filepath.Join(outside, probePrefix+"precious"), 0o755)
+	os.WriteFile(filepath.Join(outside, probePrefix+"precious", "data"), []byte("x"), 0o644)
+	if err := os.Symlink(outside, filepath.Join(dir, "e")); err != nil {
+		t.Fatal(err)
+	}
+	if got := nearest(dir, "e/f"); got != dir {
+		t.Fatalf("nearest went through the link: %s", got)
+	}
+	var out bytes.Buffer
+	if err := Get(ctx, fakeView(t, map[string]string{"e/A": "1\n", "e/a": "2\n", "k": "k\n"}, nil), Out{W: &out}, GetArgs{Ref: rvidOf("v"), Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	if ents, _ := os.ReadDir(outside); len(ents) != 1 || ents[0].Name() != probePrefix+"precious" {
+		t.Fatalf("outside the folder: %v\n%s", ents, out.String())
+	}
+	if _, err := os.Stat(filepath.Join(outside, probePrefix+"precious", "data")); err != nil {
+		t.Fatalf("outside the folder: %v", err)
+	}
+
+	dir = t.TempDir()
+	out.Reset()
+	if err := Get(ctx, fakeView(t, map[string]string{"Docs/a": "loser\n", "docs/A": "winner\n"}, nil), Out{W: &out}, GetArgs{Ref: rvidOf("v"), Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "kept      ") {
+		t.Fatalf("a fresh folder, and something is called left over:\n%s", out.String())
+	}
+}
+
+// A folder that takes no new entry, for want of permission or because its
+// volume is read-only, is measured as it stands; any other error is one.
+func TestCannotMake(t *testing.T) {
+	for _, c := range []struct {
+		err  error
+		want bool
+	}{
+		{&os.PathError{Op: "mkdir", Path: "x", Err: syscall.EACCES}, true},
+		{&os.PathError{Op: "mkdir", Path: "x", Err: syscall.EPERM}, true},
+		{&os.PathError{Op: "mkdir", Path: "x", Err: syscall.EROFS}, true},
+		{&os.PathError{Op: "mkdir", Path: "x", Err: syscall.ENOENT}, false},
+		{&os.PathError{Op: "mkdir", Path: "x", Err: syscall.ENOSPC}, false},
+	} {
+		if got := cannotMake(c.err); got != c.want {
+			t.Errorf("cannotMake(%v) = %v", c.err, got)
+		}
 	}
 }
