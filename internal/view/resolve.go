@@ -175,18 +175,71 @@ func buildNode(items []item, f Filter) (*Node, error) {
 	return root, nil
 }
 
-// rootID is the ID of the root listing: the top-level entries as recorded.
+// rootID is the ID of the root listing: the C4 ID of the canonical text of
+// the top-level entries, each as recorded. A top-level directory's null
+// size, time or C4 ID is derived, by the library's normaliser, from the
+// children the description itself lists under it; one with none listed
+// (known only by its ID) keeps its null. Never recomputed with
+// ComputeC4ID: through c4 50ba056 that reads a directory known only by its
+// ID as empty and hashes a size of 0 the description does not state.
 func rootID(items []item) c4.ID {
 	m := c4m.NewManifest()
-	for _, it := range items {
+	for i, it := range items {
 		if strings.Count(strings.TrimSuffix(it.path, "/"), "/") != 0 {
 			continue
 		}
 		cp := *it.entry
 		cp.Depth = 0
+		if it.isDir && it.hasChildren && (cp.Size < 0 || cp.C4ID.IsNil() || cp.Timestamp.Equal(c4m.NullTimestamp())) {
+			derive(&cp, it.path, items[i+1:])
+		}
 		m.AddEntry(&cp)
 	}
-	return m.ComputeC4ID()
+	return c4.Identify(strings.NewReader(m.Canonical()))
+}
+
+// derive fills d's null size, time and C4 ID from the entries the
+// description lists under dir (the items that follow it), as the library's
+// normaliser derives them; a value d states is kept. Entries read from the
+// store under a directory known only by its ID are not the description's
+// and are left out, so that directory counts as the line it is.
+func derive(d *c4m.Entry, dir string, after []item) {
+	sub := c4m.NewManifest()
+	top := *d
+	sub.AddEntry(&top)
+	var collapsed []string // directories whose items came from the store
+	for _, it := range after {
+		if !strings.HasPrefix(it.path, dir) {
+			break
+		}
+		under := false
+		for _, c := range collapsed {
+			if strings.HasPrefix(it.path, c) {
+				under = true
+				break
+			}
+		}
+		if under {
+			continue
+		}
+		cp := *it.entry
+		cp.Depth = strings.Count(strings.TrimSuffix(it.path, "/"), "/")
+		sub.AddEntry(&cp)
+		if it.isDir && !it.hasChildren {
+			collapsed = append(collapsed, it.path)
+		}
+	}
+	c4m.Normalize(sub)
+	got := sub.Entries[0]
+	if d.Size < 0 {
+		d.Size = got.Size
+	}
+	if d.Timestamp.Equal(c4m.NullTimestamp()) {
+		d.Timestamp = got.Timestamp
+	}
+	if d.C4ID.IsNil() {
+		d.C4ID = got.C4ID
+	}
 }
 
 func (r *resolver) resolveID(id c4.ID, depth int) ([][]item, error) {
