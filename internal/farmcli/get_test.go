@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1042,11 +1043,30 @@ func TestSubmitAndToolsNameTheProjectAsItIs(t *testing.T) {
 	}
 }
 
-// A get of many files through the client NewClient makes reuses a
-// connection per fetch worker: Go's default transport keeps two a host,
-// and a get of 2,000 files opened 828, enough on a large view to run the
-// machine out of ports.
+// A get of many files through the client NewClient makes reuses about a
+// connection per fetch worker: Go's default transport keeps two idle a
+// host, and a get of 2,000 files opened 478 to 850 (4 to 16 CPUs), enough
+// on a large view to run the machine out of ports. The client keeps an
+// idle one for each worker, checked directly. The count is only near
+// that: a connection goes back to the idle pool on the transport's own
+// goroutine after its body ends, and a worker asking first dials another
+// (9 to 17 measured). So the get is bounded at four a worker, and only
+// with two CPUs or more: on one, even the default client can stay at 8.
 func TestAGetReusesItsConnections(t *testing.T) {
+	c0, err := NewClient(Farm{HUD: "http://127.0.0.1:1", As: "noor"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, ok := c0.HTTP.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("the client's transport is %T, not one that keeps idle connections a host", c0.HTTP.Transport)
+	}
+	if tr.MaxIdleConnsPerHost < farmWorkers {
+		t.Fatalf("the client keeps %d idle connections a host, fewer than its %d fetch workers", tr.MaxIdleConnsPerHost, farmWorkers)
+	}
+	if runtime.GOMAXPROCS(0) < 2 {
+		t.Skip("with one CPU the connection count cannot tell reuse from its absence")
+	}
 	ctx := context.Background()
 	old := getOS
 	t.Cleanup(func() { getOS = old })
@@ -1082,7 +1102,7 @@ func TestAGetReusesItsConnections(t *testing.T) {
 	if err := Get(ctx, c, Out{W: &out}, GetArgs{Ref: rvidOf("v"), Dir: t.TempDir()}); err != nil {
 		t.Fatal(err)
 	}
-	if n := conns.Load(); n > farmWorkers {
-		t.Fatalf("a get of 2,000 files opened %d connections; at most %d, one a fetch worker", n, farmWorkers)
+	if n := conns.Load(); n > 4*farmWorkers {
+		t.Fatalf("a get of 2,000 files opened %d connections; about one a fetch worker (%d) is reuse, and %d is the bound", n, farmWorkers, 4*farmWorkers)
 	}
 }
