@@ -169,12 +169,16 @@ func TestAChangesetNamesItsEntryByPath(t *testing.T) {
 	}
 	at := func(e *c4m.Entry, depth int) *c4m.Entry { e.Depth = depth; return e }
 	m := c4m.NewManifest()
+	// The bad entry comes after the patch has gone down two directories and
+	// come back up, so its path is only right if the levels left are left.
 	m.Entries = []*c4m.Entry{
 		at(SymlinkEntry("a", "a.txt"), 0),
 		dir("x", 0),
 		at(SymlinkEntry("ok", "b.txt"), 1),
 		dir("y", 1),
-		at(SymlinkEntry("bad", "host:path"), 2),
+		at(SymlinkEntry("deep", "d.txt"), 2),
+		dir("w", 0),
+		at(SymlinkEntry("bad", "host:path"), 1),
 		at(SymlinkEntry("z", "c.txt"), 0),
 	}
 	text, err := EncodeChangeset(parent, m)
@@ -182,8 +186,8 @@ func TestAChangesetNamesItsEntryByPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	var nr *NotReadBack
-	if err := checkChangeset(parent, text, m.Entries); !errors.As(err, &nr) || nr.Entry != "x/y/bad" || nr.What != "changeset" {
-		t.Fatalf("a changeset with a bad entry two levels down: %v", err)
+	if err := checkChangeset(parent, text, m.Entries); !errors.As(err, &nr) || nr.Entry != "w/bad" || nr.What != "changeset" {
+		t.Fatalf("a changeset with a bad entry after two levels left: %v", err)
 	}
 }
 
