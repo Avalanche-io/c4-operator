@@ -147,3 +147,18 @@ func hasName(ents []os.DirEntry, name string) bool {
 	}
 	return false
 }
+
+// On macOS a link's target is kept as its bytes, whatever they are (APFS
+// takes any target, measured); only on Windows is a target held to the
+// name rule.
+func TestALinkTargetIsHeldToTheNameRuleOnWindowsOnly(t *testing.T) {
+	links := []api.ViewLink{{Path: "l", Target: "caf\xe9/x"}, {Path: "m", Target: `a\b`}}
+	_, _, kept, left := writable("darwin", nil, nil, links)
+	if len(kept) != 2 || len(left) != 0 {
+		t.Fatalf("darwin: kept %v, left %q", kept, left)
+	}
+	_, _, kept, left = writable("windows", nil, nil, links)
+	if len(kept) != 1 || kept[0].Path != "l" || len(left) != 1 {
+		t.Fatalf("windows: kept %v, left %q", kept, left)
+	}
+}
