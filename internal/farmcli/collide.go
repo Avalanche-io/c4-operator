@@ -203,7 +203,9 @@ func measure(probe string, names []string) (map[string]string, error) {
 			if err != nil {
 				return nil, err
 			}
-			ids.add(fi, name)
+			if err := ids.made(fi, name, folder); err != nil {
+				return nil, err
+			}
 			group[name] = name
 			continue
 		}
@@ -242,7 +244,7 @@ func listsExactly(folder string, ids *identities) error {
 	}
 	// As many entries as made (fewer: one was removed; more: one was added,
 	// a hard link to one made included).
-	if made := len(ids.byKey) + len(ids.names); len(ents) != made {
+	if made := ids.n; len(ents) != made {
 		return fmt.Errorf("measuring names: the probe folder %s lists %d entries where this get made %d; something else changed it", folder, len(ents), made)
 	}
 	notMade := func(name string) error {
@@ -254,6 +256,9 @@ func listsExactly(folder string, ids *identities) error {
 		fi, err := os.Lstat(filepath.Join(folder, e.Name()))
 		if err != nil {
 			return fmt.Errorf("measuring names: %w", err)
+		}
+		if !fi.Mode().IsRegular() {
+			return notMade(e.Name()) // every entry made is an empty file
 		}
 		if _, ok := keyOf(fi); ok {
 			made := ids.of(fi)
@@ -312,9 +317,29 @@ type identities struct {
 	byKey map[fileKey]string
 	all   []os.FileInfo
 	names []string
+	n     int // entries added: a reused inode overwrites byKey, not this
+}
+
+// made adds a file this get has just made. One with the identity of a file
+// made before is refused: that file was removed meanwhile, and the
+// filesystem gave the new one its inode (ext4 does, measured). Checked
+// where identity is a key (unix); on Windows a lookup compares with every
+// entry, and NTFS's file index carries a sequence number that a reused
+// record does not repeat.
+func (s *identities) made(fi os.FileInfo, name, folder string) error {
+	if _, ok := keyOf(fi); !ok {
+		s.add(fi, name)
+		return nil
+	}
+	if was := s.of(fi); was != "" {
+		return fmt.Errorf("measuring names: %s, just made in the probe folder %s, has the identity %s had: %s was removed meanwhile", show(name), folder, show(was), show(was))
+	}
+	s.add(fi, name)
+	return nil
 }
 
 func (s *identities) add(fi os.FileInfo, name string) {
+	s.n++
 	if k, ok := keyOf(fi); ok {
 		if s.byKey == nil {
 			s.byKey = map[fileKey]string{}

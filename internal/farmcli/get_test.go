@@ -869,12 +869,34 @@ func TestProbeListsExactlyWhatWasMade(t *testing.T) {
 			os.Remove(filepath.Join(f, "b"))
 			os.Link(filepath.Join(f, "a"), filepath.Join(f, "x"))
 		}},
+		{"a symlink in a removed entry's place", func(f string) {
+			os.Remove(filepath.Join(f, "b"))
+			os.Symlink("a", filepath.Join(f, "b"))
+		}},
 		{"the folder gone", func(f string) { os.RemoveAll(f) }},
 	} {
 		folder, ids := setup(t)
 		c.change(folder)
 		if err := listsExactly(folder, ids); err == nil {
 			t.Errorf("%s: passed", c.name)
+		}
+	}
+	// One made entry removed while names are still being made, and the next
+	// made afresh, as measure makes it: on ext4 the new file takes the
+	// removed one's inode, and the get must still not pass.
+	folder, ids = setup(t)
+	os.Remove(filepath.Join(folder, "b"))
+	full := filepath.Join(folder, "c")
+	if err := os.WriteFile(full, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Lstat(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ids.made(fi, "c", folder); err == nil {
+		if err := listsExactly(folder, ids); err == nil {
+			t.Error("removed mid-measure, a name made afresh: passed")
 		}
 	}
 	// One made entry the folder lists under another spelling (a folder
@@ -885,7 +907,7 @@ func TestProbeListsExactlyWhatWasMade(t *testing.T) {
 	if err := os.Rename(filepath.Join(folder, "a"), filepath.Join(folder, "A")); err != nil {
 		t.Fatal(err)
 	}
-	err := listsExactly(folder, ids)
+	err = listsExactly(folder, ids)
 	if collides(t, t.TempDir(), "A", "a") {
 		if err != nil {
 			t.Errorf("respelled, in a folder that takes a for A: %v", err)
