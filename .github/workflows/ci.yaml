@@ -128,8 +128,15 @@ jobs:
 
   dcc-submitters:
     name: DCC submitters (c4submit and the panels, against fakes of each application)
-    runs-on: ubuntu-latest
+    # Not ubuntu-latest: Python 3.9 has no build for Ubuntu 26.04, which
+    # ubuntu-latest became on 2026-11-11, and none is coming (3.9.25 is its
+    # last release). actions/python-versions' manifest lists 3.9 for 24.04,
+    # 3.11 and 3.13 for both.
+    runs-on: ubuntu-24.04
     strategy:
+      # one version's leg failing, at setup or in a test, must not cancel
+      # the others: each is a different DCC's Python
+      fail-fast: false
       matrix:
         # 3.9 is the oldest a supported DCC embeds (Nuke 14); 3.11 is Houdini 20.5 and 21, Maya 2025, Blender 4.
         python-version: ["3.9", "3.11", "3.13"]
