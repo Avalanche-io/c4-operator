@@ -23,9 +23,9 @@ import (
 // set, the last in byte order is the one written, whole: its exact
 // spelling and its bytes. The others, and everything under them, are not
 // written at all, and are reported with it; nothing already in the folder
-// is removed. Git leaves the first spelling on disk holding the last one's
-// bytes, an entry that is neither, which a scan of the folder would read
-// as a wrong one; here a scan reads the winner exactly.
+// is removed. For files that is what git does; for directories git merges a
+// set under its first spelling, and here the winner is written alone, so
+// that what this get writes is one c4m entry exactly.
 
 // probePrefix names a get's probe folders, so one left by a crash is
 // found and removed by the next get.
@@ -242,6 +242,19 @@ func (s *identities) add(fi os.FileInfo, name string) {
 	s.names = append(s.names, name)
 }
 
+// rename makes fi known by name from now on.
+func (s *identities) rename(fi os.FileInfo, name string) {
+	if k, ok := keyOf(fi); ok {
+		s.byKey[k] = name
+		return
+	}
+	for i, o := range s.all {
+		if os.SameFile(o, fi) {
+			s.names[i] = name
+		}
+	}
+}
+
 func (s *identities) of(fi os.FileInfo) string {
 	if k, ok := keyOf(fi); ok {
 		return s.byKey[k]
@@ -353,6 +366,7 @@ func compact(s []string) []string {
 func respell(dir string, paths []string) []string {
 	var left []string
 	listed := map[string]map[string]bool{}
+	byID := map[string]*identities{}
 	sort.Strings(paths)
 	for _, p := range paths {
 		p = strings.TrimSuffix(p, "/")
@@ -377,19 +391,34 @@ func respell(dir string, paths []string) []string {
 		if err != nil {
 			continue
 		}
-		for other := range names {
-			fi, err := os.Lstat(filepath.Join(parent, other))
-			if err != nil || !os.SameFile(fi, there) {
-				continue
+		// The folder's entries by identity, made on the first miss in it,
+		// so a folder full of names to respell costs one Lstat per entry.
+		ids, ok := byID[parent]
+		if !ok {
+			ids = &identities{}
+			listedNames := make([]string, 0, len(names))
+			for n := range names {
+				listedNames = append(listedNames, n)
 			}
-			if err := os.Rename(filepath.Join(parent, other), filepath.Join(parent, name)); err != nil {
-				left = append(left, fmt.Sprintf("%s: the folder lists it as %s and will not take its own spelling: %v", show(p), show(other), err))
-			} else {
-				delete(names, other)
-				names[name] = true
+			sort.Strings(listedNames) // of two names of one entry, the first
+			for _, n := range listedNames {
+				if fi, err := os.Lstat(filepath.Join(parent, n)); err == nil && ids.of(fi) == "" {
+					ids.add(fi, n)
+				}
 			}
-			break
+			byID[parent] = ids
 		}
+		other := ids.of(there)
+		if other == "" || other == name {
+			continue
+		}
+		if err := os.Rename(filepath.Join(parent, other), filepath.Join(parent, name)); err != nil {
+			left = append(left, fmt.Sprintf("%s: the folder lists it as %s and will not take its own spelling: %v", show(p), show(other), err))
+			continue
+		}
+		delete(names, other)
+		names[name] = true
+		ids.rename(there, name)
 	}
 	return left
 }
@@ -505,4 +534,21 @@ func leftovers(dir string, lost map[string]string, files []api.ViewFile, dirs []
 	}
 	sort.Strings(out)
 	return out
+}
+
+// linksInside leaves out every link whose target would reach past the
+// folder, as makeLinks would, and says which.
+func linksInside(links []api.ViewLink) ([]api.ViewLink, []string) {
+	var kept []api.ViewLink
+	var left []string
+	for _, l := range links {
+		rel := filepath.FromSlash(l.Path)
+		target := filepath.FromSlash(l.Target)
+		if filepath.IsAbs(target) || !filepath.IsLocal(filepath.Join(filepath.Dir(rel), target)) {
+			left = append(left, fmt.Sprintf("%s -> %s: the link points outside the folder", l.Path, l.Target))
+			continue
+		}
+		kept = append(kept, l)
+	}
+	return kept, left
 }

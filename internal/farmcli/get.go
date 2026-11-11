@@ -83,6 +83,10 @@ func Get(ctx context.Context, c *Client, o Out, a GetArgs) error {
 		return fmt.Errorf("nothing at %s in %s", strings.Join(a.Paths, ", "), vid)
 	}
 	files, dirs, links, left := writable(getOS, files, dirs, links)
+	// A link that would point outside the folder is left out before the
+	// names are measured, so it is never taken for the one written.
+	links, outside := linksInside(links)
+	left = append(left, outside...)
 	lost, err := losers(a.Dir, files, dirs, links)
 	if err != nil {
 		return err

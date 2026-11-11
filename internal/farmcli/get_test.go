@@ -610,3 +610,40 @@ func TestGetAroundTheProbe(t *testing.T) {
 		t.Fatal("a failed fetch left a file under the view's name")
 	}
 }
+
+// A winner that would not be written is not one: a link that points
+// outside the folder is left out first, so LATEST is written. Empty
+// directories a folder takes for one are measured like any names. The
+// report says each thing once.
+func TestWinnersAreWhatIsWritten(t *testing.T) {
+	ctx := context.Background()
+	old := getOS
+	t.Cleanup(func() { getOS = old })
+	getOS = "linux"
+	dir := t.TempDir()
+	if !collides(t, dir, "A", "a") {
+		t.Skip("this folder tells names apart by case")
+	}
+	vid := c4.Identify(strings.NewReader("v")).String()
+	var out bytes.Buffer
+	if err := Get(ctx, fakeViewDirs(t, map[string]string{"LATEST": "l\n", "Docs/a": "a\n", "docs/b": "b\n"}, []api.ViewLink{{Path: "latest", Target: "/etc"}}, []string{"Empty/", "empty/"}), Out{W: &out}, GetArgs{Ref: vid, Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "LATEST")); err != nil || string(b) != "l\n" {
+		t.Fatalf("LATEST: %q, %v\n%s", b, err, out.String())
+	}
+	if strings.Contains(out.String(), "latest, the last of them") {
+		t.Fatalf("a link that is not written was reported as written:\n%s", out.String())
+	}
+	ents, _ := os.ReadDir(dir)
+	if !hasName(ents, "empty") || hasName(ents, "Empty") || !strings.Contains(out.String(), "skipped   Empty: this folder takes it for empty") {
+		t.Fatalf("empty directories: %v\n%s", ents, out.String())
+	}
+	seen := map[string]bool{}
+	for _, l := range strings.Split(out.String(), "\n") {
+		if l != "" && seen[l] {
+			t.Fatalf("the report says %q twice:\n%s", l, out.String())
+		}
+		seen[l] = true
+	}
+}
