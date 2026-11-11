@@ -125,8 +125,11 @@ func replayPort(t *testing.T, ns string, q *Queue, now *time.Time, put func(stri
 // watches that the package's other tests do not run: measured by line
 // coverage, every block it reached was reached by another test but one
 // (suggest.go, the information point used), which
-// TestAnInformationPointMovesASuggestionOnce now reaches and pins. It
-// still runs on every leg of the plain test step.
+// TestAnInformationPointMovesASuggestionOnce now reaches and pins. Nor
+// does it start a goroutine of the operator's own, so the race detector
+// has nothing in this code to pair it with; a change that makes a tick
+// concurrent ends that, and the skip with it. It still runs on every leg
+// of the plain test step.
 func TestReplayLibraryPort(t *testing.T) {
 	if raceDetector {
 		t.Skip("under the race detector: every block it reaches is reached by the package's other tests (see above)")
