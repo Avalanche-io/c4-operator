@@ -230,16 +230,35 @@ rule on Windows only: elsewhere its bytes are kept as they are.
 The one writer that runs on Windows is `c4-farm get`; checkout, layers and
 the object cache do not build there. A link whose target holds a name the
 platform cannot hold is refused the same way: on Windows a backslash in a
-target is a separator, and the link would point at another entry. A
-trailing space or dot and the device
-names are refused by git's rule and not yet measured: a writer can make
-them through `\\?\` paths, and a Windows measurement that they read back
-exactly would drop those refusals. Two names a folder takes for one (case
-on NTFS and APFS, Unicode form on APFS) are not yet looked for: one can
-overwrite the other. Until the operator's c4m pin carries c4 PR #98, a name
-or link target that ends in a backslash is refused at import by the
-round-trip guard (section 2.3), since the pinned library reads it back with
-one more.
+target is a separator, and the link would point at another entry. A trailing
+space or dot and the device names are refused by git's rule and not yet
+measured: a writer can make them through `\\?\` paths, and a Windows
+measurement that they read back exactly would drop those refusals. Two names
+a folder takes for one (case on NTFS and APFS, Unicode form on APFS:
+README.md and readme.md, ß and ss, σ and ς, é and e + U+0301, İ and I +
+U+0307, measured on this Mac) are measured, not predicted, and measured in a
+scratch folder of the get's own, never in the user's tree: for each
+directory of the view its names are made as empty files in a fresh probe
+folder, in byte order, and a name whose making lands on one made before it
+is taken for that one. A folder that tells A from a and é from e + U+0301 is
+taken to take none for one, and nothing more is measured. The probe folder
+is made at the get's folder, so a directory deeper in it with a rule of its
+own (an ext4 casefold directory, NTFS per-directory case sensitivity) is not
+measured. Of each set, the last in byte order is the one written, whole: its
+exact spelling and its bytes. The others, everything under them, and every
+link that points into one, are not written at all, and are reported with it;
+nothing the folder already holds is removed. **This is where c4 goes past
+git:** git's checkout leaves the first spelling on disk holding the last
+one's bytes, an entry that is neither of the two, which a scan of the folder
+would read as a wrong one; here a scan reads the winner exactly and nothing
+of the losers. After the writes, an entry the folder lists under another
+spelling than the view's (one an earlier get or anything else left) is
+renamed in place to the view's exactly; nothing is removed for it. The
+measuring costs a made and removed empty file per name, about 90 µs a name
+on this Mac (20,000 names in one directory, 1.8 s), first run and re-run
+alike. Until the operator's c4m pin carries c4 PR #98, a name or link target
+that ends in a backslash is refused at import by the round-trip guard
+(section 2.3), since the pinned library reads it back with one more.
 
 ### 2.2 Records
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -82,6 +83,12 @@ func Get(ctx context.Context, c *Client, o Out, a GetArgs) error {
 		return fmt.Errorf("nothing at %s in %s", strings.Join(a.Paths, ", "), vid)
 	}
 	files, dirs, links, left := writable(getOS, files, dirs, links)
+	lost, err := losers(a.Dir, files, dirs, links)
+	if err != nil {
+		return err
+	}
+	files, dirs, links, lostLeft := withoutLosers(lost, files, dirs, links)
+	left = append(left, lostLeft...)
 	var (
 		next        atomic.Int64
 		wrote, kept atomic.Int64
@@ -133,6 +140,23 @@ func Get(ctx context.Context, c *Client, o Out, a GetArgs) error {
 	if err != nil {
 		return err
 	}
+	// Every name the view has, in the folder's listing as it is spelled.
+	var names []string
+	for _, f := range files {
+		names = append(names, f.Path)
+	}
+	for _, d := range dirs {
+		names = append(names, d)
+	}
+	for _, l := range links {
+		names = append(names, l.Path)
+	}
+	for _, p := range append([]string(nil), names...) {
+		for d := path.Dir(strings.TrimSuffix(p, "/")); d != "." && d != "/"; d = path.Dir(d) {
+			names = append(names, d)
+		}
+	}
+	left = append(left, respell(a.Dir, names)...)
 	line := fmt.Sprintf("%s · %s · every ID checked", plural(int(wrote.Load()), "file", "files"), Bytes(bytes.Load()))
 	if k := kept.Load(); k > 0 {
 		line += fmt.Sprintf(" · %d already here", k)
