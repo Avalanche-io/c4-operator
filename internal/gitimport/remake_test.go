@@ -205,6 +205,15 @@ func TestRemakeComparesEveryKindOfLine(t *testing.T) {
 	if err := Remake(ctx, opts, old); err == nil || strings.Contains(err.Error(), "before 2026-11-09") || !strings.Contains(err.Error(), "and the mapping records the view") {
 		t.Fatalf("a line in the earlier form with another view: %v", err)
 	}
+	// A line whose view is not the commit's, with a changeset in the
+	// earlier form over that same wrong view, is not said to be in the
+	// earlier form: the commit does not come to the view it records.
+	wrongView := sum.Commits[1]
+	wrongView.View = sum.Commits[0].View
+	wrongView.Changeset = c4.Identify(strings.NewReader(string(data) + wrongView.View.String() + "\n"))
+	if err := Remake(ctx, opts, wrongView); err == nil || strings.Contains(err.Error(), "before 2026-11-09") || !strings.Contains(err.Error(), "and the mapping records the view") {
+		t.Fatalf("a line in the earlier form over a view its commit does not come to: %v", err)
+	}
 	// The earlier form had its view's C4 ID on a line of its own; the
 	// same text without the newline is not that form.
 	old = sum.Commits[1]

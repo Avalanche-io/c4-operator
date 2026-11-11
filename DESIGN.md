@@ -1203,15 +1203,18 @@ import step, so import must be fast and push-driven.
     changeset's line, or, when the parent's view could not be put back, to
     before the first line that names the parent or has its view. The parent
     stays known by its view while any line names it (an import under another
-    ref, one in full, a line that moved a ref to it), and a commit that
-    changed nothing the view records (an empty commit, a submodule bump) has
-    its parent's view, so an import could go on from either; cut before both,
-    the next import goes on from a view it can read. That cut assumes the
-    views before it can be read along the paths the next commits change; a
-    record of an earlier view lost from the store stops the next import as it
-    does on main, and nothing here makes it again. A changeset that is still
-    not in the store after it was made again (a store that says it holds what
-    it does not) is an error after one try, not a loop.
+    ref, one in full, a line that moved a ref to it), and any line with that
+    view is a place an import could go on from or a chain could build on: a
+    commit that changed nothing the view records (an empty commit, a submodule
+    bump), a revert to it, a chain section over it. Cut before both, the next
+    import goes on from a view it can read, though where such a line is one
+    nothing builds on (a deleted ref's), the cut takes more than it needs to,
+    which costs only lines imported again. That cut assumes the views before
+    it can be read along the paths the next commits change; a record of an
+    earlier view lost from the store stops the next import as it does on main,
+    and nothing here makes it again. A changeset that is still not in the
+    store after it was made again (a store that says it holds what it does
+    not) is an error after one try, not a loop.
   - *A wrong object is not written over.* A store keeps the object it has
     under a C4 ID, so a changeset the store holds wrongly cannot be made
     again until the object is removed; the error says so, and the next
