@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,6 +28,18 @@ import (
 // the test runs instead of a clock.
 func sealedOwnerIssuer(t *testing.T) (*ownerIssuer, func()) {
 	t.Helper()
+	o, seal, _ := bookedFarm(t, false)
+	return o, seal
+}
+
+// bookedFarm is sealedOwnerIssuer with two of a real farm's states: a
+// sealer that refuses every people's entry (refusePeople: the seal can
+// refuse what was pending), and, while busy is set, one more entry on the
+// page's pending list (a busy farm's control entries and renewals, or a
+// HUD that says something waits when nothing does: the client never
+// checks the pending list, only waits on it).
+func bookedFarm(t *testing.T, refusePeople bool) (*ownerIssuer, func(), *atomic.Bool) {
+	t.Helper()
 	o := newBookedOwnerIssuer(t)
 	book := o.index.Book
 	queue, err := provenance.NewSigner(context.Background(), func(_ context.Context, pub ed25519.PublicKey) ([]*x509.Certificate, error) {
@@ -38,9 +51,13 @@ func sealedOwnerIssuer(t *testing.T) (*ownerIssuer, func()) {
 	}
 	sealer := &farmbook.Sealer{Farm: book.Farm, Roots: book.Roots, Store: book.Store, Pointer: book.Pointer, Own: book.Own, Signer: queue, Log: logr.Discard(),
 		Checkers: func() []farmbook.Checker {
-			return []farmbook.Checker{people.NewBookChecker(book.Farm, book.Roots, book.Store),
-				&farmbook.ControlChecker{Farm: book.Farm, Roots: book.Roots, Store: book.Store}}
+			cs := []farmbook.Checker{&farmbook.ControlChecker{Farm: book.Farm, Roots: book.Roots, Store: book.Store}}
+			if !refusePeople {
+				cs = append(cs, people.NewBookChecker(book.Farm, book.Roots, book.Store))
+			}
+			return cs
 		}}
+	busy := &atomic.Bool{}
 	o.mux.HandleFunc("GET /api/v1/book/farm", func(w http.ResponseWriter, r *http.Request) {
 		since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
 		v, err := book.View(r.Context(), time.Now())
@@ -48,7 +65,11 @@ func sealedOwnerIssuer(t *testing.T) (*ownerIssuer, func()) {
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
-		json.NewEncoder(w).Encode(farmbook.NewPage(v, since, 100))
+		p := farmbook.NewPage(v, since, 100)
+		if busy.Load() && !p.More {
+			p.Pending = append(p.Pending, farmbook.PageEntry{ID: "c4pending", Position: p.Head.Position + 1})
+		}
+		json.NewEncoder(w).Encode(p)
 	})
 	seal := func() {
 		t.Helper()
@@ -56,7 +77,7 @@ func sealedOwnerIssuer(t *testing.T) (*ownerIssuer, func()) {
 			t.Fatal(err)
 		}
 	}
-	return o, seal
+	return o, seal, busy
 }
 
 // up checks the owner it has just enrolled against the farm's own record
@@ -164,17 +185,62 @@ func UpKeysCheck(ctx context.Context, o *ownerIssuer, st keystore.Store, pinned 
 	return CheckOwner(ctx, o.client, st, cfg, pinned)
 }
 
-// With nothing waiting for the seal, there is nothing to wait for: a farm
-// whose book holds no owner and no pending entry is refused at once, not
-// after ownerSealWait. Here the machine has no certificate of its own, so
-// it reads no owner from a book that holds nothing.
-func TestTheOwnerCheckWaitsOnlyForWhatIsPending(t *testing.T) {
+// The wait is only while no owner is booked and something waits for the
+// seal. A farm whose book has sealed its owner answers at once, pinned
+// right or wrong, however much it holds pending (on a busy farm something
+// almost always is); one whose seal refused the owner's entry, with
+// nothing pending, is refused at once as booking none; and one whose HUD
+// says forever that something waits is refused at ownerSealWait, never
+// accepted.
+func TestTheOwnerCheckWaitsOnlyForASealToCome(t *testing.T) {
 	ctx := context.Background()
-	o, _ := sealedOwnerIssuer(t)
+	old := ownerSealWait
+	t.Cleanup(func() { ownerSealWait = old })
+	ownerSealWait = 3 * time.Second
+
+	o, seal, busy := bookedFarm(t, false)
 	st := keystore.Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
+	out, err := EnrolOwner(ctx, o.client, st, "noor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seal()
+	busy.Store(true)
 	start := time.Now()
-	err := UpKeysCheck(ctx, o, st, "c4notthisfarmsowner")
-	if !errors.Is(err, ErrOwnerKey) || !strings.Contains(err.Error(), "books none") || time.Since(start) > time.Second {
-		t.Errorf("no owner and nothing pending: %v, after %s", err, time.Since(start))
+	if err := UpKeysCheck(ctx, o, st, out.Owner.Device); err != nil || time.Since(start) > time.Second {
+		t.Errorf("its owner sealed, entries pending, the right key: %v, after %s", err, time.Since(start))
+	}
+	other := out.Owner.Device[:len(out.Owner.Device)-1] + "z"
+	if strings.HasSuffix(out.Owner.Device, "z") {
+		other = out.Owner.Device[:len(out.Owner.Device)-1] + "y"
+	}
+	start = time.Now()
+	if err := UpKeysCheck(ctx, o, st, other); !errors.Is(err, ErrOwnerKey) || time.Since(start) > time.Second {
+		t.Errorf("its owner sealed, entries pending, another key: %v, after %s", err, time.Since(start))
+	}
+
+	o, seal, busy = bookedFarm(t, true)
+	st = keystore.Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
+	if out, err = EnrolOwner(ctx, o.client, st, "noor"); err != nil {
+		t.Fatal(err)
+	}
+	seal() // refuses the owner's entry: nothing sealed, nothing pending
+	start = time.Now()
+	if err := UpKeysCheck(ctx, o, st, out.Owner.Device); !errors.Is(err, ErrOwnerKey) || !strings.Contains(err.Error(), "books none") || time.Since(start) > time.Second {
+		t.Errorf("no owner sealed and nothing pending: %v, after %s", err, time.Since(start))
+	}
+	busy.Store(true)
+	ownerSealWait = 700 * time.Millisecond
+	start = time.Now()
+	err = UpKeysCheck(ctx, o, st, out.Owner.Device)
+	if el := time.Since(start); !errors.Is(err, ErrOwnerKey) || !strings.Contains(err.Error(), "sealed no owner within") || el < ownerSealWait || el > ownerSealWait+2*time.Second {
+		t.Errorf("a HUD that always has something pending, and no owner sealed: %v, after %s", err, el)
+	}
+	// a caller's deadline ends the wait, said as the owner check's
+	ownerSealWait = 30 * time.Second
+	short, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+	defer cancel()
+	if err := UpKeysCheck(short, o, st, out.Owner.Device); !errors.Is(err, context.DeadlineExceeded) || !strings.HasPrefix(err.Error(), "the farm's owner key") {
+		t.Errorf("the wait, past the caller's deadline: %v", err)
 	}
 }

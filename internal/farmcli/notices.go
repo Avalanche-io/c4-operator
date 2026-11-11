@@ -303,17 +303,12 @@ func readBook(ctx context.Context, c *Client, roots *x509.CertPool, farm string,
 	}
 }
 
-// FarmOwner is the farm's owner key as its people's index books it: the
+// farmOwner is the farm's owner key as its people's index books it: the
 // first device the installer token enrolled, read from the start and
 // checked as each run's reading is, without moving what this machine
-// keeps. "" when the index books none.
-func FarmOwner(ctx context.Context, c *Client, st keystore.Store, cfg *people.Config) (string, error) {
-	owner, _, err := farmOwner(ctx, c, st, cfg)
-	return owner, err
-}
-
-// farmOwner is FarmOwner, and how many entries the farm book held pending
-// its seal when it was read (0 on a farm without a book). A device entry
+// keeps; "" when the index books none. With it, how many entries the farm
+// book held pending its seal when it was read (0 on a farm without a
+// book). A device entry
 // whose record does not load is an error, not an entry that books no
 // owner: when no owner is found it is the answer, so a read that failed
 // never reads as a farm with no owner.
@@ -376,7 +371,7 @@ func CheckOwner(ctx context.Context, c *Client, st keystore.Store, cfg *people.C
 	for err == nil && owner == "" && pending > 0 && time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf("the farm's owner key: %w", ctx.Err())
 		case <-time.After(ownerSealPoll):
 		}
 		owner, pending, err = farmOwner(ctx, c, st, cfg)
@@ -385,7 +380,7 @@ func CheckOwner(ctx context.Context, c *Client, st keystore.Store, cfg *people.C
 		return fmt.Errorf("the farm's owner key: %w", err)
 	}
 	if owner == "" && pending > 0 {
-		return fmt.Errorf("%w: its farm book sealed no owner within %s, with %d entries still waiting for its seal, and this machine pinned %s when up enrolled it; run up again once the book has sealed",
+		return fmt.Errorf("%w: its farm book sealed no owner within %s, with entries still waiting for its seal (%d), and this machine pinned %s when up enrolled it; run up again once the book has sealed",
 			ErrOwnerKey, ownerSealWait, pending, pinned)
 	}
 	if owner != pinned {
