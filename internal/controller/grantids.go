@@ -20,10 +20,12 @@ import (
 // entry restated with another mode or date as a removal, where the
 // resolver keeps it). A RootID, the description's root lines as stated, is
 // not one: a hand-made c4m can state any. Every read is hashed
-// (view.Checked), and the result is remembered by the source's byte ID,
-// since a source never changes.
-func (r *MaterializationReconciler) grantIDs(ctx context.Context, store view.Store, data []byte, sourceID c4.ID) ([]c4.ID, error) {
-	if ids, ok := r.views.get(sourceID); ok {
+// (view.Checked), and the result is remembered by project and source byte
+// ID, since a source never changes: a hit reads nothing, so it is never
+// carried from one project's store to another's.
+func (r *MaterializationReconciler) grantIDs(ctx context.Context, project string, store view.Store, data []byte, sourceID c4.ID) ([]c4.ID, error) {
+	key := memoKey{project, sourceID}
+	if ids, ok := r.views.get(key); ok {
 		return ids, nil
 	}
 	all, err := view.NewFilter(nil)
@@ -41,33 +43,38 @@ func (r *MaterializationReconciler) grantIDs(ctx context.Context, store view.Sto
 		return nil, err
 	}
 	ids := []c4.ID{sourceID, res.Chain[0].ID, res.View().ID}
-	r.views.put(sourceID, ids)
+	r.views.put(key, ids)
 	return ids, nil
 }
 
-// viewMemo remembers, by a description's byte ID, the IDs grantIDs
-// computed for it: a source never changes, so it is resolved for grant
-// lookup once, not on every reconcile.
+// viewMemo remembers, by project and a description's byte ID, the IDs
+// grantIDs computed for it: a source never changes, so it is resolved for
+// grant lookup once, not on every reconcile.
 type viewMemo struct {
 	mu sync.Mutex
-	m  map[c4.ID][]c4.ID
+	m  map[memoKey][]c4.ID
+}
+
+type memoKey struct {
+	project string
+	source  c4.ID
 }
 
 // viewMemoMax bounds the memo; past it, it starts again.
 const viewMemoMax = 4096
 
-func (v *viewMemo) get(source c4.ID) ([]c4.ID, bool) {
+func (v *viewMemo) get(k memoKey) ([]c4.ID, bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	ids, ok := v.m[source]
+	ids, ok := v.m[k]
 	return ids, ok
 }
 
-func (v *viewMemo) put(source c4.ID, ids []c4.ID) {
+func (v *viewMemo) put(k memoKey, ids []c4.ID) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if v.m == nil || len(v.m) >= viewMemoMax {
-		v.m = map[c4.ID][]c4.ID{}
+		v.m = map[memoKey][]c4.ID{}
 	}
-	v.m[source] = ids
+	v.m[k] = ids
 }

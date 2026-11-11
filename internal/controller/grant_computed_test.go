@@ -200,7 +200,7 @@ func TestGrantIDsUnit(t *testing.T) {
 	}
 	r := &MaterializationReconciler{}
 	cs := &countingStore{Store: st.store}
-	first, err := r.grantIDs(ctx, cs, desc, c4.Identify(bytes.NewReader(desc)))
+	first, err := r.grantIDs(ctx, "memo", cs, desc, c4.Identify(bytes.NewReader(desc)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,12 +208,19 @@ func TestGrantIDsUnit(t *testing.T) {
 	if reads == 0 || len(first) != 3 || first[2] != v.ID {
 		t.Fatalf("the first lookup read %d objects and gave %v; want reads and the view %s", reads, first, v.ID)
 	}
-	second, err := r.grantIDs(ctx, cs, desc, c4.Identify(bytes.NewReader(desc)))
+	second, err := r.grantIDs(ctx, "memo", cs, desc, c4.Identify(bytes.NewReader(desc)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cs.n != reads || first[2] != second[2] {
 		t.Fatalf("a second lookup read %d objects more and gave %v, after %v", cs.n-reads, second, first)
+	}
+	// Another project's lookup of the same source reads its own store.
+	if _, err := r.grantIDs(ctx, "another", cs, desc, c4.Identify(bytes.NewReader(desc))); err != nil {
+		t.Fatal(err)
+	}
+	if cs.n == reads {
+		t.Fatal("another project's lookup was answered from the first project's memo")
 	}
 
 	patch := c4m.NewManifest()
@@ -223,7 +230,7 @@ func TestGrantIDsUnit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ids, err := r.grantIDs(ctx, st.store, changeset, c4.Identify(bytes.NewReader(changeset)))
+	ids, err := r.grantIDs(ctx, "memo", st.store, changeset, c4.Identify(bytes.NewReader(changeset)))
 	if err != nil {
 		t.Fatal(err)
 	}

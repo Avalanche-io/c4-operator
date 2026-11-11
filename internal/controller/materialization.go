@@ -121,7 +121,7 @@ func (r *MaterializationReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			return r.fail(ctx, orig, &mat, "NotGranted",
 				fmt.Errorf("project %s has scope Grants and no grants", p.Name), 0)
 		}
-		ids, err := r.grantIDs(ctx, store, data, sourceID)
+		ids, err := r.grantIDs(ctx, p.Name, store, data, sourceID)
 		if err != nil {
 			return r.fail(ctx, orig, &mat, "ResolveFailed",
 				fmt.Errorf("resolving source %s, with every read checked, to match it against the project's grants: %w", sourceID, err), r.Retry)
