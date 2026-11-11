@@ -145,8 +145,10 @@ type MaterializationStatus struct {
 	// SourceID identifies the exact description resolved.
 	// +optional
 	SourceID string `json:"sourceID,omitempty"`
-	// RootID is the description's C4 ID, the one `c4 id -q` reports for it
-	// (for a changeset, for the state it resolves to).
+	// RootID is the description's C4 ID: the ID of its root listing, each
+	// top-level line as stated (for a changeset, the state it resolves to),
+	// which is what `c4 id -q` reports unless a top-level directory's line
+	// is stale or null where its listed children would derive it.
 	// +optional
 	RootID string `json:"rootID,omitempty"`
 	// ViewID is the ID of the tree pods see.

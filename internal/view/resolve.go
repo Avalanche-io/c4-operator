@@ -34,10 +34,11 @@ type Resolved struct {
 	// SourceID is the ID of the description itself: the c4m text, the
 	// stored record, or the changeset.
 	SourceID c4.ID
-	// RootID is the description's C4 ID, the one `c4 id -q` reports for it
-	// (for a changeset, for the state it resolves to): the ID of its root
-	// listing once the library's normaliser has re-derived every directory
-	// whose children it lists.
+	// RootID is the description's C4 ID: the ID of its root listing, each
+	// top-level line as stated (for a changeset, the state it resolves to).
+	// It is what `c4 id -q` reports except where a top-level directory's
+	// line is stale or null and its listed children would derive it; see
+	// descriptionID.
 	RootID c4.ID
 	// Chain holds the most recent views of the changeset chain (at most
 	// KeepLevels), base first. The last one is what pods see. A plain
@@ -183,21 +184,26 @@ func buildNode(items []item, f Filter) (*Node, error) {
 	return root, nil
 }
 
-// descriptionID is a description's C4 ID, the one c4 reports for it
-// (`c4 id -q`): the library's normaliser over the description (every
-// directory whose children it lists re-derived from them), then the C4 ID
-// of its root listing's canonical text. A top-level directory known only
-// by its ID keeps a null size, except that the empty listing's ID says
-// the directory is empty, size 0, as c4 50ba056 has it. Not ComputeC4ID:
-// on the pinned library that reads every directory known only by its ID
-// as empty and hashes a 0 the description does not state; once the pin
-// carries 50ba056 this is Normalize and ComputeC4ID.
+// descriptionID is a description's C4 ID: the C4 ID of the canonical text
+// of its root listing, each top-level line as the description states it.
+// A top-level directory known only by its ID keeps a null size, except
+// that the empty listing's ID says the directory is empty, size 0, as c4
+// 50ba056 has it. Not ComputeC4ID: on the pinned library that reads every
+// directory known only by its ID as empty and hashes a 0 the description
+// does not state.
+//
+// It equals what `c4 id -q` reports except where a top-level line is
+// stale, or null where its listed children would derive it: c4's
+// normaliser re-derives every directory whose children are listed, and a
+// changeset deepens a directory its base knows only by its ID with a
+// partial listing (view.Apply restates a changed directory with its new
+// size and ID and lists only the changed child), which the normaliser
+// would wrongly take as whole. Until c4 rules that a partial listing keeps
+// a stated size and ID and nulls an unstated one, the line is kept as
+// recorded, which is right for every changeset this system writes.
 func descriptionID(m *c4m.Manifest) c4.ID {
 	cp := m.Copy()
-	c4m.Normalize(cp)
 	for _, e := range cp.Entries {
-		// After the normaliser a directory with listed children has their
-		// ID, never the empty listing's.
 		if e.Depth == 0 && e.IsDir() && e.Size < 0 && e.C4ID == emptyID {
 			e.Size = 0
 		}

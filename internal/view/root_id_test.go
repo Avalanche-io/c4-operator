@@ -2,6 +2,8 @@ package view
 
 import (
 	"bufio"
+	"bytes"
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -18,21 +20,25 @@ func (d dirStore) Open(id c4.ID) (io.ReadCloser, error) {
 	return os.Open(filepath.Join(string(d), id.String()))
 }
 
-// rootIDGaps are sources whose RootID the pinned c4m library cannot get
-// right yet, and why. Each must still be wrong: when a pin move makes it
-// right, the test says so, and the entry comes out.
-var rootIDGaps = map[string]string{
-	// a/ is null and holds d/, known only by its ID, with a null size: the
-	// pinned normaliser reads d/ as empty and counts 0 into a/.
-	"collapsed-null.c4m": "the pinned c4m library reads a collapsed directory's null size as 0; fixed in c4 50ba056",
-	// a/ is null and holds e/, with neither an ID nor children: the pinned
-	// normaliser reads e/ as empty too.
-	"empty-unknown.c4m": "the pinned c4m library reads a directory nobody read as empty; fixed in c4 0a27b6d",
-	// a/ states its own time; the pinned normaliser replaces it with its
-	// newest child's.
-	"stated-time.c4m":       "the pinned c4m normaliser replaces a stated directory time with the newest child's; fixed in c4 f13056e",
-	"changeset-dirline.c4m": "the pinned c4m normaliser replaces a stated directory time with the newest child's; fixed in c4 f13056e",
-}
+// rootIDAsRecorded are sources whose RootID is not yet what `c4 id -q`
+// reports, and why: each has a top-level directory line that is stale, or
+// null where the children it lists would derive it. RootID keeps such a
+// line as recorded, since c4's normaliser would re-derive a directory a
+// changeset deepens from a partial listing (see descriptionID), until c4
+// rules on partial listings. Each must still differ from -q: when exact
+// -q lands, the test says so, and the entry comes out.
+var rootIDAsRecorded = func() map[string]bool {
+	m := map[string]bool{}
+	for _, n := range []string{
+		"nested.c4m", "stated-size.c4m", "stale-size.c4m", "stale-id.c4m",
+		"stated-time.c4m", "dated-child.c4m", "collapsed-stated.c4m",
+		"collapsed-null.c4m", "empty-unknown.c4m", "changeset-file.c4m",
+		"changeset-dirline.c4m",
+	} {
+		m[n] = true
+	}
+	return m
+}()
 
 // rootIDPending are sources awaiting a format ruling, with no expected ID
 // in root-ids.txt ("-"): they must still resolve.
@@ -88,9 +94,9 @@ func TestRootIDIsTheDescriptionID(t *testing.T) {
 			t.Logf("%s: RootID %s, pending a ruling on %s", name, res.RootID, why)
 			continue
 		}
-		if why, known := rootIDGaps[name]; known {
+		if rootIDAsRecorded[name] {
 			if res.RootID == want {
-				t.Errorf("%s: RootID is now right; take it out of rootIDGaps (%s)", name, why)
+				t.Errorf("%s: RootID is now what c4 id -q reports; take it out of rootIDAsRecorded", name)
 			}
 		} else if res.RootID != want {
 			t.Errorf("%s: RootID %s, where c4 id -q reports %s", name, res.RootID, want)
@@ -101,5 +107,64 @@ func TestRootIDIsTheDescriptionID(t *testing.T) {
 	}
 	if n != 21 {
 		t.Fatalf("root-ids.txt holds %d sources, not 21", n)
+	}
+}
+
+// objStore serves objects from memory, by C4 ID.
+type objStore map[c4.ID][]byte
+
+func (s objStore) Open(id c4.ID) (io.ReadCloser, error) {
+	b, ok := s[id]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	return io.NopCloser(bytes.NewReader(b)), nil
+}
+
+// A changeset as this system writes it (view.Apply: the changed directory
+// restated with its new size and ID, only the changed child listed) has
+// the RootID of the view it produces, whatever the filter: grant lookup
+// finds a grant naming that view by it.
+func TestRootIDOfAChangesetIsTheViewItMakes(t *testing.T) {
+	ctx := context.Background()
+	tree := t.TempDir()
+	for _, p := range []string{"h.txt", "a/f.txt", "a/s/g.txt", "b/g.txt"} {
+		full := filepath.Join(tree, filepath.FromSlash(p))
+		os.MkdirAll(filepath.Dir(full), 0o755)
+		os.WriteFile(full, []byte(p+"\n"), 0o644)
+	}
+	v, err := ScanDir(tree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recs, err := v.Records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := objStore{}
+	for _, r := range recs {
+		st[r.ID] = r.Data
+	}
+	n := []byte("n\n")
+	nid := c4.Identify(bytes.NewReader(n))
+	applied, err := Apply(ctx, v.ID, []Edit{{Path: "a/n.txt", Entry: FileEntry("", int64(len(n)), nid, false)}}, StoreRecords(st))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range applied.Records {
+		st[r.ID] = r.Data
+	}
+	for _, pats := range [][]string{nil, {"a/f.txt"}, {"h.txt"}, {"b"}} {
+		f, err := NewFilter(pats)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := FromBytes(applied.Changeset, st, f)
+		if err != nil {
+			t.Fatalf("filter %v: %v", pats, err)
+		}
+		if res.RootID != applied.ID {
+			t.Errorf("filter %v: RootID %s, the view it makes %s", pats, res.RootID, applied.ID)
+		}
 	}
 }
