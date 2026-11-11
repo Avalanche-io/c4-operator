@@ -26,14 +26,20 @@ var rootIDGaps = map[string]string{
 	// library's normaliser reads d/ as empty and counts 0 into a/, as
 	// ComputeC4ID did at the top; c4 50ba056 keeps the null.
 	"collapsed-null.c4m": "the pinned c4m library reads a collapsed directory's null size as 0; fixed in c4 50ba056",
+	// a/ states its own time; the pinned normaliser replaces it with its
+	// newest child's. c4 f13056e keeps a stated directory time (reading A).
+	"stated-time.c4m": "the pinned c4m normaliser replaces a stated directory time with the newest child's; fixed in c4 f13056e",
 }
 
 // A resolution's RootID is the description's ID, the one c4 master's
 // `c4 id -q` reports, for every kind of source in testdata/root-id: a
 // view's ID, the view as a c4m, the c4 CLI's full c4m, c4 master's scan
-// chain, and five made with the library: a top-level directory with a
+// chain, and eight made with the library: a top-level directory with a
 // null size and ID and its child listed; one with its size stated and its
-// ID null; one null throughout with a dated child; and two whose null top-level directory holds a directory known
+// ID null; one stating a stale size (999 over a child deriving 114), which
+// the normaliser corrects; one stating every field with a stale ID, also
+// corrected; one stating its own time, older than its
+// child's, which is kept; one null throughout with a dated child; and two whose null top-level directory holds a directory known
 // only by its ID (read from the store, which is not the description's and
 // is left out), its size stated or null. The first two hold a directory known only
 // by its ID with a null size (it holds a link), which ComputeC4ID read as
@@ -82,7 +88,7 @@ func TestRootIDIsTheDescriptionID(t *testing.T) {
 		}
 		n++
 	}
-	if n != 9 {
-		t.Fatalf("root-ids.txt holds %d sources, not 9", n)
+	if n != 12 {
+		t.Fatalf("root-ids.txt holds %d sources, not 12", n)
 	}
 }
