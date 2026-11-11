@@ -65,9 +65,24 @@ func TestRootIDIsTheDescriptionID(t *testing.T) {
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		n++
-		name, idText, ok := strings.Cut(sc.Text(), " ")
-		if !ok {
+		f := strings.Fields(sc.Text())
+		if len(f) < 2 || len(f) > 3 {
 			t.Fatalf("root-ids.txt: %q", sc.Text())
+		}
+		name, idText := f[0], f[1]
+		// A third column, for a source kept as recorded: the ID of its root
+		// listing as stated, by the library's ListingRecord over the decoded
+		// top-level entries (testdata/root-id/README.md).
+		var recorded c4.ID
+		if len(f) == 3 {
+			if recorded, err = c4.Parse(f[2]); err != nil {
+				t.Fatalf("root-ids.txt: %s: %v", name, err)
+			}
+			if !rootIDAsRecorded[name] {
+				t.Fatalf("root-ids.txt: %s has a recorded ID and is not kept as recorded", name)
+			}
+		} else if rootIDAsRecorded[name] {
+			t.Fatalf("root-ids.txt: %s is kept as recorded and has no recorded ID", name)
 		}
 		var want c4.ID
 		if idText == "-" {
@@ -97,6 +112,9 @@ func TestRootIDIsTheDescriptionID(t *testing.T) {
 		if rootIDAsRecorded[name] {
 			if res.RootID == want {
 				t.Errorf("%s: RootID is now what c4 id -q reports; take it out of rootIDAsRecorded", name)
+			}
+			if res.RootID != recorded {
+				t.Errorf("%s: RootID %s, where its root listing as stated is %s", name, res.RootID, recorded)
 			}
 		} else if res.RootID != want {
 			t.Errorf("%s: RootID %s, where c4 id -q reports %s", name, res.RootID, want)

@@ -40,7 +40,10 @@ re-derives it; RootID keeps it as stated, because c4's normaliser would
 also re-derive a directory a changeset deepens from a partial listing, and
 the farm's own changesets restate a changed directory with its new size and
 ID over only its changed child. The test holds them in `rootIDAsRecorded`
-until c4 rules on partial listings and RootID can be exactly `-q`.
+until c4 rules on partial listings and RootID can be exactly `-q`. Each has a
+third column in `root-ids.txt`: the C4 ID of its root listing as stated,
+made by the library's `ListingRecord` over the decoded top-level entries (a
+changeset's from the state it resolves to), which RootID must equal.
 `deepen-collapsed.c4m` has no expected ID (`-` in `root-ids.txt`): when a patch
 deepens a directory its base knows only by its ID, the description lists that
 directory's children only in part, and whether its ID is derived from the
