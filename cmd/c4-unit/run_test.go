@@ -535,6 +535,35 @@ previews: "render/*.$F4.exr"
 	}
 }
 
+// An empty file is not a frame while the tool runs, but it is a sign the
+// tool is alive: a tool whose only output for a while is empty per-frame
+// markers, and no log lines, is not ended as stalled. ("Counted as a frame"
+// and "the tool is working" are two questions.)
+func TestEmptyMarkersKeepAToolAlive(t *testing.T) {
+	r := newToolRun(t, `
+c4: tool/1
+name: x
+kind: frames
+runs:
+  image: c4/runtime-base
+  command: [bash, -c, 'for f in 1001 1002 1003 1004 1005 1006 1007 1008 1009 1010; do : > render/sm.$f.done; sleep 0.06; done']
+  workdir: "{{Job.Tree}}"
+previews: "render/*.$F4.done"
+stall: {quietMinutes: 2}
+`)
+	r.minute = 100 * time.Millisecond
+	r.vars["C4_FRAME_END"], r.vars["C4_FRAME_STEP"] = "1010", "1"
+	os.MkdirAll(filepath.Join(r.tree, "render"), 0o755)
+	c := r.run()
+	if o := r.outcome(); o.Stalled || c != 0 {
+		t.Errorf("a tool writing an empty marker every 60 ms, quiet for 200 ms at most: exit %d, ended as stalled %v", c, o.Stalled)
+	}
+	// counted as frames only at the end, as the tool left them
+	if p := r.file(".c4/progress"); p != "1\n" {
+		t.Errorf("progress %q", p)
+	}
+}
+
 func TestRunWritesThePathMap(t *testing.T) {
 	r := newToolRun(t, `c4: tool/1
 name: x

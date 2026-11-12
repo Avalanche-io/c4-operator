@@ -1162,11 +1162,11 @@ type fileState struct {
 // end, final), and once only, unless it is written again. An empty one
 // never counts while the tool runs, however long it holds: a writer that
 // opens before it writes (GNU cp) leaves the file empty until its bytes
-// come, and an empty file is not a frame yet. So an empty file is no sign
-// of work for the stall rule either, while the tool runs: a tool whose only
-// output is empty per-frame markers, silent for the stall's quiet minutes,
-// is ended as stalled. seen nil is the final scan: anything written since
-// the run began counts, as the tool left it.
+// come, and an empty file is not a frame yet. Whether the tool is alive is
+// another question: any file of the pattern that appears or changes is
+// sign of work for the stall rule, an empty one included, as it is when a
+// frame counts. seen nil is the final scan: anything written since the run
+// began counts, as the tool left it.
 func (r *runner) scanTree(seen map[string]fileState, final bool) {
 	root := r.tree
 	if pre := fixedPrefix(r.tool.Previews); pre != "" {
@@ -1206,8 +1206,10 @@ func (r *runner) scanTree(seen map[string]fileState, final bool) {
 		switch {
 		case !had:
 			seen[rel] = fileState{size: info.Size(), mod: info.ModTime()}
+			r.alive()
 		case s.size != info.Size() || !s.mod.Equal(info.ModTime()):
 			seen[rel] = fileState{size: info.Size(), mod: info.ModTime()}
+			r.alive()
 		case info.Size() == 0:
 			// not written yet: it counts once its bytes have come and held
 		case !s.counted:
@@ -1219,12 +1221,17 @@ func (r *runner) scanTree(seen map[string]fileState, final bool) {
 	})
 }
 
-// countTreeFrame takes a frame found in the tree: its preview, and, when
-// the tool has no progress rules, its progress.
-func (r *runner) countTreeFrame(n int, path string) {
+// alive notes a sign of the tool's work, for the stall rule.
+func (r *runner) alive() {
 	r.mu.Lock()
 	r.last = r.e.clock()
 	r.mu.Unlock()
+}
+
+// countTreeFrame takes a frame found in the tree: its preview, and, when
+// the tool has no progress rules, its progress.
+func (r *runner) countTreeFrame(n int, path string) {
+	r.alive()
 	if len(r.progress) == 0 {
 		r.frameDone(n, "")
 	}
