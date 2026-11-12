@@ -409,8 +409,11 @@ func (rc RecordedChain) bytes(ctx context.Context, src view.RecordSource) ([]byt
 	for i, id := range rc.Changesets {
 		lost := &CannotRemake{Changeset: id, Commit: rc.Commits[i], Line: rc.Lines[i]}
 		data, err := src.Record(ctx, id)
-		if errors.Is(err, view.ErrNotItsID) {
-			// not present to a reader, and still under the ID in the store
+		if errors.Is(err, view.ErrNotItsID) && !errors.Is(err, view.ErrRefiled) {
+			// not present to a reader, and still under the ID in the store,
+			// which keeps what it has: it has to go before the changeset
+			// can be made again. Re-filed, it has gone, and the changeset is
+			// missing like any other.
 			lost.Wrong = true
 			return nil, lost
 		}

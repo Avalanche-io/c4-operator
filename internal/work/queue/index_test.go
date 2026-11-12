@@ -285,7 +285,7 @@ func TestAnOldFoldWithNoRecordToSayIsFoldedAndReported(t *testing.T) {
 			var told []string
 			was := c4view.OnMismatch
 			t.Cleanup(func() { c4view.OnMismatch = was })
-			c4view.OnMismatch = func(_ string, asked, _ c4.ID) { told = append(told, asked.String()) }
+			c4view.OnMismatch = func(_ string, asked, _ c4.ID, _ error) { told = append(told, asked.String()) }
 			defer func() {
 				wrong := c.name == "a wrong object under the record's ID"
 				if wrong != (len(told) > 0) {

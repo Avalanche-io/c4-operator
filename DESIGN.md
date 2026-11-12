@@ -114,8 +114,25 @@ Project says not to, and are trusted from the local cache from then on.**
   object (`view.ErrNotItsID`, which is also `ErrIncomplete`,
   `storeurl.ErrNotFound` and `fs.ErrNotExist`), never the bytes, and the
   read is counted (`c4_store_mismatch_total`, by shard) and logged with
-  both IDs. A tool's egress and image pins, once read unchecked, come only
-  from its own files. It costs under 2% of a resolve (50,000 files: 565 ms
+  both IDs. The read then re-files them, as Joshua ruled: "rename the
+  'corrupted' data to its actual id (if this data is never referred to by
+  anything then it should eventually get garbage collected)". The bytes go
+  under their own ID (written only if no object there is that ID's
+  already; if one there is another wrong object, nothing moves, since
+  these may be its only copy), then come out from under the one asked for,
+  which frees it for a correct Put: `Head` no longer says it is there. On a
+  tree store the file is taken aside by a rename first, hashed, and put
+  back if it is the ID's own after all (a correct Put since the read); a
+  file put at its path afterwards is another and stays. On S3 the delete
+  carries the ETag the re-file read it at (`If-Match`), so an object put
+  since is not deleted; a store that ignores `If-Match` on a delete is left
+  with the read just before it. A c4d computes the ID of what it is given,
+  so it never takes a wrong object and repairs its own: it is not re-filed
+  from here. Nothing pins a re-filed object, and removing a key is the
+  re-file's alone. A git import whose changeset is found wrong then makes
+  it again in the same import, where before the store kept it and the
+  import stopped. A tool's egress and image pins, once read unchecked,
+  come only from its own files. It costs under 2% of a resolve (50,000 files: 565 ms
   against 561). An import from c4git still copies an object without
   hashing it (c4git verified it at `git add`), and a reader finds it not
   present if it is not its ID's.

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/Avalanche-io/c4"
 	"github.com/go-logr/logr"
 
@@ -12,8 +14,12 @@ import (
 // asked for (view.ReadObject), naming both IDs: a store that serves them
 // has lost or swapped the object, and needs looking at.
 func watchMismatches(log logr.Logger) {
-	view.OnMismatch = func(shard string, asked, got c4.ID) {
-		metrics.StoreMismatch.WithLabelValues(shard).Inc()
-		log.Info("a store served bytes that are not the C4 ID asked for: not present to its reader", "shard", shard, "asked", asked.String(), "got", got.String())
+	view.OnMismatch = func(shard string, asked, got c4.ID, refiled error) {
+		result := "refiled"
+		if refiled != nil {
+			result = "left"
+		}
+		metrics.StoreMismatch.WithLabelValues(shard, result).Inc()
+		log.Info("a store served bytes that are not the C4 ID asked for: not present to its reader", "shard", shard, "asked", asked.String(), "got", got.String(), "refile", fmt.Sprint(refiled))
 	}
 }

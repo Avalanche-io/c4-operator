@@ -100,8 +100,7 @@ func ReadObject(st Store, id c4.ID) ([]byte, error) {
 		return nil, fmt.Errorf("reading %s: %w", id, err)
 	}
 	if got := c4.Identify(bytes.NewReader(data)); got != id {
-		OnMismatch(storeName(st, id), id, got)
-		return nil, &notItsID{asked: id, got: got}
+		return nil, mismatch(st, id, got, data)
 	}
 	return data, nil
 }

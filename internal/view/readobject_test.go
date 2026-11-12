@@ -2,13 +2,16 @@ package view
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io/fs"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/Avalanche-io/c4"
 	"github.com/Avalanche-io/c4/c4m"
+	"github.com/Avalanche-io/c4/store"
 
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 )
@@ -26,7 +29,7 @@ func TestBytesThatAreNotTheIDAskedForAreNotPresent(t *testing.T) {
 	var told [][2]c4.ID
 	was := OnMismatch
 	t.Cleanup(func() { OnMismatch = was })
-	OnMismatch = func(_ string, a, g c4.ID) { told = append(told, [2]c4.ID{a, g}) }
+	OnMismatch = func(_ string, a, g c4.ID, _ error) { told = append(told, [2]c4.ID{a, g}) }
 
 	data, err := ReadObject(st, asked)
 	if data != nil || err == nil {
@@ -76,9 +79,50 @@ func TestAViewWithASwappedRecordIsIncomplete(t *testing.T) {
 	sub := v.Root.Dirs["shots/"].Entry.C4ID
 	was := OnMismatch
 	t.Cleanup(func() { OnMismatch = was })
-	OnMismatch = func(string, c4.ID, c4.ID) {}
+	OnMismatch = func(string, c4.ID, c4.ID, error) {}
 	st[sub] = st[v.ID] // the root's record under the subdirectory's ID
 	if r, err := FromID(v.ID, st, all); !errors.Is(err, ErrIncomplete) {
 		t.Fatalf("a view whose record is another's bytes: %v, %v", r, err)
+	}
+}
+
+// Through a store that can (storeurl.Sharded), the read that finds a wrong
+// object re-files it: the bytes are under their own ID, and gone from under
+// the one asked for, and the read says so (ErrRefiled), as does
+// OnMismatch.
+func TestTheReadThatFindsAWrongObjectRefilesIt(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	st, err := storeurl.OpenSharded([]storeurl.Spec{{Name: "s0", URL: dir}}, storeurl.Credentials{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	asked, err := st.PutBytes(ctx, []byte("the record"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong := []byte("not the record")
+	got := c4.Identify(bytes.NewReader(wrong))
+	ts, _ := store.NewTreeStore(dir)
+	p, _ := ts.ContentPath(asked)
+	os.Chmod(p, 0o644)
+	if err := os.WriteFile(p, wrong, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var refiled error = errors.New("not told")
+	was := OnMismatch
+	t.Cleanup(func() { OnMismatch = was })
+	OnMismatch = func(_ string, _, _ c4.ID, r error) { refiled = r }
+	if _, err := ReadObject(st, asked); !errors.Is(err, ErrNotItsID) || !errors.Is(err, ErrRefiled) {
+		t.Fatalf("the read: %v", err)
+	}
+	if refiled != nil {
+		t.Fatalf("OnMismatch was told %v", refiled)
+	}
+	if b, err := ReadObject(st, got); err != nil || !bytes.Equal(b, wrong) {
+		t.Fatalf("under their own ID: %q, %v", b, err)
+	}
+	if _, err := st.Head(ctx, asked); !errors.Is(err, storeurl.ErrNotFound) {
+		t.Fatalf("still under the ID asked for: %v", err)
 	}
 }

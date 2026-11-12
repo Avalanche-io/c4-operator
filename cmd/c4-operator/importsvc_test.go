@@ -523,35 +523,31 @@ func TestTheNextPushAfterATornFile(t *testing.T) {
 		}
 	}
 
-	// A wrong object under a changeset's C4 ID (cut short). A store keeps
-	// the object it has, so importing the commit again would not replace
-	// it: the error says it has to be removed. Removed, the next import
-	// makes the changeset again as it was, with no line of the mapping cut.
+	// A wrong object under a changeset's C4 ID (cut short). The read that
+	// finds it re-files it under its own ID (Joshua, 2026-11-11), which
+	// frees the changeset's, so the same import makes the changeset again
+	// as it was, with no line of the mapping cut and no one removing
+	// anything; the cut-short bytes are under their own ID, for GC. Before,
+	// the store kept them, and the error said they had to be removed.
 	lost := len(rc.Changesets) - 3
 	wrong := object(rc.Changesets[lost])
 	stored, _ := os.ReadFile(wrong)
 	os.Chmod(wrong, 0o644)
-	if err := os.WriteFile(wrong, stored[:len(stored)/2], 0o644); err != nil {
+	short := stored[:len(stored)/2]
+	if err := os.WriteFile(wrong, short, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	os.Remove(chainPath)
-	rec, _ := postMain()
-	if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), "wrong object") || !strings.Contains(rec.Body.String(), "has to be removed from the store") || strings.Contains(rec.Body.String(), "cut the mapping") {
+	rec, res := postMain()
+	if rec.Code != http.StatusOK {
 		t.Fatalf("with a wrong object under a changeset's C4 ID: %d %s", rec.Code, rec.Body)
 	}
-	if now, _ := os.ReadFile(wrong); len(now) != len(stored)/2 {
-		t.Fatal("the wrong object was written over")
-	}
-	if err := os.Remove(wrong); err != nil {
-		t.Fatal(err)
-	}
-	rec, res = postMain()
-	if rec.Code != http.StatusOK {
-		t.Fatalf("after the wrong object was removed: %d %s", rec.Code, rec.Body)
-	}
-	headIs("after the wrong object was removed", res)
+	headIs("after a wrong object under a changeset's C4 ID", res)
 	if now, _ := os.ReadFile(object(rc.Changesets[lost])); !bytes.Equal(now, stored) {
 		t.Fatal("the changeset made again is not the bytes that were stored")
+	}
+	if now, _ := os.ReadFile(object(c4.Identify(bytes.NewReader(short)))); !bytes.Equal(now, short) {
+		t.Fatal("the cut-short bytes are not under their own ID")
 	}
 	if now, _ := os.ReadFile(r.svc.out); !bytes.Equal(now, mappingWas) {
 		t.Fatal("the mapping was written")

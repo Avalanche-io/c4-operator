@@ -69,7 +69,7 @@ var (
 	// StoreMismatch counts the reads (view.ReadObject) whose bytes were not
 	// the C4 ID asked for: not present to their reader. The IDs are in the
 	// log line, never a label.
-	StoreMismatch = counter("c4_store_mismatch_total", "Reads whose bytes were not the C4 ID asked for, by the shard that served them.", "shard")
+	StoreMismatch = counter("c4_store_mismatch_total", "Reads whose bytes were not the C4 ID asked for, by the shard that served them and the re-file's result (refiled, left).", "shard", "result")
 )
 
 // Node daemon.

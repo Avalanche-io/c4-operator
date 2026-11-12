@@ -136,6 +136,11 @@ func (s *ShardedSink) Copy(ctx context.Context, id c4.ID, size int64, src Source
 // Open reads an object back (view.Store), for records.
 func (s *ShardedSink) Open(id c4.ID) (io.ReadCloser, error) { return s.S.Open(id) }
 
+// Refile re-files a wrong object the sink's store holds (view.Refiler).
+func (s *ShardedSink) Refile(ctx context.Context, asked, got c4.ID, data []byte) error {
+	return s.S.Refile(ctx, asked, got, data)
+}
+
 func (s *ShardedSink) has(ctx context.Context, id c4.ID) (bool, error) {
 	_, err := s.S.Head(ctx, id)
 	if err == nil {

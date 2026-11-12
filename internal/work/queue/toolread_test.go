@@ -52,7 +52,7 @@ func TestAToolsEgressComesOnlyFromItsOwnToolYAML(t *testing.T) {
 	was := c4view.OnMismatch
 	t.Cleanup(func() { c4view.OnMismatch = was })
 	var told c4.ID
-	c4view.OnMismatch = func(_ string, asked, _ c4.ID) { told = asked }
+	c4view.OnMismatch = func(_ string, asked, _ c4.ID, _ error) { told = asked }
 	overwriteObject(t, dir, id.String(), []byte("c4: tool/1\nname: x\nneeds: {network: [the-internet]}\n"))
 	nets, err := q.declaredNetworks(ctx, "show", v.ID.String())
 	if !errors.Is(err, c4view.ErrNotItsID) || len(nets) != 0 || told != id {

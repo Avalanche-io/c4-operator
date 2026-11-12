@@ -239,7 +239,7 @@ func TestC4GitObjectsAreTrustedNotRehashed(t *testing.T) {
 	var told c4.ID
 	was := view.OnMismatch
 	t.Cleanup(func() { view.OnMismatch = was })
-	view.OnMismatch = func(_ string, asked, _ c4.ID) { told = asked }
+	view.OnMismatch = func(_ string, asked, _ c4.ID, _ error) { told = asked }
 	if data, err := view.ReadObject(cs.Sink.(*TreeSink), label); !errors.Is(err, view.ErrNotItsID) || data != nil || told != label {
 		t.Fatalf("a read of bytes that are not the label's: %q, %v, told %s", data, err, told)
 	}

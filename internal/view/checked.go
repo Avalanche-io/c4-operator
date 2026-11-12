@@ -1,10 +1,12 @@
 package view
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"log"
+	"time"
 
 	"github.com/Avalanche-io/c4"
 
@@ -20,26 +22,68 @@ import (
 // own reads do not rehash.
 var ErrNotItsID = errors.New("the store served bytes that are not this ID's")
 
-// notItsID is the error ReadObject returns for a mismatch.
-type notItsID struct{ asked, got c4.ID }
+// ErrRefiled is a wrong object the store has re-filed under its own ID
+// (Refiler): the ID asked for no longer holds it, and a correct Put can
+// store the right bytes there.
+var ErrRefiled = errors.New("re-filed under its own ID")
+
+// notItsID is the error ReadObject returns for a mismatch, and how its
+// re-file went.
+type notItsID struct {
+	asked, got c4.ID
+	refiled    error
+}
 
 func (e *notItsID) Error() string {
-	return fmt.Sprintf("%s: %v (they are %s)", e.asked, ErrNotItsID, e.got)
+	if e.refiled == nil {
+		return fmt.Sprintf("%s: %v (they are %s, and are under that ID now)", e.asked, ErrNotItsID, e.got)
+	}
+	return fmt.Sprintf("%s: %v (they are %s; not re-filed: %v)", e.asked, ErrNotItsID, e.got, e.refiled)
 }
 
 func (e *notItsID) Is(target error) bool {
 	switch target {
 	case ErrNotItsID, ErrIncomplete, storeurl.ErrNotFound, fs.ErrNotExist:
 		return true
+	case ErrRefiled:
+		return e.refiled == nil
 	}
 	return false
 }
 
 // OnMismatch is told of every read whose bytes were not the ID asked for:
-// the ID asked for, the one the bytes are, and the store. It logs by
-// default; the operator's main counts it too. It must not block.
-var OnMismatch = func(store string, asked, got c4.ID) {
-	log.Printf("c4: store %s served bytes that are not %s; they are %s", store, asked, got)
+// the store, the ID asked for, the one the bytes are, and how the re-file
+// went (nil: the bytes are under their own ID now, and gone from under the
+// one asked for). It logs by default; the operator's main counts it too.
+// It must not block.
+var OnMismatch = func(store string, asked, got c4.ID, refiled error) {
+	log.Printf("c4: store %s served bytes that are not %s; they are %s (re-filed: %v)", store, asked, got, refiled)
+}
+
+// Refiler is a store that can re-file a wrong object: put the bytes under
+// their own ID, and take them from under the one they were stored under
+// (storeurl.Sharded.Refile).
+type Refiler interface {
+	Refile(ctx context.Context, asked, got c4.ID, data []byte) error
+}
+
+// errNoRefile is the re-file of a store that cannot.
+var errNoRefile = errors.New("this store does not re-file")
+
+// refileTimeout bounds a re-file, which a read waits on.
+const refileTimeout = 30 * time.Second
+
+// mismatch re-files a wrong object through st, if st can, tells
+// OnMismatch, and answers the error the read returns.
+func mismatch(st Store, asked, got c4.ID, data []byte) error {
+	err := errNoRefile
+	if rf, ok := st.(Refiler); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), refileTimeout)
+		err = rf.Refile(ctx, asked, got, data)
+		cancel()
+	}
+	OnMismatch(storeName(st, asked), asked, got, err)
+	return &notItsID{asked: asked, got: got, refiled: err}
 }
 
 // storeName names the store id was read from, for OnMismatch: the shard

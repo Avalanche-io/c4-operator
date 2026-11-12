@@ -61,7 +61,7 @@ func TestAToolLockIsReadChecked(t *testing.T) {
 	was := c4view.OnMismatch
 	t.Cleanup(func() { c4view.OnMismatch = was })
 	var told c4.ID
-	c4view.OnMismatch = func(_ string, asked, _ c4.ID) { told = asked }
+	c4view.OnMismatch = func(_ string, asked, _ c4.ID, _ error) { told = asked }
 	got, ok, err := readFile(ctx, st, v, lockFile, 1<<20)
 	if !errors.Is(err, c4view.ErrNotItsID) || got != nil || !ok || told != id {
 		t.Fatalf("another lock under its ID: %q, %v, %v, told %s", got, ok, err, told)

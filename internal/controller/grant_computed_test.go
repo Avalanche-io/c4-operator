@@ -3,6 +3,7 @@ package controller
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -168,10 +169,19 @@ func TestGrantCheckRefusesBytesThatAreNotTheirID(t *testing.T) {
 	putProject(t, "swap", []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: v.ID.String()}})
 	putMat(t, ns, "swapped", byID(csID))
 	// It fails as a resolve that read bad bytes does, not as a grant that
-	// did not match.
+	// did not match. The read that found them re-filed them under their
+	// own ID (Joshua, 2026-11-11), so a retry finds the base's root simply
+	// missing: either way the resolve is incomplete.
 	m := waitMat(t, ns, "swapped", c4v1.PhaseFailed, "ResolveFailed")
-	if !strings.Contains(readyMessage(m), "not this ID's") {
+	if !strings.Contains(readyMessage(m), "description is incomplete") {
 		t.Fatalf("message %q", readyMessage(m))
+	}
+	moved := c4.Identify(strings.NewReader("drwxr-xr-x - - x/ -\n"))
+	if b, err := view.ReadObject(st.store, moved); err != nil || string(b) != "drwxr-xr-x - - x/ -\n" {
+		t.Fatalf("the wrong bytes under their own ID: %q, %v", b, err)
+	}
+	if _, err := os.Stat(root); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("the base's root ID still holds them: %v", err)
 	}
 }
 
