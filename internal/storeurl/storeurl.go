@@ -499,7 +499,11 @@ func (s *treeShard) Put(_ context.Context, id c4.ID, r io.Reader, _ int64) error
 		return err
 	}
 	if _, err := io.Copy(w, r); err != nil {
+		// The store's writer publishes on Close, whatever it was given: a
+		// copy that failed (its reader did, or found the bytes are not
+		// id's) is taken out again, so it never stands under id.
 		w.Close()
+		s.ts.Remove(id)
 		return err
 	}
 	return w.Close()

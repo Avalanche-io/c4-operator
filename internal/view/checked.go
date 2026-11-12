@@ -20,7 +20,7 @@ import (
 // every caller degrades as it does for a missing object, and the wrong
 // bytes are never passed on. An ID is checked, never trusted, and a store's
 // own reads do not rehash.
-var ErrNotItsID = errors.New("the store served bytes that are not this ID's")
+var ErrNotItsID = storeurl.ErrNotItsID
 
 // ErrRefiled is a wrong object the store has re-filed under its own ID
 // (Refiler): the ID asked for no longer holds it, and a correct Put can

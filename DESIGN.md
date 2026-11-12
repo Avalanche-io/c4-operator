@@ -131,8 +131,12 @@ Project says not to, and are trusted from the local cache from then on.**
   from here. Nothing pins a re-filed object, and removing a key is the
   re-file's alone. A git import whose changeset is found wrong then makes
   it again in the same import, where before the store kept it and the
-  import stopped. A tool's egress and image pins, once read unchecked,
-  come only from its own files. It costs under 2% of a resolve (50,000 files: 565 ms
+  import stopped. A copy from one store to another (a tool published to
+  more projects than its own) is hashed as it streams, and bytes that are
+  not the ID's are refused at their end, so no shard keeps them; a tree
+  store's Put whose reader fails leaves nothing under the ID (its writer
+  publishes on Close, and once kept a failed copy). A tool's egress and
+  image pins, once read unchecked, come only from its own files. It costs under 2% of a resolve (50,000 files: 565 ms
   against 561). An import from c4git still copies an object without
   hashing it (c4git verified it at `git add`), and a reader finds it not
   present if it is not its ID's.

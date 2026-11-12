@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha512"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"net/http"
 	"os"
@@ -23,6 +25,46 @@ import (
 // correct Put: Head no longer says it is there. Nothing pins the re-filed
 // object; ordinary GC reclaims it. Removing a key is the re-file's alone:
 // no shard deletes for any other reason.
+
+// ErrNotItsID is bytes that are not the C4 ID they were stored or asked
+// under: never kept under it, and never served (view.ReadObject).
+var ErrNotItsID = errors.New("the store served bytes that are not this ID's")
+
+// Copy stores the object id from another store in this one, hashed as it
+// streams: bytes that are not id's are refused at their end (ErrNotItsID),
+// and no shard keeps them under id, since a Put whose reader fails stores
+// nothing. The source's object is not re-filed here (the bytes stream past
+// and are not kept); the next whole read of it re-files it.
+func (s *Sharded) Copy(ctx context.Context, from *Sharded, id c4.ID, size int64) error {
+	rc, err := from.Open(id)
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	return s.Put(ctx, id, &checking{r: rc, id: id, h: sha512.New()}, size)
+}
+
+// checking reads r, the bytes of id, hashing them as they pass (a C4 ID is
+// their SHA-512, c4.Identify), and fails at their end, instead of ending,
+// if they are not id's.
+type checking struct {
+	r  io.Reader
+	id c4.ID
+	h  hash.Hash
+}
+
+func (c *checking) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.h.Write(p[:n])
+	if err == io.EOF {
+		var got c4.ID
+		copy(got[:], c.h.Sum(nil))
+		if got != c.id {
+			return n, fmt.Errorf("%s: %w (they are %s)", c.id, ErrNotItsID, got)
+		}
+	}
+	return n, err
+}
 
 // ErrNoRefile is a shard that cannot take a wrong object out from under
 // its ID: a c4d store, which computes the ID of what it is given and so

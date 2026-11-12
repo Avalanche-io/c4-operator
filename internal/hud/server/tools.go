@@ -767,13 +767,9 @@ func (s *Server) spreadTool(ctx context.Context, m *model, ver c4v1.ToolVersion)
 				if _, err := to.Head(ctx, f.ID); err == nil {
 					continue
 				}
-				r, err := from.Open(f.ID)
-				if err != nil {
-					return fmt.Errorf("%s: %v", f.Path, err)
-				}
-				err = to.Put(ctx, f.ID, r, f.Size)
-				r.Close()
-				if err != nil {
+				// hashed as it streams: bytes that are not f.ID's are never
+				// stored under it in another project's store
+				if err := to.Copy(ctx, from, f.ID, f.Size); err != nil {
 					return fmt.Errorf("project %s: %s: %v", p.Name, f.Path, err)
 				}
 			}

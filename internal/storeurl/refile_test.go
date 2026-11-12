@@ -234,3 +234,70 @@ func TestAnS3RefileDeletesOnlyWhatItRead(t *testing.T) {
 		t.Fatalf("an object that is its own: deletes %q, holds %q", deletes, objects[key])
 	}
 }
+
+// A copy from another store is hashed as it streams: the right bytes are
+// stored, and bytes that are not the ID's are refused at their end, with
+// nothing under the ID in either a tree store or S3. Once, a copy put what
+// it read.
+func TestACopyStoresOnlyTheIDsOwnBytes(t *testing.T) {
+	ctx := context.Background()
+	right := bytes.Repeat([]byte("frame "), 200_000) // 1.2 MB, more than one read
+	id := c4.Identify(bytes.NewReader(right))
+	from, _ := treeWith(t, id, right)
+	to, _ := treeWith(t, c4.Identify(strings.NewReader("unrelated")), []byte("unrelated"))
+	if err := to.Copy(ctx, from, id, int64(len(right))); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := read(t, to, id); !bytes.Equal(b, right) {
+		t.Fatalf("the right bytes copied: %d bytes", len(b))
+	}
+
+	wrong := append(append([]byte(nil), right[:len(right)-1]...), '!')
+	from, _ = treeWith(t, id, wrong)
+	to, _ = treeWith(t, c4.Identify(strings.NewReader("unrelated")), []byte("unrelated"))
+	if err := to.Copy(ctx, from, id, int64(len(wrong))); !errors.Is(err, ErrNotItsID) {
+		t.Fatalf("wrong bytes copied: %v", err)
+	}
+	if _, err := to.Head(ctx, id); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a tree store keeps wrong bytes under the ID: %v", err)
+	}
+
+	var puts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut || r.Method == http.MethodPost {
+			puts++
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	s3, err := OpenSharded([]Spec{{Name: "s3", URL: "s3://bucket/p/?endpoint=" + url.QueryEscape(srv.URL)}}, Credentials{AccessKeyID: "K", SecretAccessKey: "S"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	small := []byte("not the record")
+	asked := c4.Identify(strings.NewReader("the record"))
+	from, _ = treeWith(t, asked, small)
+	if err := s3.Copy(ctx, from, asked, int64(len(small))); !errors.Is(err, ErrNotItsID) || puts != 0 {
+		t.Fatalf("wrong bytes into S3: %v, %d PUTs sent", err, puts)
+	}
+}
+
+// A Put whose reader fails stores nothing under the ID on a tree store.
+// The store's writer publishes on Close, and once a failed copy left what
+// it had under the ID.
+func TestAFailedPutLeavesNothing(t *testing.T) {
+	ctx := context.Background()
+	s, _ := treeWith(t, c4.Identify(strings.NewReader("unrelated")), []byte("unrelated"))
+	id := c4.Identify(strings.NewReader("the whole object"))
+	r := io.MultiReader(strings.NewReader("the whole"), iotestErr{})
+	if err := s.Put(ctx, id, r, 16); err == nil {
+		t.Fatal("a Put whose reader failed succeeded")
+	}
+	if _, err := s.Head(ctx, id); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a failed Put left something under the ID: %v", err)
+	}
+}
+
+type iotestErr struct{}
+
+func (iotestErr) Read([]byte) (int, error) { return 0, errors.New("the source failed") }
