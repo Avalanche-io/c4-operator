@@ -121,7 +121,29 @@ type tree struct {
 
 func newStore(t *testing.T) *tree {
 	t.Helper()
-	dir := t.TempDir()
+	// Not t.TempDir: the package's manager runs on after a test, and a
+	// Materialization it is still resolving can write a record into this
+	// store while the directory is removed ("directory not empty", which
+	// failed TestGrantsMatchOnlyComputedIDs under load). The removal is
+	// tried again until it holds; a write after it finds no root and fails.
+	dir, err := os.MkdirTemp("", "c4-controller-store-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			err := os.RemoveAll(dir)
+			if err == nil {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Errorf("removing the test store: %v", err)
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	})
 	st, err := storeurl.OpenSharded([]storeurl.Spec{{Name: "s0", URL: dir}}, storeurl.Credentials{})
 	if err != nil {
 		t.Fatal(err)

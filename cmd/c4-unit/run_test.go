@@ -43,12 +43,16 @@ type toolRun struct {
 	out, errs syncBuffer
 	signals   chan os.Signal
 	minute    time.Duration
-	oiiotool  string // a stand-in for the image's oiiotool, when set
+	grace     time.Duration // SIGTERM to SIGKILL
+	oiiotool  string        // a stand-in for the image's oiiotool, when set
 }
 
 func newToolRun(t *testing.T, toolYAML string) *toolRun {
 	t.Helper()
-	r := &toolRun{t: t, tree: t.TempDir(), dir: t.TempDir(), signals: make(chan os.Signal, 1), minute: time.Minute}
+	r := &toolRun{t: t, tree: t.TempDir(), dir: t.TempDir(), signals: make(chan os.Signal, 1), minute: time.Minute,
+		// Long enough that a tool's own SIGTERM trap always runs before the
+		// SIGKILL on a loaded machine (TestRunForwardsSIGTERM wants its 143).
+		grace: 5 * time.Second}
 	if err := os.WriteFile(filepath.Join(r.dir, "tool.yaml"), []byte(toolYAML), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +76,7 @@ func (r *toolRun) env() env {
 		stderr:    &r.errs,
 		signals:   r.signals,
 		minuteLen: r.minute,
-		stopGrace: 300 * time.Millisecond,
+		stopGrace: r.grace,
 		pollEvery: 20 * time.Millisecond,
 		oiiotool:  r.oiiotool,
 	}
@@ -322,6 +326,7 @@ func TestRunForwardsSIGTERM(t *testing.T) {
 
 func TestRunOutlivesAChildHoldingStdout(t *testing.T) {
 	r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {image: c4/runtime-base, command: [bash, -c, '(sleep 60 &); echo done']}\n")
+	r.grace = 300 * time.Millisecond // nothing here traps a signal
 	began := time.Now()
 	if c := r.run(); c != 0 {
 		t.Fatalf("exit %d", c)
@@ -551,12 +556,15 @@ runs:
 previews: "render/*.$F4.done"
 stall: {quietMinutes: 2}
 `)
-	r.minute = 100 * time.Millisecond
+	// Quiet before a stall (2 minutes) is 1 s, about 16 of the tool's
+	// 60 ms writes: a loaded machine can stretch one write, not sixteen.
+	// (At 200 ms, three writes, a loaded full suite ended it as stalled.)
+	r.minute = 500 * time.Millisecond
 	r.vars["C4_FRAME_END"], r.vars["C4_FRAME_STEP"] = "1010", "1"
 	os.MkdirAll(filepath.Join(r.tree, "render"), 0o755)
 	c := r.run()
 	if o := r.outcome(); o.Stalled || c != 0 {
-		t.Errorf("a tool writing an empty marker every 60 ms, quiet for 200 ms at most: exit %d, ended as stalled %v", c, o.Stalled)
+		t.Errorf("a tool writing an empty marker every 60 ms, quiet for 1 s at most: exit %d, ended as stalled %v", c, o.Stalled)
 	}
 	// counted as frames only at the end, as the tool left them
 	if p := r.file(".c4/progress"); p != "1\n" {

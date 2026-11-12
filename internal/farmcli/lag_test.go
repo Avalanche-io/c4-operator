@@ -50,17 +50,18 @@ func TestFindJobWaitsForAJobJustMade(t *testing.T) {
 }
 
 // A submit returns once the job it made shows in the snapshot, so ls
-// straight after it lists the job.
+// straight after it lists the job: well before the lag it would wait out
+// (30 s here, so a loaded machine cannot blur the two).
 func TestAwaitJobsReturnsOnceTheJobShows(t *testing.T) {
 	defer func(l, p time.Duration) { JobLag, jobPoll = l, p }(JobLag, jobPoll)
-	JobLag, jobPoll = 2*time.Second, 10*time.Millisecond
+	JobLag, jobPoll = 30*time.Second, 10*time.Millisecond
 	hud := &laggingHUD{}
 	srv := httptest.NewServer(hud)
 	defer srv.Close()
 	c, _ := NewClient(Farm{HUD: srv.URL, As: "artist"})
 	start := time.Now()
 	awaitJobs(context.Background(), c, "saltmarsh/sm0140-render-v001")
-	if hud.reads != 3 || time.Since(start) > time.Second {
+	if hud.reads != 3 || time.Since(start) > 10*time.Second {
 		t.Errorf("%d reads in %v", hud.reads, time.Since(start))
 	}
 }

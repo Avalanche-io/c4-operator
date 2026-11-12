@@ -6,6 +6,11 @@ CONTROLLER_GEN ?= $(GOBIN)/controller-gen
 SETUP_ENVTEST ?= $(GOBIN)/setup-envtest
 KIND ?= $(GOBIN)/kind
 ENVTEST_K8S_VERSION ?= 1.37.0
+# envtest gives its API server 20 s to start, and on a loaded machine (a
+# full suite starts many at once) it can take longer: config/policy failed
+# so ("timeout waiting for process kube-apiserver to start"). A slow start
+# is not the test's fault, so every envtest here waits up to 2 minutes.
+export KUBEBUILDER_CONTROLPLANE_START_TIMEOUT ?= 2m
 IMG ?= c4-operator:dev
 ARCH ?= $(shell go env GOARCH)
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)

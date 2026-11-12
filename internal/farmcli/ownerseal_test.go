@@ -26,6 +26,13 @@ import (
 // book has besides: the HUD's page of the book (GET /api/v1/book/farm, the
 // entries sealed and those pending the seal) and the queue's sealer, which
 // the test runs instead of a clock.
+
+// atOnce is how long "at once" may take: a call that does not wait for
+// the seal returns well within it, on a loaded machine too, while one that
+// waited would take ownerSealWait, set to 30 s or more where atOnce is
+// asked (60 s by default). (At 1 s, a loaded full suite could fail it.)
+const atOnce = 10 * time.Second
+
 func sealedOwnerIssuer(t *testing.T) (*ownerIssuer, func()) {
 	t.Helper()
 	o, seal, _ := bookedFarm(t, false)
@@ -113,7 +120,7 @@ func TestUpWaitsForTheBookToSealItsOwner(t *testing.T) {
 		}
 		// up again, pinned, on the sealed book: at once
 		start := time.Now()
-		if _, err := UpKeys(ctx, o.client, st, "noor", r.out.Owner.Device, false); err != nil || time.Since(start) > time.Second {
+		if _, err := UpKeys(ctx, o.client, st, "noor", r.out.Owner.Device, false); err != nil || time.Since(start) > atOnce {
 			t.Fatalf("up again: %v, after %s", err, time.Since(start))
 		}
 	case <-time.After(10 * time.Second):
@@ -140,7 +147,7 @@ func TestUpRefusesWhatTheBookSealsAndWhatItNeverSeals(t *testing.T) {
 	}
 	other := out.Owner.Device[:len(out.Owner.Device)-1] + last
 	start := time.Now()
-	if _, err := UpKeys(ctx, o.client, st, "noor", other, false); !errors.Is(err, ErrOwnerKey) || time.Since(start) > time.Second {
+	if _, err := UpKeys(ctx, o.client, st, "noor", other, false); !errors.Is(err, ErrOwnerKey) || time.Since(start) > atOnce {
 		t.Errorf("another owner key than the pinned one, sealed: %v, after %s", err, time.Since(start))
 	}
 
@@ -196,7 +203,7 @@ func TestTheOwnerCheckWaitsOnlyForASealToCome(t *testing.T) {
 	ctx := context.Background()
 	old := ownerSealWait
 	t.Cleanup(func() { ownerSealWait = old })
-	ownerSealWait = 3 * time.Second
+	ownerSealWait = 30 * time.Second
 
 	o, seal, busy := bookedFarm(t, false)
 	st := keystore.Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
@@ -207,7 +214,7 @@ func TestTheOwnerCheckWaitsOnlyForASealToCome(t *testing.T) {
 	seal()
 	busy.Store(true)
 	start := time.Now()
-	if err := UpKeysCheck(ctx, o, st, out.Owner.Device); err != nil || time.Since(start) > time.Second {
+	if err := UpKeysCheck(ctx, o, st, out.Owner.Device); err != nil || time.Since(start) > atOnce {
 		t.Errorf("its owner sealed, entries pending, the right key: %v, after %s", err, time.Since(start))
 	}
 	other := out.Owner.Device[:len(out.Owner.Device)-1] + "z"
@@ -215,7 +222,7 @@ func TestTheOwnerCheckWaitsOnlyForASealToCome(t *testing.T) {
 		other = out.Owner.Device[:len(out.Owner.Device)-1] + "y"
 	}
 	start = time.Now()
-	if err := UpKeysCheck(ctx, o, st, other); !errors.Is(err, ErrOwnerKey) || time.Since(start) > time.Second {
+	if err := UpKeysCheck(ctx, o, st, other); !errors.Is(err, ErrOwnerKey) || time.Since(start) > atOnce {
 		t.Errorf("its owner sealed, entries pending, another key: %v, after %s", err, time.Since(start))
 	}
 
@@ -226,14 +233,14 @@ func TestTheOwnerCheckWaitsOnlyForASealToCome(t *testing.T) {
 	}
 	seal() // refuses the owner's entry: nothing sealed, nothing pending
 	start = time.Now()
-	if err := UpKeysCheck(ctx, o, st, out.Owner.Device); !errors.Is(err, ErrOwnerKey) || !strings.Contains(err.Error(), "books none") || time.Since(start) > time.Second {
+	if err := UpKeysCheck(ctx, o, st, out.Owner.Device); !errors.Is(err, ErrOwnerKey) || !strings.Contains(err.Error(), "books none") || time.Since(start) > atOnce {
 		t.Errorf("no owner sealed and nothing pending: %v, after %s", err, time.Since(start))
 	}
 	busy.Store(true)
 	ownerSealWait = 700 * time.Millisecond
 	start = time.Now()
 	err = UpKeysCheck(ctx, o, st, out.Owner.Device)
-	if el := time.Since(start); !errors.Is(err, ErrOwnerKey) || !strings.Contains(err.Error(), "sealed no owner within") || el < ownerSealWait || el > ownerSealWait+2*time.Second {
+	if el := time.Since(start); !errors.Is(err, ErrOwnerKey) || !strings.Contains(err.Error(), "sealed no owner within") || el < ownerSealWait || el > ownerSealWait+atOnce {
 		t.Errorf("a HUD that always has something pending, and no owner sealed: %v, after %s", err, el)
 	}
 	// a caller's deadline ends the wait, said as the owner check's
