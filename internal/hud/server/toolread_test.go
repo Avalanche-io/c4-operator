@@ -112,3 +112,37 @@ func TestAControlRecordIsBookedOnlyIfItIsItsID(t *testing.T) {
 		t.Fatalf("bookFarm booked another record's bytes: %v, %d pending", err, len(v.State.Pending))
 	}
 }
+
+// readFile's limit holds on the bytes read, not on the size a description
+// states (null here, or stated small): a tool file that names a 3 MiB
+// object is refused, never read whole into the HUD (the reader of this
+// branch, which had briefly checked the stated size alone).
+func TestAToolFilesLimitIsOnWhatIsRead(t *testing.T) {
+	ctx := context.Background()
+	st, err := storeurl.OpenSharded([]storeurl.Spec{{Name: "s0", URL: t.TempDir()}}, storeurl.Credentials{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	big := bytes.Repeat([]byte("x"), 3<<20)
+	id, err := st.PutBytes(ctx, big)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, size := range []int64{-1, 10} {
+		m := c4m.NewManifest()
+		m.AddEntry(&c4m.Entry{Name: lockFile, Size: size, Timestamp: c4m.NullTimestamp(), C4ID: id})
+		b, err := c4m.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		all, _ := c4view.NewFilter(nil)
+		res, err := c4view.FromBytes(b, st, all)
+		if err != nil {
+			t.Fatalf("size %d: %v", size, err)
+		}
+		got, ok, err := readFile(ctx, st, res.View(), lockFile, 1<<20)
+		if err == nil || got != nil || !ok {
+			t.Errorf("a stated size of %d over a 3 MiB object: %d bytes, %v, %v", size, len(got), ok, err)
+		}
+	}
+}

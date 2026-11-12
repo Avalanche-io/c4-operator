@@ -73,10 +73,12 @@ var ErrNoRefile = errors.New("this store does not re-file a wrong object: it rep
 
 // refiler is a shard that can take a wrong object out from under its ID.
 type refiler interface {
-	// removeWrong removes the object stored under id, unless it is id's
-	// own: what it holds is read again and hashed first, and kept if it is
-	// id's (a correct Put since). An object not there is nothing to do.
-	removeWrong(ctx context.Context, id c4.ID) error
+	// removeWrong removes the object stored under id if it is still got's
+	// bytes, the ones just re-filed under got: what id holds is read again
+	// and hashed first, and anything else (id's own, a correct Put since;
+	// or other bytes, which may be their only copy) is left as it is. An
+	// object not there is nothing to do.
+	removeWrong(ctx context.Context, id, got c4.ID) error
 }
 
 // Refile takes data, read from under asked and found to be got's, out
@@ -101,7 +103,7 @@ func (s *Sharded) Refile(ctx context.Context, asked, got c4.ID, data []byte) err
 			return fmt.Errorf("re-file %s: %s holds other bytes too, so these stay where they are", asked, got)
 		}
 	}
-	if err := rf.removeWrong(ctx, asked); err != nil {
+	if err := rf.removeWrong(ctx, asked, got); err != nil {
 		return fmt.Errorf("re-file %s: taking it from under its ID: %w", asked, err)
 	}
 	return nil
@@ -109,7 +111,7 @@ func (s *Sharded) Refile(ctx context.Context, asked, got c4.ID, data []byte) err
 
 // holdsOwn reports whether the store holds id's own bytes under id.
 func (s *Sharded) holdsOwn(ctx context.Context, id c4.ID) bool {
-	rc, err := s.Open(id)
+	rc, _, _, err := s.For(id).Get(ctx, id, 0)
 	if err != nil {
 		return false
 	}
@@ -117,12 +119,15 @@ func (s *Sharded) holdsOwn(ctx context.Context, id c4.ID) bool {
 	return c4.Identify(rc) == id
 }
 
-// removeWrong on a tree store renames the object's file aside first, which
-// takes that file whatever is put at its path afterwards, then hashes what
-// it took: id's own goes back (unless a new file is there by then, which
-// stays), anything else is removed. An object still pending publication is
-// left alone: it is being written.
-func (s *treeShard) removeWrong(_ context.Context, id c4.ID) error {
+// removeWrong on a tree store renames the object's file aside first,
+// which takes that file whatever is put at its path afterwards, into the
+// store's root under a dot name (the tree store takes it for a temp file,
+// so a split never moves it), then hashes what it took: got's bytes, the
+// ones re-filed, are removed; anything else goes back under id through the
+// store's own Create, which finds id's path as it is now and keeps an
+// object put there since. An object still pending publication is left
+// alone: it is being written. sweepRefiles mends what a crash leaves.
+func (s *treeShard) removeWrong(_ context.Context, id, got c4.ID) error {
 	p, ok := s.ts.ContentPath(id)
 	if !ok {
 		return nil
@@ -132,7 +137,7 @@ func (s *treeShard) removeWrong(_ context.Context, id c4.ID) error {
 	}
 	var suffix [8]byte
 	rand.Read(suffix[:])
-	aside := p + ".refile." + hex.EncodeToString(suffix[:])
+	aside := filepath.Join(s.ts.Root(), refileAside+id.String()+"."+hex.EncodeToString(suffix[:]))
 	if err := os.Rename(p, aside); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
@@ -142,20 +147,80 @@ func (s *treeShard) removeWrong(_ context.Context, id c4.ID) error {
 	if refileTook != nil {
 		refileTook(p)
 	}
+	return s.settleAside(aside, id, got)
+}
+
+// refileAside starts the name of a file a re-file has taken aside.
+const refileAside = ".refile."
+
+// settleAside removes a file taken aside from under id if it is got's
+// bytes, and puts anything else back under id.
+func (s *treeShard) settleAside(aside string, id, got c4.ID) error {
 	f, err := os.Open(aside)
 	if err != nil {
 		return err
 	}
-	own := c4.Identify(f) == id
+	held := c4.Identify(f)
 	f.Close()
-	if own {
-		// a correct object, put since the read: it goes back where it was,
-		// unless another has been put there meanwhile, which stays
-		if err := os.Link(aside, p); err != nil && !errors.Is(err, os.ErrExist) {
-			return err
-		}
+	if held == got && got != id {
+		return os.Remove(aside)
+	}
+	f, err = os.Open(aside)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w, err := s.ts.Create(id)
+	if errors.Is(err, os.ErrExist) {
+		// another object under id since: it stays, and this one, which is
+		// not got's, was id's own or under id before it
+		return os.Remove(aside)
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(w, f); err != nil {
+		w.Close()
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
 	}
 	return os.Remove(aside)
+}
+
+// sweepRefiles mends what a re-file a crash cut short left in the store's
+// root: a file taken aside that is the ID it was taken from goes back under
+// it; any other was got's, filed under got before it was taken, and goes.
+func (s *treeShard) sweepRefiles() {
+	entries, _ := os.ReadDir(s.ts.Root())
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || len(name) <= len(refileAside) || name[:len(refileAside)] != refileAside {
+			continue
+		}
+		rest := name[len(refileAside):]
+		dot := len(rest) - 17 // "." and 16 hex digits
+		if dot <= 0 || rest[dot] != '.' {
+			continue
+		}
+		id, err := c4.Parse(rest[:dot])
+		if err != nil {
+			continue
+		}
+		aside := filepath.Join(s.ts.Root(), name)
+		f, err := os.Open(aside)
+		if err != nil {
+			continue
+		}
+		held := c4.Identify(f)
+		f.Close()
+		got := held
+		if held == id {
+			got = c4.ID{} // id's own: back under it
+		}
+		s.settleAside(aside, id, got)
+	}
 }
 
 // refileTook, in tests, runs after a tree store has taken an object's file
@@ -163,10 +228,12 @@ func (s *treeShard) removeWrong(_ context.Context, id c4.ID) error {
 var refileTook func(path string)
 
 // removeWrong on S3 reads the object and its ETag, hashes it, and deletes
-// it only if it is not id's, on that ETag (If-Match): an object put since
-// the read has another, and is not deleted. A store that does not honour
-// If-Match on a DELETE falls back to the read just before it.
-func (s *s3Shard) removeWrong(ctx context.Context, id c4.ID) error {
+// it only if it is got's bytes (the ones re-filed), on that ETag
+// (If-Match): an object put since the read has another, and is not
+// deleted. AWS honours If-Match on a DELETE (general-purpose buckets since
+// 2025-09); a store that ignores it deletes whatever is there by then,
+// which leaves id absent, never wrong.
+func (s *s3Shard) removeWrong(ctx context.Context, id, got c4.ID) error {
 	resp, err := s.do(ctx, http.MethodGet, id, nil)
 	if err != nil {
 		return err
@@ -178,11 +245,13 @@ func (s *s3Shard) removeWrong(ctx context.Context, id c4.ID) error {
 	if resp.StatusCode != http.StatusOK {
 		return s3Error(resp, "get", id)
 	}
-	own := c4.Identify(resp.Body) == id
+	held := c4.Identify(resp.Body)
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 	etag := resp.Header.Get("ETag")
-	if own {
+	if held != got || got == id {
+		// id's own (a correct Put since), or other bytes, which may be
+		// their only copy: not the ones re-filed, so not deleted
 		return nil
 	}
 	if etag == "" {

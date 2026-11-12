@@ -451,7 +451,9 @@ func openTree(root string) (Shard, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &treeShard{root: root, ts: ts}, nil
+	s := &treeShard{root: root, ts: ts}
+	s.sweepRefiles()
+	return s, nil
 }
 
 func (s *treeShard) Name() string { return "file://" + s.root }
@@ -489,22 +491,22 @@ func (s *treeShard) Head(_ context.Context, id c4.ID) (int64, error) {
 	return st.Size(), nil
 }
 
+// Put stores r under id through the tree store's own Put, which hashes as
+// it writes, publishes under the ID it computed, never over an object that
+// is there, and leaves nothing on any error. So bytes that are not id's
+// are never under id (they are under their own, harmless, for GC), and a
+// Put that fails takes nothing away from a concurrent one that did not.
 func (s *treeShard) Put(_ context.Context, id c4.ID, r io.Reader, _ int64) error {
 	if s.ts.Has(id) {
 		_, err := io.Copy(io.Discard, r)
 		return err
 	}
-	w, err := s.ts.Create(id)
+	got, err := s.ts.Put(r)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(w, r); err != nil {
-		// The store's writer publishes on Close, whatever it was given: a
-		// copy that failed (its reader did, or found the bytes are not
-		// id's) is taken out again, so it never stands under id.
-		w.Close()
-		s.ts.Remove(id)
-		return err
+	if got != id {
+		return fmt.Errorf("%s: %w (they are %s)", id, ErrNotItsID, got)
 	}
-	return w.Close()
+	return nil
 }

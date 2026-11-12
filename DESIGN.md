@@ -113,8 +113,11 @@ Project says not to, and are trusted from the local cache from then on.**
   (Joshua, 2026-11-11): the reader gets the error it gets for a missing
   object (`view.ErrNotItsID`, which is also `ErrIncomplete`,
   `storeurl.ErrNotFound` and `fs.ErrNotExist`), never the bytes, and the
-  read is counted (`c4_store_mismatch_total`, by shard) and logged with
-  both IDs. The read then re-files them, as Joshua ruled: "rename the
+  read is logged with both IDs in every process, and counted
+  (`c4_store_mismatch_total`, by shard and the re-file's result) where the
+  process exports metrics: the manager, a node, the regional tier. An
+  object a re-file cannot move is logged and counted at most once a
+  minute. The read then re-files them, as Joshua ruled: "rename the
   'corrupted' data to its actual id (if this data is never referred to by
   anything then it should eventually get garbage collected)". The bytes go
   under their own ID (written only if no object there is that ID's
@@ -129,13 +132,25 @@ Project says not to, and are trusted from the local cache from then on.**
   with the read just before it. A c4d computes the ID of what it is given,
   so it never takes a wrong object and repairs its own: it is not re-filed
   from here. Nothing pins a re-filed object, and removing a key is the
-  re-file's alone. A git import whose changeset is found wrong then makes
+  re-file's alone. A file taken aside on a tree store is in the store's
+  root under a dot name, which the store's own splits never move, and goes
+  back through the store's own write, which finds the ID's path as it is
+  then; one a crash leaves is mended when the store is next opened. The
+  re-file removes from under the ID only the bytes it filed under their
+  own: anything else there by then stays. Two wrong objects under each
+  other's IDs are not moved (each one's slot holds the other's bytes,
+  perhaps their only copy), so neither ID heals: what happens then waits on
+  a ruling. A git import whose changeset is found wrong then makes
   it again in the same import, where before the store kept it and the
   import stopped. A copy from one store to another (a tool published to
   more projects than its own) is hashed as it streams, and bytes that are
-  not the ID's are refused at their end, so no shard keeps them; a tree
-  store's Put whose reader fails leaves nothing under the ID (its writer
-  publishes on Close, and once kept a failed copy). The farm book's and
+  not the ID's are refused at their end, so no shard keeps them. A tree
+  store's Put goes through the store's own, which hashes as it writes,
+  publishes under the ID it computed and never over an object that is
+  there: bytes that are not the ID's land under their own, and a Put that
+  fails takes nothing from a concurrent one that did not (once, a failed
+  copy's part was renamed over the ID). A tool file is bounded by the bytes
+  read, not by the size its description states. The farm book's and
   the people's index's own reads check every object they load
   (`c4id(raw) != id`); their later reads are checked too: a control
   record booked by the HUD (whose entry books the ID of the bytes, so

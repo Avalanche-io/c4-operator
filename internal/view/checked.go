@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/Avalanche-io/c4"
@@ -74,16 +75,57 @@ var errNoRefile = errors.New("this store does not re-file")
 const refileTimeout = 30 * time.Second
 
 // mismatch re-files a wrong object through st, if st can, tells
-// OnMismatch, and answers the error the read returns.
+// OnMismatch, and answers the error the read returns. An object read again
+// within refileEvery of a re-file that could not be done is not re-filed
+// or told again: every such read is still not present, but a wrong object
+// a re-file cannot move (a c4d's, or two objects under each other's IDs)
+// does not make every read a re-file and a log line.
 func mismatch(st Store, asked, got c4.ID, data []byte) error {
+	if recentlyTried(asked) {
+		return &notItsID{asked: asked, got: got, refiled: errRecentlyTried}
+	}
 	err := errNoRefile
 	if rf, ok := st.(Refiler); ok {
 		ctx, cancel := context.WithTimeout(context.Background(), refileTimeout)
 		err = rf.Refile(ctx, asked, got, data)
 		cancel()
 	}
+	if err != nil {
+		noteTried(asked)
+	}
 	OnMismatch(storeName(st, asked), asked, got, err)
 	return &notItsID{asked: asked, got: got, refiled: err}
+}
+
+// refileEvery is how long a re-file that could not be done is not tried
+// again for the same object.
+const refileEvery = time.Minute
+
+var errRecentlyTried = errors.New("not re-filed again yet: a re-file of it could not be done within the last minute")
+
+var (
+	triedMu sync.Mutex
+	tried   = map[c4.ID]time.Time{}
+)
+
+func recentlyTried(id c4.ID) bool {
+	triedMu.Lock()
+	defer triedMu.Unlock()
+	at, ok := tried[id]
+	return ok && time.Since(at) < refileEvery
+}
+
+func noteTried(id c4.ID) {
+	triedMu.Lock()
+	defer triedMu.Unlock()
+	if len(tried) >= 4096 {
+		for k, at := range tried {
+			if time.Since(at) >= refileEvery {
+				delete(tried, k)
+			}
+		}
+	}
+	tried[id] = time.Now()
 }
 
 // storeName names the store id was read from, for OnMismatch: the shard

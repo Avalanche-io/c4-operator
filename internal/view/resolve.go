@@ -88,16 +88,34 @@ func FromID(id c4.ID, st Store, f Filter) (*Resolved, error) {
 // ReadObject reads a whole (small) object and checks it: bytes that are not
 // id's are not present (ErrNotItsID, which is also ErrIncomplete,
 // storeurl.ErrNotFound and fs.ErrNotExist), told to OnMismatch, and never
-// returned. Every reader of a stored object by ID goes through it.
-func ReadObject(st Store, id c4.ID) ([]byte, error) {
+// returned. The operator's readers of a stored object by its ID go through
+// it; the farm book's and the people's index's own reads hash for
+// themselves.
+func ReadObject(st Store, id c4.ID) ([]byte, error) { return readObject(st, id, -1) }
+
+// ReadObjectAtMost is ReadObject for an object that must be no larger than
+// limit bytes: a larger one is refused, read no further than limit+1. A
+// size a description states is not what it bounds; the bytes are.
+func ReadObjectAtMost(st Store, id c4.ID, limit int64) ([]byte, error) {
+	return readObject(st, id, limit)
+}
+
+func readObject(st Store, id c4.ID, limit int64) ([]byte, error) {
 	rc, err := st.Open(id)
 	if err != nil {
 		return nil, fmt.Errorf("%s not in store: %w", id, err)
 	}
 	defer rc.Close()
-	data, err := io.ReadAll(rc)
+	var r io.Reader = rc
+	if limit >= 0 {
+		r = io.LimitReader(rc, limit+1)
+	}
+	data, err := io.ReadAll(r)
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", id, err)
+	}
+	if limit >= 0 && int64(len(data)) > limit {
+		return nil, fmt.Errorf("%s is over %d bytes", id, limit)
 	}
 	if got := c4.Identify(bytes.NewReader(data)); got != id {
 		return nil, mismatch(st, id, got, data)

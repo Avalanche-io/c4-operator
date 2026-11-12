@@ -459,7 +459,9 @@ func (c *BookChecker) Admit(ctx context.Context, raw []byte, p farmbook.Placemen
 	signedAt := time.Time{}
 	switch e.Kind {
 	case KindDevice, KindRemoval, KindCode, KindCountersign, KindApproval:
-		if b, err := x.Store.Get(ctx, e.Record); err == nil {
+		// checked: another validly signed record's bytes would give the
+		// sealer another signing time to judge the entry's window by
+		if b, err := getChecked(ctx, x.Store, e.Record); err == nil {
 			if v, err := provenance.VerifyBundle(b, x.Roots); err == nil {
 				signedAt = v.SignedAt
 			}

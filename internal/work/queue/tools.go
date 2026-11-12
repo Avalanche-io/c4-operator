@@ -396,11 +396,9 @@ func (q *Queue) declaredNetworks(ctx context.Context, project, view string) ([]s
 		if f.Path != "tool.yaml" {
 			continue
 		}
-		// checked as read: what it declares becomes the tool's egress
-		if f.Size > 1<<20 {
-			return nil, fmt.Errorf("the tool's tool.yaml is over 1 MiB")
-		}
-		b, err := c4view.ReadObject(st, f.ID)
+		// checked as read, and bounded by what is read, not by the size
+		// the view states: what it declares becomes the tool's egress
+		b, err := c4view.ReadObjectAtMost(st, f.ID, 1<<20)
 		if err != nil {
 			return nil, err
 		}

@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"sort"
 	"strconv"
 	"unicode/utf8"
@@ -15,6 +14,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
+	c4view "github.com/Avalanche-io/c4-operator/internal/view"
 )
 
 // A block ends its task with a summary of it (.c4/done), which its runner
@@ -99,20 +99,14 @@ func (q *Queue) readSummary(ctx context.Context, project, id string) ([]byte, er
 	if st == nil {
 		return nil, &summaryGone{fmt.Sprintf("project %s has no store to read its summary from", project)}
 	}
-	r, err := st.Open(cid)
+	// checked and bounded as read; bytes that are not its ID's are not
+	// present (view.ErrNotItsID is also storeurl.ErrNotFound)
+	b, err := c4view.ReadObjectAtMost(st, cid, maxSummaryDoc)
 	if errors.Is(err, storeurl.ErrNotFound) {
 		return nil, &summaryGone{"the store does not have its summary " + id}
 	}
 	if err != nil {
-		return nil, err
-	}
-	defer r.Close()
-	b, err := io.ReadAll(io.LimitReader(r, maxSummaryDoc+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(b) > maxSummaryDoc || c4.Identify(bytes.NewReader(b)) != cid {
-		return nil, &summaryGone{"its stored summary does not match its ID " + id}
+		return nil, &summaryGone{fmt.Sprintf("its stored summary %s: %v", id, err)}
 	}
 	return b, nil
 }

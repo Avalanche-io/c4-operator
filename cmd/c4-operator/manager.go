@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -44,6 +45,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/hud"
 	hudserver "github.com/Avalanche-io/c4-operator/internal/hud/server"
+	"github.com/Avalanche-io/c4-operator/internal/metrics"
 	"github.com/Avalanche-io/c4-operator/internal/project"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
@@ -141,6 +143,10 @@ func runManager(args []string) error {
 	ctrl.SetLogger(zap.New())
 	log := ctrl.Log.WithName("manager")
 	watchMismatches(log)
+	// the manager serves controller-runtime's registry: the store's reads
+	// that are not their IDs (the controller's, the queue's, the HUD's) are
+	// counted there too
+	ctrlmetrics.Registry.MustRegister(metrics.StoreMismatch)
 	scheme := newScheme()
 	cfg := ctrl.GetConfigOrDie()
 

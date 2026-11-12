@@ -1,11 +1,9 @@
 package queue
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"time"
 
@@ -16,6 +14,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
+	c4view "github.com/Avalanche-io/c4-operator/internal/view"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
 	"github.com/Avalanche-io/c4-operator/internal/work/policy"
 	"github.com/Avalanche-io/c4-operator/work/estimate"
@@ -198,17 +197,9 @@ func (q *Queue) expansionDoc(ctx context.Context, project string, m *jobMem, id 
 	if st == nil {
 		return nil, fmt.Errorf("project %s has no store", project)
 	}
-	r, err := st.Open(cid)
+	b, err := c4view.ReadObjectAtMost(st, cid, class.MaxExpandDoc)
 	if err != nil {
-		return nil, err
-	}
-	defer r.Close()
-	b, err := io.ReadAll(io.LimitReader(r, class.MaxExpandDoc+1))
-	if err != nil {
-		return nil, err
-	}
-	if got := c4.Identify(bytes.NewReader(b)); got != cid {
-		return nil, fmt.Errorf("expansion document %s read back as %s", id, got)
+		return nil, fmt.Errorf("expansion document %s: %w", id, err)
 	}
 	if m.docs == nil {
 		m.docs = map[string][]byte{}

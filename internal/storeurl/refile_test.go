@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -205,9 +207,10 @@ func TestAnS3RefileDeletesOnlyWhatItRead(t *testing.T) {
 	}
 	s3 := sh.(*s3Shard)
 	key := "/bucket/p/" + asked.String()
+	gotWrong := c4.Identify(bytes.NewReader(wrong))
 
 	objects[key], etags[key] = wrong, `"e1"`
-	if err := s3.removeWrong(ctx, asked); err != nil {
+	if err := s3.removeWrong(ctx, asked, gotWrong); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := objects[key]; ok || len(deletes) != 1 || deletes[0] != `"e1"` {
@@ -217,7 +220,7 @@ func TestAnS3RefileDeletesOnlyWhatItRead(t *testing.T) {
 	deletes = nil
 	objects[key], etags[key] = wrong, `"e1"`
 	changeBeforeDelete = true
-	if err := s3.removeWrong(ctx, asked); err != nil {
+	if err := s3.removeWrong(ctx, asked, gotWrong); err != nil {
 		t.Fatal(err)
 	}
 	changeBeforeDelete = false
@@ -227,11 +230,22 @@ func TestAnS3RefileDeletesOnlyWhatItRead(t *testing.T) {
 
 	deletes = nil
 	objects[key], etags[key] = []byte("the record"), `"e3"`
-	if err := s3.removeWrong(ctx, asked); err != nil {
+	if err := s3.removeWrong(ctx, asked, gotWrong); err != nil {
 		t.Fatal(err)
 	}
 	if len(deletes) != 0 || string(objects[key]) != "the record" {
 		t.Fatalf("an object that is its own: deletes %q, holds %q", deletes, objects[key])
+	}
+
+	// a third object's bytes under the key by then: not the ones re-filed,
+	// perhaps their only copy, so not deleted
+	deletes = nil
+	objects[key], etags[key] = []byte("a third object"), `"e4"`
+	if err := s3.removeWrong(ctx, asked, gotWrong); err != nil {
+		t.Fatal(err)
+	}
+	if len(deletes) != 0 || string(objects[key]) != "a third object" {
+		t.Fatalf("a third object's bytes: deletes %q, holds %q", deletes, objects[key])
 	}
 }
 
@@ -301,3 +315,169 @@ func TestAFailedPutLeavesNothing(t *testing.T) {
 type iotestErr struct{}
 
 func (iotestErr) Read([]byte) (int, error) { return 0, errors.New("the source failed") }
+
+// A Put that fails takes nothing from a concurrent one that did not (the
+// reader of this branch): X's reader stalls mid-copy, Y puts the right
+// bytes, X's reader fails. Y's object is there, right. Once, X's failure
+// removed it, and before that X's Close renamed its part over it.
+func TestAFailedPutTakesNothingFromAConcurrentOne(t *testing.T) {
+	ctx := context.Background()
+	s, _ := treeWith(t, c4.Identify(strings.NewReader("unrelated")), []byte("unrelated"))
+	right := []byte("the whole object")
+	id := c4.Identify(bytes.NewReader(right))
+
+	release := make(chan struct{})
+	started := make(chan struct{})
+	x := &gatedFail{prefix: []byte("the whole"), started: started, release: release}
+	var xerr error
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); xerr = s.Put(ctx, id, x, int64(len(right))) }()
+	<-started // X has passed Has and Create, and is mid-copy
+	if err := s.Put(ctx, id, bytes.NewReader(right), int64(len(right))); err != nil {
+		t.Fatal(err)
+	}
+	if b, ok := read(t, s, id); !ok || !bytes.Equal(b, right) {
+		t.Fatalf("Y alone: %q %v", b, ok)
+	}
+	close(release)
+	wg.Wait()
+	if b, ok := read(t, s, id); xerr == nil || !ok || !bytes.Equal(b, right) {
+		t.Errorf("after a failing Put (%v) beside a successful one: present %v, %q", xerr, ok, b)
+	}
+}
+
+type gatedFail struct {
+	prefix  []byte
+	sent    bool
+	started chan struct{}
+	release chan struct{}
+}
+
+func (g *gatedFail) Read(p []byte) (int, error) {
+	if !g.sent {
+		g.sent = true
+		close(g.started)
+		return copy(p, g.prefix), nil
+	}
+	<-g.release
+	return 0, errors.New("source failed")
+}
+
+// The re-file removes from under the ID only the bytes it re-filed: other
+// bytes there by then (another object's, perhaps its only copy) stay.
+// Once, it removed whatever was not the ID's own.
+func TestTheRefileRemovesOnlyWhatItRefiled(t *testing.T) {
+	ctx := context.Background()
+	asked := c4.Identify(strings.NewReader("the record"))
+	w1 := []byte("wrong one")
+	w2 := []byte("wrong two: some other object's only copy")
+	g1 := c4.Identify(bytes.NewReader(w1))
+	g2 := c4.Identify(bytes.NewReader(w2))
+	s, _ := treeWith(t, asked, w2) // asked holds w2 by the time removeWrong looks
+	if err := s.Refile(ctx, asked, g1, w1); err != nil {
+		t.Fatal(err)
+	}
+	if b, ok := read(t, s, asked); !ok || !bytes.Equal(b, w2) {
+		t.Errorf("other bytes under asked: %q, %v, want them kept", b, ok)
+	}
+	if _, ok := read(t, s, g1); !ok {
+		t.Error("the re-filed bytes are not under their own ID")
+	}
+	_ = g2
+}
+
+// A leaf split while the re-file holds a file aside (the window covers
+// hashing it) does not lose it: the file aside is in the store's root
+// under a dot name, which a split never moves, and it goes back to where
+// the ID is now. Here the object is its own, a correct one put since the
+// read that found a wrong one. Once, the split moved it under a name
+// nothing reads, and the ID was lost.
+func TestASplitDuringARefileLosesNothing(t *testing.T) {
+	ctx := context.Background()
+	right := []byte("the record")
+	asked := c4.Identify(bytes.NewReader(right))
+	wrong := []byte("not the record")
+	got := c4.Identify(bytes.NewReader(wrong))
+	s, p := treeWith(t, asked, right)
+	ts := s.For(asked).(*treeShard).ts
+	ts.SetSplitThreshold(4)
+	refileTook = func(path string) {
+		if path != p {
+			return
+		}
+		for i := 0; i < 8; i++ { // other writers fill the leaf past the threshold
+			ts.Put(strings.NewReader(fmt.Sprintf("filler %d", i)))
+		}
+	}
+	t.Cleanup(func() { refileTook = nil })
+	err := s.Refile(ctx, asked, got, wrong)
+	refileTook = nil
+	if b, ok := read(t, s, asked); err != nil || !ok || !bytes.Equal(b, right) {
+		t.Errorf("after a split during the re-file (%v): asked %q, %v", err, b, ok)
+	}
+	strays := 0
+	filepath.WalkDir(ts.Root(), func(path string, d os.DirEntry, err error) error {
+		if strings.Contains(path, refileAside) {
+			strays++
+		}
+		return nil
+	})
+	if strays != 0 {
+		t.Errorf("%d files left aside", strays)
+	}
+}
+
+// What a crash leaves in the middle of a re-file, a file taken aside, is
+// mended when the store is opened: one that is the ID it was taken from
+// goes back under it; any other (the bytes re-filed, under their own ID
+// already) goes.
+func TestARefileCutShortIsMendedOnOpen(t *testing.T) {
+	right := []byte("the record")
+	asked := c4.Identify(bytes.NewReader(right))
+	wrong := []byte("not the record")
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, refileAside+asked.String()+".0123456789abcdef"), right, 0o444)
+	other := c4.Identify(strings.NewReader("another"))
+	os.WriteFile(filepath.Join(dir, refileAside+other.String()+".fedcba9876543210"), wrong, 0o444)
+	s, err := OpenSharded([]Spec{{Name: "s0", URL: dir}}, Credentials{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, ok := read(t, s, asked); !ok || !bytes.Equal(b, right) {
+		t.Errorf("the object taken aside, its ID's own: %q, %v", b, ok)
+	}
+	if _, ok := read(t, s, other); ok {
+		t.Error("bytes that are not their ID's were put back under it")
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, refileAside+"*")); len(left) != 0 {
+		t.Errorf("left aside: %v", left)
+	}
+}
+
+// An object still pending publication (a tree store in batch mode) is
+// being written, and the re-file leaves it alone.
+func TestTheRefileLeavesAnObjectBeingWritten(t *testing.T) {
+	ts, err := store.NewTreeStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts.SetSyncMode(store.SyncBatch)
+	sh := &treeShard{root: ts.Root(), ts: ts}
+	asked := c4.Identify(strings.NewReader("the record"))
+	w, err := ts.Create(asked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Write([]byte("not yet"))
+	w.Close()
+	got := c4.Identify(strings.NewReader("not yet"))
+	if err := sh.removeWrong(context.Background(), asked, got); err == nil {
+		t.Error("an object pending publication was taken")
+	}
+	if p, ok := ts.ContentPath(asked); !ok {
+		t.Error("the pending object is gone")
+	} else if b, _ := os.ReadFile(p); string(b) != "not yet" {
+		t.Errorf("the pending object holds %q", b)
+	}
+}

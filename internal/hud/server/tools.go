@@ -131,12 +131,9 @@ func readFile(ctx context.Context, st *storeurl.Sharded, v *c4view.View, p strin
 		if f.Path != p {
 			continue
 		}
-		if f.Size > limit {
-			return nil, true, fmt.Errorf("%s is over %d bytes", p, limit)
-		}
-		b, err := c4view.ReadObject(st, f.ID)
+		b, err := c4view.ReadObjectAtMost(st, f.ID, limit)
 		if err != nil {
-			return nil, true, err
+			return nil, true, fmt.Errorf("%s: %w", p, err)
 		}
 		return b, true, nil
 	}

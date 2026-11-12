@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Avalanche-io/c4"
 	"github.com/Avalanche-io/c4/c4m"
@@ -21,6 +22,7 @@ import (
 // caller already takes for a missing object, and tells OnMismatch both
 // IDs. The right bytes read as ever, and tell nothing.
 func TestBytesThatAreNotTheIDAskedForAreNotPresent(t *testing.T) {
+	freshTries(t)
 	st := objStore{}
 	asked := c4.Identify(strings.NewReader("the record"))
 	other := []byte("not the record")
@@ -58,6 +60,7 @@ func TestBytesThatAreNotTheIDAskedForAreNotPresent(t *testing.T) {
 // A view one of whose records is another object's bytes resolves as
 // incomplete, never as another tree.
 func TestAViewWithASwappedRecordIsIncomplete(t *testing.T) {
+	freshTries(t)
 	st := objStore{}
 	all, _ := NewFilter(nil)
 	m := c4m.NewManifest()
@@ -91,6 +94,7 @@ func TestAViewWithASwappedRecordIsIncomplete(t *testing.T) {
 // the one asked for, and the read says so (ErrRefiled), as does
 // OnMismatch.
 func TestTheReadThatFindsAWrongObjectRefilesIt(t *testing.T) {
+	freshTries(t)
 	ctx := context.Background()
 	dir := t.TempDir()
 	st, err := storeurl.OpenSharded([]storeurl.Spec{{Name: "s0", URL: dir}}, storeurl.Credentials{})
@@ -124,5 +128,59 @@ func TestTheReadThatFindsAWrongObjectRefilesIt(t *testing.T) {
 	}
 	if _, err := st.Head(ctx, asked); !errors.Is(err, storeurl.ErrNotFound) {
 		t.Fatalf("still under the ID asked for: %v", err)
+	}
+}
+
+// A bounded read refuses an object past its limit, having read no more
+// than one byte past it, and takes one at the limit, checked as ever.
+func TestABoundedReadStopsAtItsLimit(t *testing.T) {
+	freshTries(t)
+	st := objStore{}
+	at := bytes.Repeat([]byte("x"), 100)
+	id := c4.Identify(bytes.NewReader(at))
+	st[id] = at
+	if b, err := ReadObjectAtMost(st, id, 100); err != nil || len(b) != 100 {
+		t.Fatalf("an object at the limit: %d bytes, %v", len(b), err)
+	}
+	if b, err := ReadObjectAtMost(st, id, 99); err == nil || b != nil {
+		t.Fatalf("an object past the limit: %d bytes, %v", len(b), err)
+	}
+	was := OnMismatch
+	t.Cleanup(func() { OnMismatch = was })
+	OnMismatch = func(string, c4.ID, c4.ID, error) {}
+	st[id] = bytes.Repeat([]byte("y"), 100)
+	if _, err := ReadObjectAtMost(st, id, 100); !errors.Is(err, ErrNotItsID) {
+		t.Fatalf("other bytes at the limit: %v", err)
+	}
+}
+
+// freshTries forgets the re-files tried, for a test that reads the same
+// wrong objects as another.
+func freshTries(t *testing.T) {
+	t.Helper()
+	triedMu.Lock()
+	tried = map[c4.ID]time.Time{}
+	triedMu.Unlock()
+}
+
+// A wrong object a re-file cannot move is not re-filed, or told, again
+// within the minute: every read is still not present, and only the first
+// makes a log line and a count.
+func TestAWrongObjectThatCannotMoveIsToldOnceAMinute(t *testing.T) {
+	freshTries(t)
+	st := objStore{}
+	asked := c4.Identify(strings.NewReader("the record, again"))
+	st[asked] = []byte("not it")
+	told := 0
+	was := OnMismatch
+	t.Cleanup(func() { OnMismatch = was })
+	OnMismatch = func(string, c4.ID, c4.ID, error) { told++ }
+	for i := 0; i < 3; i++ {
+		if _, err := ReadObject(st, asked); !errors.Is(err, ErrNotItsID) {
+			t.Fatalf("read %d: %v", i, err)
+		}
+	}
+	if told != 1 {
+		t.Fatalf("told %d times, want once", told)
 	}
 }
