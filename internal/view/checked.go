@@ -81,7 +81,8 @@ const refileTimeout = 30 * time.Second
 // a re-file cannot move (a c4d's, or two objects under each other's IDs)
 // does not make every read a re-file and a log line.
 func mismatch(st Store, asked, got c4.ID, data []byte) error {
-	if recentlyTried(asked) {
+	key := triedKey{storeName(st, asked), asked}
+	if recentlyTried(key) {
 		return &notItsID{asked: asked, got: got, refiled: errRecentlyTried}
 	}
 	err := errNoRefile
@@ -91,7 +92,7 @@ func mismatch(st Store, asked, got c4.ID, data []byte) error {
 		cancel()
 	}
 	if err != nil {
-		noteTried(asked)
+		noteTried(key)
 	}
 	OnMismatch(storeName(st, asked), asked, got, err)
 	return &notItsID{asked: asked, got: got, refiled: err}
@@ -103,19 +104,26 @@ const refileEvery = time.Minute
 
 var errRecentlyTried = errors.New("not re-filed again yet: a re-file of it could not be done within the last minute")
 
+// triedKey is an object in one store: the same content in two projects'
+// stores is two objects to re-file.
+type triedKey struct {
+	store string
+	id    c4.ID
+}
+
 var (
 	triedMu sync.Mutex
-	tried   = map[c4.ID]time.Time{}
+	tried   = map[triedKey]time.Time{}
 )
 
-func recentlyTried(id c4.ID) bool {
+func recentlyTried(id triedKey) bool {
 	triedMu.Lock()
 	defer triedMu.Unlock()
 	at, ok := tried[id]
 	return ok && time.Since(at) < refileEvery
 }
 
-func noteTried(id c4.ID) {
+func noteTried(id triedKey) {
 	triedMu.Lock()
 	defer triedMu.Unlock()
 	if len(tried) >= 4096 {

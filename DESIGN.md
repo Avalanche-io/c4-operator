@@ -169,7 +169,9 @@ Project says not to, and are trusted from the local cache from then on.**
   come only from its own files. It costs under 2% of a resolve (50,000 files: 565 ms
   against 561). An import from c4git still copies an object without
   hashing it (c4git verified it at `git add`), and a reader finds it not
-  present if it is not its ID's.
+  present if it is not its ID's. Into a tree store the copy is hashed now
+  (a tree store's Put is self-checking, below); into S3 it is not, until
+  every shard checks a Put.
 - **A fill is checked.** A node cache filling from a peer or the regional
   tier, and the regional tier filling from the store, hash what arrives and
   refuse bytes that are not the ID asked for. `spec.store.verifyFill`

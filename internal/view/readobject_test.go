@@ -159,7 +159,7 @@ func TestABoundedReadStopsAtItsLimit(t *testing.T) {
 func freshTries(t *testing.T) {
 	t.Helper()
 	triedMu.Lock()
-	tried = map[c4.ID]time.Time{}
+	tried = map[triedKey]time.Time{}
 	triedMu.Unlock()
 }
 
@@ -182,5 +182,33 @@ func TestAWrongObjectThatCannotMoveIsToldOnceAMinute(t *testing.T) {
 	}
 	if told != 1 {
 		t.Fatalf("told %d times, want once", told)
+	}
+}
+
+// namedStore is an objStore with a name, for OnMismatch.
+type namedStore struct {
+	objStore
+	name string
+}
+
+func (n namedStore) Name() string { return n.name }
+
+// The once-a-minute rule is per store: the same wrong content under the
+// same ID in two projects' stores is two objects, and the second is told
+// though the first was a moment before.
+func TestTheOnceAMinuteRuleIsPerStore(t *testing.T) {
+	freshTries(t)
+	asked := c4.Identify(strings.NewReader("shared content"))
+	a := namedStore{objStore{asked: []byte("not it")}, "project-a"}
+	b := namedStore{objStore{asked: []byte("not it")}, "project-b"}
+	var told []string
+	was := OnMismatch
+	t.Cleanup(func() { OnMismatch = was })
+	OnMismatch = func(store string, _, _ c4.ID, _ error) { told = append(told, store) }
+	ReadObject(a, asked)
+	ReadObject(b, asked)
+	ReadObject(a, asked)
+	if len(told) != 2 || told[0] != "project-a" || told[1] != "project-b" {
+		t.Fatalf("told %v, want project-a then project-b, once each", told)
 	}
 }

@@ -372,9 +372,10 @@ func (g *gatedFail) Read(p []byte) (int, error) {
 	return 0, errors.New("source failed")
 }
 
-// The re-file removes from under the ID only the bytes it re-filed: other
-// bytes there by then (another object's, perhaps its only copy) stay.
-// Once, it removed whatever was not the ID's own.
+// The re-file deletes nothing it has not placed: other bytes under the ID
+// by then (another object's, perhaps its only copy) are themselves wrong
+// there, and go under their own ID, by the same rule. Once, it removed
+// whatever was not the ID's own.
 func TestTheRefileRemovesOnlyWhatItRefiled(t *testing.T) {
 	ctx := context.Background()
 	asked := c4.Identify(strings.NewReader("the record"))
@@ -386,13 +387,15 @@ func TestTheRefileRemovesOnlyWhatItRefiled(t *testing.T) {
 	if err := s.Refile(ctx, asked, g1, w1); err != nil {
 		t.Fatal(err)
 	}
-	if b, ok := read(t, s, asked); !ok || !bytes.Equal(b, w2) {
-		t.Errorf("other bytes under asked: %q, %v, want them kept", b, ok)
+	if _, ok := read(t, s, asked); ok {
+		t.Error("other bytes still under asked")
+	}
+	if b, ok := read(t, s, g2); !ok || !bytes.Equal(b, w2) {
+		t.Errorf("the other bytes under their own ID: %q, %v, want them there", b, ok)
 	}
 	if _, ok := read(t, s, g1); !ok {
 		t.Error("the re-filed bytes are not under their own ID")
 	}
-	_ = g2
 }
 
 // A leaf split while the re-file holds a file aside (the window covers
@@ -458,6 +461,9 @@ func TestARefileCutShortIsMendedOnOpen(t *testing.T) {
 	if _, ok := read(t, s, other); ok {
 		t.Error("bytes that are not their ID's were put back under it")
 	}
+	if b, ok := read(t, s, c4.Identify(bytes.NewReader(wrong))); !ok || !bytes.Equal(b, wrong) {
+		t.Errorf("bytes found aside are not under their own ID: %q, %v (perhaps their only copy)", b, ok)
+	}
 	if left, _ := filepath.Glob(filepath.Join(dir, refileAside+"*")); len(left) != 0 {
 		t.Errorf("left aside: %v", left)
 	}
@@ -479,8 +485,7 @@ func TestTheRefileLeavesAnObjectBeingWritten(t *testing.T) {
 	}
 	w.Write([]byte("not yet"))
 	w.Close()
-	got := c4.Identify(strings.NewReader("not yet"))
-	if err := sh.removeWrong(context.Background(), asked, got); err == nil {
+	if _, _, err := sh.setAside(asked); err == nil {
 		t.Error("an object pending publication was taken")
 	}
 	if p, ok := ts.ContentPath(asked); !ok {
@@ -622,5 +627,69 @@ func TestAChainTooLongStopsAndKeepsEverything(t *testing.T) {
 		if !have[o] {
 			t.Errorf("%q is gone", o)
 		}
+	}
+}
+
+// A correct Put that lands while the re-file has a wrong object aside is
+// never written over: the aside's bytes go under their own ID, and what is
+// under the ID asked for by then stays (the independent reader of this
+// branch: once, bytes put back through the store's Create renamed over
+// it). Here the third bytes under asked, another object's perhaps only
+// copy, are aside when the correct Put comes.
+func TestACorrectPutDuringARefileStands(t *testing.T) {
+	ctx := context.Background()
+	right := []byte("the record")
+	asked := c4.Identify(bytes.NewReader(right))
+	w1 := []byte("wrong one")
+	w2 := []byte("wrong two: another object's only copy")
+	g1, g2 := c4.Identify(bytes.NewReader(w1)), c4.Identify(bytes.NewReader(w2))
+	s, _ := treeWith(t, asked, w2)
+	step = func(name string) error {
+		if name == "taken" {
+			if err := s.Put(ctx, asked, bytes.NewReader(right), int64(len(right))); err != nil {
+				t.Errorf("the correct Put: %v", err)
+			}
+		}
+		return nil
+	}
+	t.Cleanup(func() { step = func(string) error { return nil } })
+	if err := s.Refile(ctx, asked, g1, w1); err != nil {
+		t.Fatal(err)
+	}
+	step = func(string) error { return nil }
+	if b, _ := read(t, s, asked); !bytes.Equal(b, right) {
+		t.Errorf("asked holds %q, want the correct Put's", b)
+	}
+	if b, _ := read(t, s, g2); !bytes.Equal(b, w2) {
+		t.Errorf("the third bytes under their own ID: %q", b)
+	}
+	if b, _ := read(t, s, g1); !bytes.Equal(b, w1) {
+		t.Errorf("the re-filed bytes under their own ID: %q", b)
+	}
+}
+
+// Two settlers of one store (processes that opened the same tree root) can
+// reach the same object at once: the one that finds it already taken has
+// nothing to do, and the re-file still ends with every byte under its own
+// ID.
+func TestARefileFindingItsObjectTakenHasNothingToDo(t *testing.T) {
+	ctx := context.Background()
+	asked := c4.Identify(strings.NewReader("the record"))
+	wrong := []byte("not the record")
+	got := c4.Identify(bytes.NewReader(wrong))
+	s, p := treeWith(t, asked, wrong)
+	step = func(name string) error {
+		if name == "taking" {
+			os.Remove(p) // another settler took it first
+		}
+		return nil
+	}
+	t.Cleanup(func() { step = func(string) error { return nil } })
+	if err := s.Refile(ctx, asked, got, wrong); err != nil {
+		t.Fatalf("a re-file whose object another took: %v", err)
+	}
+	step = func(string) error { return nil }
+	if b, ok := read(t, s, got); !ok || !bytes.Equal(b, wrong) {
+		t.Errorf("under their own ID: %q, %v", b, ok)
 	}
 }
