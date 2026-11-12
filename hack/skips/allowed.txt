@@ -45,3 +45,6 @@ linux  internal/farmcli             TestWinnersAreWhatIsWritten                 
 
 # Waits on a ruling; runs once the ruling comes, with the fix it brings.
 *      internal/view                TestTheReadersAgreeOnADirectoryWrittenByIDOverAFile # unruled: draft c4 #89
+
+# Waits on the c4 pin move (MIGRATION-C4-PIN.md): a fix the pinned library lacks.
+*      internal/work/queue          TestABlockOfTwoSectionsResolves                   # needs c4 80b7dda (#136); the operator writes one section per block

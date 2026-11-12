@@ -2274,7 +2274,21 @@ output chain: one changeset per fold, each over the output before it, so
 every intermediate output is named in the chain and can be verified and
 mounted. The chain is stored in the project's store and named in the job's
 status beside the current output view, which the chain does not hold
-(`status.output`).
+(`status.output`). It is stored in blocks: each fold stores one block, its
+one section (the changeset computed over the output) encoded by the c4m
+library under a first line naming the block before (the spec's external
+base reference), and status names the newest. Every 64 blocks, and before
+the first, a block names the view it was made over instead, whose listing
+is stored, so resolving a head (`c4m.ResolveBaseID`, every block's bytes
+checked) reads at most 64 blocks: 4 ms at 1,000 folds, where the chain as
+one object took 1.06 s, and about 307 bytes stored per fold. Until
+2026-11-12 every fold stored the whole chain again: 6.2 MB of chain at 200
+folds, 62 KB now. A block holds one section: c4 before 80b7dda (#136)
+resolves a block of more than one wrongly, and the operator's pin is
+before it. The job's input view, which a refold of nothing starts from and
+the newest block no longer reaches, is kept in the provenance index. A chain
+stored as one object before blocks still loads, and the next block rests on
+its view.
 
 A unit's changeset is a patch over the unit's own input, and a patch entry
 means a write or a removal by what its own base holds; the output is

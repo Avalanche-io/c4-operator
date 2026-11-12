@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -36,6 +37,27 @@ func foldStore(t *testing.T) (*storeurl.Sharded, string) {
 		t.Fatal(err)
 	}
 	return st, dir
+}
+
+// resolveHead resolves a chain's head through the c4m library, every block
+// read checked, and returns the view it describes.
+func resolveHead(t *testing.T, st *storeurl.Sharded, head c4.ID) c4.ID {
+	t.Helper()
+	m, err := c4m.ResolveBaseID(head, checkedSource{st})
+	if err != nil {
+		t.Fatalf("resolve %s: %v", head, err)
+	}
+	return m.ComputeC4ID()
+}
+
+type checkedSource struct{ st c4view.Store }
+
+func (s checkedSource) Open(id c4.ID) (io.ReadCloser, error) {
+	b, err := c4view.ReadObject(s.st, id)
+	if err != nil {
+		return nil, err
+	}
+	return io.NopCloser(bytes.NewReader(b)), nil
 }
 
 func readChain(t *testing.T, st *storeurl.Sharded, id c4.ID) ([]byte, *c4view.Chain) {
@@ -74,25 +96,24 @@ func TestFoldChainIsChangesetsJoined(t *testing.T) {
 	st, _ := foldStore(t)
 	q := &Queue{}
 	o := newOutput()
-	var outs []c4.ID
+	var outs, heads []c4.ID
 	for i, name := range []string{"a.txt", "b.txt", "c.txt"} {
 		if err := q.fold(ctx, st, o, Fold{Unit: i, Changeset: writeChangeset(t, st, name, name)}); err != nil {
 			t.Fatal(err)
 		}
 		outs = append(outs, o.view)
 		data, ch := readChain(t, st, o.id)
-		if !bytes.Equal(data, o.chain) || !ch.Seal.IsNil() || len(ch.Sections) != i+1 || ch.Base != c4view.EmptyID() {
-			t.Fatalf("after %d folds the stored chain is not the folds joined\n%s", i+1, data)
+		on := c4view.EmptyID() // the first rests on the job's input
+		if i > 0 {
+			on = heads[i-1]
 		}
-		got, err := ch.Verify(ctx, c4view.StoreRecords(st))
-		if err != nil || len(got) != i+1 || got[i] != o.view {
-			t.Fatalf("after %d folds the chain verifies to %v: %v", i+1, got, err)
+		if !ch.Seal.IsNil() || len(ch.Sections) != 1 || ch.Base != on {
+			t.Fatalf("after %d folds the head is not one block on the one before\n%s", i+1, data)
 		}
-		for k, v := range got {
-			if v != outs[k] {
-				t.Fatalf("view %d of the chain is not the output after fold %d", k, k+1)
-			}
+		if got := resolveHead(t, st, o.id); got != o.view {
+			t.Fatalf("after %d folds the head resolves to %s, the output is %s", i+1, got, o.view)
 		}
+		heads = append(heads, o.id)
 	}
 	if len(outputNames(t, st, o.view)) != 3 {
 		t.Fatal("the output does not hold the three files")
@@ -103,15 +124,16 @@ func TestFoldChainIsChangesetsJoined(t *testing.T) {
 	if err := again.load(st, o.id.String(), o.view.String()); err != nil {
 		t.Fatal(err)
 	}
-	if again.view != o.view || !bytes.Equal(again.chain, o.chain) {
+	if again.view != o.view || again.id != o.id {
 		t.Fatal("a loaded output is not the output that was stored")
 	}
 	if err := q.fold(ctx, st, again, Fold{Unit: 3, Changeset: writeChangeset(t, st, "d.txt", "d")}); err != nil {
 		t.Fatal(err)
 	}
+	// After a restart the next block rests on the view the status kept.
 	_, ch := readChain(t, st, again.id)
-	if got, err := ch.Verify(ctx, c4view.StoreRecords(st)); err != nil || len(got) != 4 || got[3] != again.view {
-		t.Fatalf("after a restart and a fold the chain verifies to %d views: %v", len(got), err)
+	if len(ch.Sections) != 1 || ch.Base != o.view || resolveHead(t, st, again.id) != again.view {
+		t.Fatalf("after a restart and a fold the head rests on %s (want %s) and resolves elsewhere", ch.Base, o.view)
 	}
 }
 
@@ -138,15 +160,22 @@ func TestFoldReadsTheOldForm(t *testing.T) {
 	// The same two folds, in the current form, for comparison.
 	want := newOutput()
 	var csIDs []string
-	var outs []c4.ID
+	var outs, wantHeads []c4.ID
 	for i, name := range []string{"a.txt", "b.txt"} {
 		csIDs = append(csIDs, writeChangeset(t, st, name, name))
 		if err := q.fold(ctx, st, want, Fold{Unit: i, Changeset: csIDs[i]}); err != nil {
 			t.Fatal(err)
 		}
 		outs = append(outs, want.view)
+		wantHeads = append(wantHeads, want.id)
 	}
-	_, wantChain := readChain(t, st, want.id)
+	// The chain as it was stored before blocks: the folds' sections joined
+	// over the job's input (here the empty view).
+	wantChain := &c4view.Chain{Base: c4view.EmptyID()}
+	for _, h := range []c4.ID{wantHeads[0], want.id} {
+		_, blk := readChain(t, st, h)
+		wantChain.Sections = append(wantChain.Sections, blk.Sections...)
+	}
 
 	// The units' changesets as they were stored before: each with the view
 	// it produces after it. (Every changeset here is over the empty view.)
@@ -166,7 +195,7 @@ func TestFoldReadsTheOldForm(t *testing.T) {
 			t.Fatalf("fold an old changeset: %v", err)
 		}
 	}
-	if o.view != want.view || !bytes.Equal(o.chain, want.chain) {
+	if o.view != want.view || o.id != want.id {
 		t.Fatal("old changesets do not fold to the same output and chain")
 	}
 
@@ -180,18 +209,18 @@ func TestFoldReadsTheOldForm(t *testing.T) {
 	if err := re.load(st, oldID.String(), want.view.String()); err != nil {
 		t.Fatal(err)
 	}
-	if re.view != want.view || !bytes.Equal(re.chain, want.chain) {
-		t.Fatal("an old chain does not load as the chain in the current form")
+	if re.view != want.view || re.loadedBase != c4view.EmptyID() {
+		t.Fatal("an old chain does not load: its view, or its base (the job's input)")
 	}
 	if err := q.fold(ctx, st, re, Fold{Unit: 2, Changeset: writeChangeset(t, st, "c.txt", "c")}); err != nil {
 		t.Fatal(err)
 	}
 	data, ch := readChain(t, st, re.id)
-	if !ch.Seal.IsNil() || !bytes.Equal(data, re.chain) {
-		t.Fatalf("the chain stored after an old one was loaded ends with a bare ID\n%s", data)
+	if !ch.Seal.IsNil() || len(ch.Sections) != 1 || ch.Base != want.view {
+		t.Fatalf("the block after an old chain was loaded does not rest on its view\n%s", data)
 	}
-	if got, err := ch.Verify(ctx, c4view.StoreRecords(st)); err != nil || len(got) != 3 || got[2] != re.view {
-		t.Fatalf("it verifies to %d views: %v", len(got), err)
+	if got := resolveHead(t, st, re.id); got != re.view {
+		t.Fatalf("it resolves to %s, the output is %s", got, re.view)
 	}
 	// An old chain that ends with another view than the status names is
 	// refused.
@@ -227,7 +256,7 @@ func TestFoldRetriedLeavesOneSection(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	before, beforeView, beforeID := append([]byte(nil), o.chain...), o.view, o.id
+	beforeView, beforeID, beforeBlocks := o.view, o.id, o.blocks
 	var dirs []string
 	filepath.Walk(dir, func(p string, fi os.FileInfo, err error) error {
 		if err == nil && fi.IsDir() {
@@ -246,13 +275,13 @@ func TestFoldRetriedLeavesOneSection(t *testing.T) {
 	if err == nil {
 		t.Fatal("the fold stored its chain in a read-only store")
 	}
-	if !bytes.Equal(o.chain, before) || o.view != beforeView || o.id != beforeID {
+	if o.blocks != beforeBlocks || o.view != beforeView || o.id != beforeID {
 		t.Fatal("a failed fold changed the output")
 	}
 	if err := q.fold(ctx, st, o, Fold{Unit: 1, Changeset: cs}); err != nil {
 		t.Fatal(err)
 	}
-	_, stored := readChain(t, st, o.id)
+	stored := logicalChain(t, st, o.id)
 	got, err := stored.Verify(ctx, c4view.StoreRecords(st))
 	if err != nil || len(stored.Sections) != 2 || got[1] != o.view || o.view != res.ID {
 		t.Fatalf("after a retry the chain has %d sections and verifies: %v", len(stored.Sections), err)
@@ -298,7 +327,7 @@ func TestFoldADirectoryBecomesAFile(t *testing.T) {
 	if o.view != want {
 		t.Fatalf("after a unit turned a directory into a file the output is %v, want lib as a file", outputNames(t, st, o.view))
 	}
-	_, ch := readChain(t, st, o.id)
+	ch := logicalChain(t, st, o.id)
 	if got, err := ch.Verify(ctx, src); err != nil || len(got) != 2 || got[1] != want {
 		t.Fatalf("the chain verifies to %v: %v", got, err)
 	}
@@ -338,9 +367,13 @@ func TestOutputIsRestoredAfterARestartAndFoldedOnto(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, ch := readChain(t, st, id)
-	views, err := ch.Verify(ctx, c4view.StoreRecords(st))
-	if err != nil || len(views) != 2 || views[1].String() != got.Status.Output.View {
+	// After the restart the next block rests on the view the status kept:
+	// the head resolves to the status's output, and its chain verifies.
+	if r := resolveHead(t, st, id); r.String() != got.Status.Output.View {
+		t.Fatalf("the stored chain resolves to %s, the status's output is %s", r, got.Status.Output.View)
+	}
+	views, err := logicalChain(t, st, id).Verify(ctx, c4view.StoreRecords(st))
+	if err != nil || len(views) == 0 || views[len(views)-1].String() != got.Status.Output.View {
 		t.Fatalf("the stored chain verifies to %d views, the last not the status's output: %v", len(views), err)
 	}
 }
@@ -473,9 +506,54 @@ func idOf(content string) c4.ID { return c4.Identify(strings.NewReader(content))
 
 // checkChain reads the output's stored chain and checks it verifies, by
 // the plain patch rule, to the output.
+// logicalChain is the chain a head stands for, in the shape it had before
+// blocks: walked back block by block to the view the oldest rests on (an
+// object that is a listing, not a chain), its sections in order.
+func logicalChain(t *testing.T, st *storeurl.Sharded, head c4.ID) *c4view.Chain {
+	t.Helper()
+	var secs []c4view.Section
+	var blocks []c4.ID
+	cur := head
+	for {
+		data, err := c4view.ReadObject(st, cur)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ch, err := c4view.ReadChain(data)
+		if err != nil {
+			break // a view's listing: the base
+		}
+		if len(ch.Sections) == 0 {
+			cur = ch.Base // a chain from before blocks that is its base alone
+			break
+		}
+		if len(ch.Sections) != 1 {
+			t.Fatalf("block %s holds %d sections, not one", cur, len(ch.Sections))
+		}
+		secs = append(secs, ch.Sections[0])
+		blocks = append(blocks, cur)
+		cur = ch.Base
+	}
+	out := &c4view.Chain{Base: cur}
+	for i := len(secs) - 1; i >= 0; i-- {
+		sec := secs[i]
+		if i < len(secs)-1 {
+			// It rests on the block before, which stands for the view it
+			// resolves to.
+			sec.Base = resolveHead(t, st, blocks[i+1])
+		}
+		out.Sections = append(out.Sections, sec)
+	}
+	return out
+}
+
 func checkChain(t *testing.T, st *storeurl.Sharded, o *output, sections int) {
 	t.Helper()
-	data, ch := readChain(t, st, o.id)
+	if sections > 0 && resolveHead(t, st, o.id) != o.view {
+		t.Fatalf("the head %s does not resolve to the output %s", o.id, o.view)
+	}
+	ch := logicalChain(t, st, o.id)
+	data := []byte(fmt.Sprintf("head %s", o.id))
 	if len(ch.Sections) != sections {
 		t.Fatalf("the chain has %d sections, want %d\n%s", len(ch.Sections), sections, data)
 	}
@@ -760,7 +838,7 @@ func TestFoldThatChangesNothingStoresTheInputAlone(t *testing.T) {
 	if err := q.fold(ctx, st, o, Fold{Unit: 0, Changeset: unitChangeset(t, st, unitIn, nil, "tmp.txt"), Run: "pod-0"}); err != nil {
 		t.Fatal(err)
 	}
-	if o.view != jobIn || o.id != aloneID || len(o.chain) != 0 {
+	if o.view != jobIn || o.id != aloneID {
 		t.Fatalf("the output moved: view %s, chain object %s", o.view, o.id)
 	}
 	if o.count != 1 || len(o.folds) != 1 {
@@ -911,7 +989,7 @@ func TestAFailedFoldLeavesTheBooksAlone(t *testing.T) {
 		}
 	}
 	state := func() string {
-		return fmt.Sprint(o.view, o.id, o.count, o.folded, o.writer, o.records, o.units, o.conflicts, o.fresh, o.folds, o.dirty, len(o.chain))
+		return fmt.Sprint(o.view, o.id, o.count, o.folded, o.writer, o.records, o.units, o.conflicts, o.fresh, o.folds, o.dirty, o.blocks, o.input)
 	}
 	before := state()
 	chmod(0o555)
@@ -1561,4 +1639,175 @@ func TestRefoldWithEveryFoldSuperseded(t *testing.T) {
 		t.Fatalf("rebuilt from a chain with no sections, the output is %s with %d folds, want %s and none", m2.out.view, len(m2.out.folds), in)
 	}
 	checkChain(t, st, m2.out, 0)
+}
+
+// The chain is stored in blocks, one fold's section each: past
+// chainRestEvery blocks the next rests on the view before it, so a head
+// resolves within that many reads. At every fold, the head resolved
+// through the c4m library (every block's bytes checked) is exactly the
+// view the whole chain of the same folds, as stored before blocks,
+// resolves to.
+func TestTheChainIsBlocksThatResolveAsTheWholeChain(t *testing.T) {
+	ctx := context.Background()
+	st, _ := foldStore(t)
+	q := &Queue{}
+	in := inputView(t, st, map[string]string{"in.txt": "input"})
+	o := newOutput()
+	const n = chainRestEvery + 6
+	whole := &c4view.Chain{Base: in}
+	for i := 0; i < n; i++ {
+		cs := unitChangeset(t, st, in, map[string]string{fmt.Sprintf("d/e/f%03d.txt", i): fmt.Sprint(i)})
+		before := o.view
+		if before.IsNil() {
+			before = in
+		}
+		if err := q.fold(ctx, st, o, Fold{Unit: i, Changeset: cs, Run: fmt.Sprintf("pod-%d", i)}); err != nil {
+			t.Fatal(err)
+		}
+		// The whole chain as it was stored before blocks: this fold's
+		// section joins the ones before.
+		_, blk := readChain(t, st, o.id)
+		if len(blk.Sections) != 1 {
+			t.Fatalf("fold %d: the head holds %d sections", i, len(blk.Sections))
+		}
+		sec := blk.Sections[0]
+		sec.Base = before
+		whole.Sections = append(whole.Sections, sec)
+		enc, err := whole.Encode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		wholeID, err := st.PutBytes(ctx, enc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if h, w := resolveHead(t, st, o.id), resolveHead(t, st, wholeID); h != w || h != o.view {
+			t.Fatalf("fold %d: the head resolves to %s, the whole chain to %s, the output is %s", i, h, w, o.view)
+		}
+	}
+	// From the head back to a view: at most chainRestEvery blocks.
+	blocks, cur := 0, o.id
+	for {
+		data, err := c4view.ReadObject(st, cur)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ch, err := c4view.ReadChain(data)
+		if err != nil {
+			break
+		}
+		blocks++
+		cur = ch.Base
+	}
+	if blocks < 1 || blocks > chainRestEvery {
+		t.Fatalf("%d blocks from the head back to a view, want 1 to %d", blocks, chainRestEvery)
+	}
+}
+
+// A block holding more than one section resolves each against the state
+// the ones before it made. The pinned c4 library (19c97485) applies a
+// block's later sections against its first section alone; c4 80b7dda
+// (#136) fixed that. The operator writes one section per block, so the
+// old behaviour never meets its chains; this test runs once the pin moves
+// past 80b7dda (MIGRATION-C4-PIN.md).
+func TestABlockOfTwoSectionsResolves(t *testing.T) {
+	t.Skip("needs c4 80b7dda (#136): the pinned 19c97485 folds a block's later sections against its first alone; un-skip with the pin move")
+	ctx := context.Background()
+	st, _ := foldStore(t)
+	q := &Queue{}
+	in := inputView(t, st, map[string]string{"in.txt": "input"})
+	o := newOutput()
+	var secs []c4view.Section
+	for i := 0; i < 2; i++ {
+		before := o.view
+		if before.IsNil() {
+			before = in
+		}
+		// The first rewrites the base's in.txt, the second removes it (its
+		// section restates the rewritten in.txt exactly). In order against
+		// the base, in.txt is gone; the second against the first alone
+		// removes the rewrite, and the base's in.txt comes back (#136's case).
+		cs := unitChangeset(t, st, in, map[string]string{"in.txt": "rewritten"})
+		if i == 1 {
+			cs = unitChangeset(t, st, in, nil, "in.txt")
+		}
+		if err := q.fold(ctx, st, o, Fold{Unit: i, Changeset: cs, Run: fmt.Sprint(i)}); err != nil {
+			t.Fatal(err)
+		}
+		_, blk := readChain(t, st, o.id)
+		sec := blk.Sections[0]
+		sec.Base = before
+		secs = append(secs, sec)
+	}
+	two, err := (&c4view.Chain{Base: in, Sections: secs}).Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.PutBytes(ctx, two)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resolveHead(t, st, id); got != o.view {
+		t.Fatalf("a block of two sections resolves to %s, the output is %s", got, o.view)
+	}
+}
+
+// The same two folds as the operator stores them, one block each, resolve
+// right on the pinned library: each block's one section applies against
+// the whole state the blocks before it make.
+func TestOneSectionBlocksResolveTheCaseTwoSectionsGetWrong(t *testing.T) {
+	ctx := context.Background()
+	st, _ := foldStore(t)
+	q := &Queue{}
+	in := inputView(t, st, map[string]string{"in.txt": "input"})
+	o := newOutput()
+	for i, cs := range []string{
+		unitChangeset(t, st, in, map[string]string{"in.txt": "rewritten"}),
+		unitChangeset(t, st, in, nil, "in.txt"),
+	} {
+		if err := q.fold(ctx, st, o, Fold{Unit: i, Changeset: cs, Run: fmt.Sprint(i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := resolveHead(t, st, o.id); got != o.view || o.view != c4view.EmptyID() {
+		t.Fatalf("the head resolves to %s, the output is %s (want the empty view)", got, o.view)
+	}
+}
+
+// A refold after a restart, with every fold superseded, starts from the
+// job's input view: the chain's head no longer reaches it (blocks rest on
+// views), so the index keeps it (Index.Input).
+func TestARefoldAfterARestartStartsFromTheInput(t *testing.T) {
+	ctx := context.Background()
+	st, _ := foldStore(t)
+	q := &Queue{Stores: func(context.Context, string) (*storeurl.Sharded, error) { return st, nil }, Log: logr.Discard()}
+	in := inputView(t, st, map[string]string{"in.txt": "input"})
+	o := newOutput()
+	for i, name := range []string{"a.txt", "b.txt"} {
+		if err := q.fold(ctx, st, o, Fold{Unit: i, Changeset: unitChangeset(t, st, in, map[string]string{name: name}), Run: fmt.Sprint("pod-", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := o.saveIndex(ctx, st, "ns/job"); err != nil {
+		t.Fatal(err)
+	}
+	// The restart: the chain and view from the status, then the index.
+	re := newOutput()
+	if err := re.load(st, o.id.String(), o.view.String()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := re.loadIndex(ctx, st, o.index.String(), "ns/job", nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if re.input != in {
+		t.Fatalf("after a restart the input is %s, want %s", re.input, in)
+	}
+	m := &jobMem{out: re, superseded: map[int]bool{0: true, 1: true}}
+	v := &view{key: "ns/job", project: "show", mem: m}
+	if !q.refoldOutput(ctx, v) {
+		t.Fatal("the refold asked to be tried again")
+	}
+	if m.out.view != in || len(m.out.folds) != 0 {
+		t.Fatalf("with every fold superseded after a restart the output is %s, want the input %s", m.out.view, in)
+	}
 }
