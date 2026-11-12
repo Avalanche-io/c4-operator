@@ -400,6 +400,30 @@ roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: c4-queue-calibr
 subjects:
 - {kind: ServiceAccount, name: c4-manager, namespace: c4-system}
 ---
+# The webhook's serving certificate (internal/webhook/certs.go): made once,
+# in the Secret c4-webhook-tls, and served by every manager, so a rolling
+# update never fails admission. Reading it is c4-store-credentials' get.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: c4-webhook-tls
+rules:
+- apiGroups: [""]
+  resources: [secrets]
+  resourceNames: [c4-webhook-tls]
+  verbs: [update]
+- apiGroups: [""]
+  resources: [secrets]
+  verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: c4-webhook-tls
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: c4-webhook-tls}
+subjects:
+- {kind: ServiceAccount, name: c4-manager, namespace: c4-system}
+---
 # The manager's lease (cmd/c4-operator/leader.go): one manager at a time
 # runs the work queue, the farm book's sealer and the controllers. A Lease
 # that does not exist yet cannot be named, so create is for any.

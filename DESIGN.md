@@ -870,7 +870,16 @@ volumes:
   fails the publish, and the workload never starts.
 - `NodeUnpublishVolume` captures (section 4.4) and unmounts.
 - The mutating webhook stays as a convenience. It turns the MVP's
-  annotations into the `csi` volume and mounts, and nothing more.
+  annotations into the `csi` volume and mounts, and nothing more. Every
+  manager serves one certificate, kept in the Secret `c4-webhook-tls`
+  (made by the first manager that finds none, replaced within 30 days of
+  expiry or when the service's names change; the CA's key is not kept),
+  and the configuration's CA bundle holds its CA and at most two before it,
+  so during a rolling update, the old manager's and the new one's
+  certificates are both trusted and no admission fails (with
+  `failurePolicy: Fail`, a pod could not be made). Until 2026-11-12 each
+  manager made its own CA at start, and the one still running failed
+  every admission it served until it stopped.
 
 ## 6. Per-project isolation
 
