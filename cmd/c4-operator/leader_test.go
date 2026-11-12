@@ -2,8 +2,14 @@ package main
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -24,7 +30,8 @@ import (
 // nothing is the same) never runs in two managers at once, with the
 // options the manager is built with: not while both start, not while the
 // leader runs, and not across a clean handover, which takes the next
-// manager seconds, not the lease's 15 s.
+// manager seconds, not the lease's 15 s. The HUD's listener is served by
+// both, leader or not, since a manager is in the Service before it leads.
 func TestTwoManagersNeverRunTheQueueAtOnce(t *testing.T) {
 	if !(&queue.Queue{}).NeedLeaderElection() {
 		t.Fatal("the queue no longer asks for leader election")
@@ -40,12 +47,22 @@ func TestTwoManagersNeverRunTheQueueAtOnce(t *testing.T) {
 	running, most := 0, 0
 	type span struct{ start, end time.Time }
 	spans := map[string]*span{}
+	hud := map[string]string{}
 	start := func(name string) (cancel func(), done <-chan struct{}) {
 		mgr, err := ctrl.NewManager(cfg, electLeader(ctrl.Options{
 			Metrics:                metricsserver.Options{BindAddress: "0"},
 			HealthProbeBindAddress: "0",
 		}, ns))
 		if err != nil {
+			t.Fatal(err)
+		}
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		hud[name] = l.Addr().String()
+		l.Close()
+		if err := mgr.Add(hudListener(hud[name], http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))); err != nil {
 			t.Fatal(err)
 		}
 		// A stand-in for the queue: like every runnable that does not say
@@ -101,6 +118,13 @@ func TestTwoManagersNeverRunTheQueueAtOnce(t *testing.T) {
 		t.Fatal("neither manager took the lease")
 	}
 	time.Sleep(3 * time.Second) // both running, one leading
+	for name, addr := range hud {
+		resp, err := http.Get("http://" + addr + "/")
+		if err != nil {
+			t.Fatalf("manager %s (leading: %v) does not serve the HUD: %v", name, name == first, err)
+		}
+		resp.Body.Close()
+	}
 	stopped := time.Now()
 	if first == "a" {
 		cancelA()
@@ -145,4 +169,44 @@ func startEnvtest(t *testing.T) *rest.Config {
 	}
 	t.Cleanup(func() { env.Stop() })
 	return cfg
+}
+
+// Every manager this binary builds takes the lease: each ctrl.NewManager
+// call is given its options through electLeader.
+func TestEveryManagerIsElected(t *testing.T) {
+	fset := token.NewFileSet()
+	files, _ := filepath.Glob("*.go")
+	calls := 0
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, f, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != "NewManager" {
+				return true
+			}
+			calls++
+			if len(call.Args) == 2 {
+				if inner, ok := call.Args[1].(*ast.CallExpr); ok {
+					if id, ok := inner.Fun.(*ast.Ident); ok && id.Name == "electLeader" {
+						return true
+					}
+				}
+			}
+			t.Errorf("%s: a manager built without electLeader", fset.Position(call.Pos()))
+			return true
+		})
+	}
+	if calls == 0 {
+		t.Fatal("found no ctrl.NewManager call: the test no longer sees the manager")
+	}
 }

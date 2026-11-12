@@ -573,8 +573,18 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 	if err := mgr.Add(srv); err != nil {
 		return err
 	}
-	return mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
-		hs := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	return mgr.Add(hudListener(addr, srv.Handler()))
+}
+
+// hudListener serves the HUD in every manager, leader or not, as it did
+// before the manager took a lease: the HUD, the people's issuer and the
+// host runners' certificates are on it, and a manager is Ready (in the
+// Service) before it leads. A manager that does not lead answers what
+// comes from the work queue as a queue with nothing planned (no forecast,
+// no plan), since its queue does not run.
+func hudListener(addr string, h http.Handler) manager.Runnable {
+	return everyReplica(func(ctx context.Context) error {
+		hs := &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 10 * time.Second}
 		go func() {
 			<-ctx.Done()
 			sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -585,7 +595,7 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 			return err
 		}
 		return nil
-	}))
+	})
 }
 
 // parseViewers reads "wrangler=*;artist=show-a|show-b".

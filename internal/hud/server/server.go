@@ -451,7 +451,8 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 }
 
-// NeedLeaderElection lets every replica serve the HUD.
+// NeedLeaderElection runs the HUD's collector in every manager, as its
+// listener does (cmd/c4-operator hudListener), leader or not.
 func (s *Server) NeedLeaderElection() bool { return false }
 
 // ProxySecretHeader carries the SSO proxy's shared secret (ProxySecret).
