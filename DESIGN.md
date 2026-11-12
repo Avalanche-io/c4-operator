@@ -148,8 +148,11 @@ Project says not to, and are trusted from the local cache from then on.**
   any step loses nothing: opening the store places what is aside. On S3
   a slot holding other bytes is not moved yet (S3 has no listing here to
   mend an aside after a crash), so there a swap stays not present. Nothing
-  reclaims a re-filed object yet: the operator has no GC of the store, and
-  "eventually garbage collected" waits on one. A git import whose changeset is found wrong then makes
+  reclaims a re-filed object yet: the operator's store is not collected.
+  Its GC is c4 core's design (`c4/design/gc-requirements.md`, the store's
+  retention records and closure walk, and `store-records-architecture.md`),
+  not a new one; how the operator store's roots map onto it is worked out
+  before any code. A git import whose changeset is found wrong then makes
   it again in the same import, where before the store kept it and the
   import stopped. A copy from one store to another (a tool published to
   more projects than its own) is hashed as it streams, and bytes that are
