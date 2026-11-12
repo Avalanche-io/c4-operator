@@ -2347,7 +2347,12 @@ the whole index is stored again, which names nothing before it. Read from
 its head (the status names the head) it is the whole index, in at most 65
 reads. Until 2026-11-12 every save stored the whole index again, so a job
 folded n times stored about n²/2 folds' worth of index: 3.3 MB at 200 folds,
-151 KB now, measured on the queue's test harness.
+164 KB now, measured on the queue's test harness. A segment stores its folds
+in a form a manager from before segments cannot read as an index, so a
+rollback across this change stops that manager's folds (and its HUD's
+provenance answers) with an error rather than letting it take one segment
+for the whole fold log, fold again what was folded, and save over the
+history; going forward again resumes them.
 
 A downstream job's `fromJob` input mounts that view. The dependency graph (sim to render to comp to transcode to
 delivery) is therefore also a data-flow graph of content-addressed trees, and

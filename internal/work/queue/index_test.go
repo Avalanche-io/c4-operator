@@ -922,8 +922,15 @@ func TestTheIndexIsStoredInSegments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var one Index
-	if err := json.Unmarshal(data, &one); err != nil || one.Prev == "" || len(one.Folds) != 1 {
-		t.Fatalf("the head segment: prev %q, %d folds, %v", one.Prev, len(one.Folds), err)
+	var one segment
+	if err := json.Unmarshal(data, &one); err != nil || one.Prev == "" || len(one.Appended) != 1 {
+		t.Fatalf("the head segment: prev %q, %d folds, %v", one.Prev, len(one.Appended), err)
+	}
+	// A manager from before segments reads an index as one Index: on a
+	// segment it fails, rather than taking one fold for the job's whole
+	// log (it would fold again what is folded, and save over the history).
+	var old Index
+	if err := json.Unmarshal(data, &old); err == nil {
+		t.Fatalf("a segment reads as a whole index to a manager from before segments: %d folds", len(old.Folds))
 	}
 }

@@ -113,6 +113,32 @@ type Index struct {
 	Folds   []Fold            `json:"folds,omitempty"`
 }
 
+// segment is how a segment is stored: its folds under appended, and folds
+// a string, so that a manager from before segments, which reads folds as
+// a list, fails on a segment (its fold waits, the HUD answers an error)
+// instead of taking it for the whole index, folding again what it has
+// already folded and writing over the history with what it read.
+type segment struct {
+	Version  int               `json:"version,omitempty"`
+	Job      string            `json:"job"`
+	Output   string            `json:"output"`
+	Prev     string            `json:"prev"`
+	Records  map[string]string `json:"records"`
+	Units    map[int]string    `json:"units"`
+	Appended []Fold            `json:"appended,omitempty"`
+	Folds    string            `json:"folds"`
+}
+
+const segmentMark = "a segment of a provenance index: read it from its head"
+
+// stored is how readIndex reads either form: a whole index's folds are a
+// list, a segment's are under appended.
+type stored struct {
+	Index
+	Folds    json.RawMessage `json:"folds,omitempty"`
+	Appended []Fold          `json:"appended,omitempty"`
+}
+
 // indexCheckpointEvery is how many segments follow a whole index before
 // the next: a reader reads at most this many and one more, and a job
 // folded n times stores n/64 whole indexes, not n.
@@ -133,24 +159,34 @@ func ReadIndex(st c4view.Store, id c4.ID) (*Index, error) {
 func readIndex(st c4view.Store, id c4.ID) (*Index, int, error) {
 	var segs []Index
 	for cur := id; ; {
-		if len(segs) > maxIndexSegments {
+		if len(segs) >= maxIndexSegments {
 			return nil, 0, fmt.Errorf("provenance index %s: more than %d segments", id, maxIndexSegments)
 		}
 		data, err := c4view.ReadObject(st, cur)
 		if err != nil {
 			return nil, 0, err
 		}
-		var ix Index
-		if err := json.Unmarshal(data, &ix); err != nil {
+		var raw stored
+		if err := json.Unmarshal(data, &raw); err != nil {
 			return nil, 0, fmt.Errorf("provenance index segment %s: %w", cur, err)
+		}
+		ix := raw.Index
+		if ix.Prev != "" {
+			ix.Folds = raw.Appended
+		} else if len(raw.Folds) > 0 {
+			if err := json.Unmarshal(raw.Folds, &ix.Folds); err != nil {
+				return nil, 0, fmt.Errorf("provenance index %s: folds: %w", cur, err)
+			}
 		}
 		segs = append(segs, ix)
 		if ix.Prev == "" {
 			break
 		}
-		if cur, err = c4.Parse(ix.Prev); err != nil {
+		next, err := c4.Parse(ix.Prev)
+		if err != nil {
 			return nil, 0, fmt.Errorf("provenance index segment %s: prev: %w", cur, err)
 		}
+		cur = next
 	}
 	out := segs[len(segs)-1]
 	if out.Records == nil {
@@ -179,15 +215,15 @@ func (o *output) saveIndex(ctx context.Context, st *storeurl.Sharded, job string
 	if !o.dirty {
 		return nil
 	}
-	ix := Index{Version: indexVersion, Job: job, Output: o.view.String()}
 	full := o.index.IsNil() || o.rewrite || o.segs >= indexCheckpointEvery || o.newFolds > len(o.folds)
+	var b []byte
+	var err error
 	if full {
-		ix.Records, ix.Units, ix.Folds = o.records, o.units, o.folds
+		b, err = json.Marshal(Index{Version: indexVersion, Job: job, Output: o.view.String(), Records: o.records, Units: o.units, Folds: o.folds})
 	} else {
-		ix.Prev = o.index.String()
-		ix.Records, ix.Units, ix.Folds = o.newRecords, o.newUnits, o.folds[len(o.folds)-o.newFolds:]
+		b, err = json.Marshal(segment{Version: indexVersion, Job: job, Output: o.view.String(), Prev: o.index.String(),
+			Records: o.newRecords, Units: o.newUnits, Appended: o.folds[len(o.folds)-o.newFolds:], Folds: segmentMark})
 	}
-	b, err := json.Marshal(ix)
 	if err != nil {
 		return err
 	}
