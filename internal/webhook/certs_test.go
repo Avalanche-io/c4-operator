@@ -22,9 +22,10 @@ import (
 )
 
 const (
-	testNS     = "c4-system"
-	testSvc    = "c4-operator-webhook"
-	testConfig = "c4-operator"
+	testNS       = "c4-system"
+	testSecretNS = "c4-signing"
+	testSvc      = "c4-operator-webhook"
+	testConfig   = "c4-operator"
 )
 
 func envClient(t *testing.T) client.Client {
@@ -50,8 +51,10 @@ func envClient(t *testing.T) client.Client {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if err := c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: testNS}}); err != nil {
-		t.Fatal(err)
+	for _, ns := range []string{testNS, testSecretNS} {
+		if err := c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	none := admissionv1.SideEffectClassNone
 	path := "/mutate-pod"
@@ -69,7 +72,7 @@ func envClient(t *testing.T) client.Client {
 func start(t *testing.T, c client.Client) (cert, key, bundle []byte) {
 	t.Helper()
 	dir := t.TempDir()
-	if err := BootstrapCerts(context.Background(), c, dir, testSvc, testNS, testConfig); err != nil {
+	if err := BootstrapCerts(context.Background(), c, dir, testSvc, testNS, testSecretNS, testConfig); err != nil {
 		t.Fatal(err)
 	}
 	cert, _ = os.ReadFile(filepath.Join(dir, "tls.crt"))
@@ -106,10 +109,10 @@ func verifies(t *testing.T, bundle, cert []byte) bool {
 	return err == nil
 }
 
-// Two managers serve the same certificate, which the bundle verifies, and
-// the second start leaves the configuration as it was: a rolling update
-// fails no admission. A manager made before the Secret (its own CA in the
-// bundle) is admitted until it stops, however often the new one restarts.
+// Two managers serve the same certificate, which the bundle verifies. The
+// start that made the pair keeps the CA of a manager from before the
+// Secret, so it is admitted through the update; the next start drops it
+// (as revoking a leaked key needs), and starts after that change nothing.
 func TestEveryManagerServesOneCertificate(t *testing.T) {
 	c := envClient(t)
 	ctx := context.Background()
@@ -130,22 +133,76 @@ func TestEveryManagerServesOneCertificate(t *testing.T) {
 
 	certA, keyA, b1 := start(t, c)
 	if !verifies(t, b1, certA) || !verifies(t, b1, old.cert) {
-		t.Fatalf("after the first start the bundle verifies the new certificate %v, the old manager's %v", verifies(t, b1, certA), verifies(t, b1, old.cert))
+		t.Fatalf("after the start that made the pair the bundle verifies the new certificate %v, the old manager's %v", verifies(t, b1, certA), verifies(t, b1, old.cert))
 	}
-	var before admissionv1.MutatingWebhookConfiguration
-	c.Get(ctx, types.NamespacedName{Name: testConfig}, &before)
-
 	certB, keyB, b2 := start(t, c) // a second manager, or the first again
 	if !bytes.Equal(certA, certB) || !bytes.Equal(keyA, keyB) {
 		t.Fatal("two managers serve different certificates")
 	}
-	var after admissionv1.MutatingWebhookConfiguration
-	c.Get(ctx, types.NamespacedName{Name: testConfig}, &after)
-	if after.ResourceVersion != before.ResourceVersion || !bytes.Equal(b1, b2) {
-		t.Fatal("a second start changed the webhook configuration")
+	if !verifies(t, b2, certB) || verifies(t, b2, old.cert) {
+		t.Fatalf("after the next start the bundle verifies the pair %v, the old manager's %v (want true, false)", verifies(t, b2, certB), verifies(t, b2, old.cert))
 	}
-	if !verifies(t, b2, old.cert) {
-		t.Fatal("a restart dropped the CA of a manager from before")
+	var before, after admissionv1.MutatingWebhookConfiguration
+	c.Get(ctx, types.NamespacedName{Name: testConfig}, &before)
+	start(t, c)
+	c.Get(ctx, types.NamespacedName{Name: testConfig}, &after)
+	if after.ResourceVersion != before.ResourceVersion {
+		t.Fatal("a start with nothing to change changed the webhook configuration")
+	}
+}
+
+// A leaked key is revoked by deleting the Secret and starting twice: the
+// first start keeps the leaked CA for managers still on it, the second
+// trusts only the new pair.
+func TestDeletingTheSecretRevokesInTwoStarts(t *testing.T) {
+	c := envClient(t)
+	ctx := context.Background()
+	leaked, _, _ := start(t, c)
+	var s corev1.Secret
+	if err := c.Get(ctx, types.NamespacedName{Namespace: testSecretNS, Name: TLSSecret}, &s); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Delete(ctx, &s); err != nil {
+		t.Fatal(err)
+	}
+	cert1, _, b1 := start(t, c)
+	if bytes.Equal(cert1, leaked) || !verifies(t, b1, cert1) || !verifies(t, b1, leaked) {
+		t.Fatal("the first start after the deletion did not make a new pair beside the old one")
+	}
+	_, _, b2 := start(t, c)
+	if verifies(t, b2, leaked) || !verifies(t, b2, cert1) {
+		t.Fatal("the second start still trusts the leaked certificate")
+	}
+}
+
+// The bundle is built from certificates, not text: a CA without a final
+// newline, or with CRLF lines, and earlier CAs repeated or expired, give a
+// bundle that verifies, each CA once, at most two kept.
+func TestTheBundleIsBuiltFromCertificates(t *testing.T) {
+	pairs := make([]tlsPair, 4)
+	for i := range pairs {
+		var err error
+		if pairs[i], err = newPair(dnsNames(testSvc, testNS)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	expired, err := newPairUntil(dnsNames(testSvc, testNS), time.Now().Add(-time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca := bytes.TrimRight(pairs[0].ca, "\n")
+	before := append(append(append(bytes.ReplaceAll(pairs[1].ca, []byte("\n"), []byte("\r\n")), pairs[1].ca...), expired.ca...), append(pairs[2].ca, pairs[3].ca...)...)
+	b := bundle(ca, before)
+	for i, want := range []bool{true, true, true, false} {
+		if got := verifies(t, b, pairs[i].cert); got != want {
+			t.Errorf("pair %d verified %v, want %v", i, got, want)
+		}
+	}
+	if verifies(t, b, expired.cert) {
+		t.Error("an expired CA was kept")
+	}
+	if n := bytes.Count(b, []byte("BEGIN CERTIFICATE")); n != 3 {
+		t.Errorf("%d certificates in the bundle, want 3 (the pair's and two before)", n)
 	}
 }
 
@@ -155,6 +212,15 @@ func TestAPairForOtherNamesIsReplaced(t *testing.T) {
 	for name, make := range map[string]func() (tlsPair, error){
 		"other names": func() (tlsPair, error) { return newPair(dnsNames("another-service", testNS)) },
 		"expiring":    func() (tlsPair, error) { return newPairUntil(dnsNames(testSvc, testNS), time.Now().Add(renewBefore/2)) },
+		"another CA's": func() (tlsPair, error) {
+			a, err := newPair(dnsNames(testSvc, testNS))
+			if err != nil {
+				return a, err
+			}
+			b, err := newPair(dnsNames(testSvc, testNS))
+			a.ca = b.ca // the leaf is not this CA's
+			return a, err
+		},
 	} {
 		t.Run(name, func(t *testing.T) { replaced(t, make) })
 	}
@@ -167,7 +233,9 @@ func replaced(t *testing.T, make func() (tlsPair, error)) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: testNS, Name: TLSSecret}, Type: corev1.SecretTypeTLS, Data: other.data()}); err != nil {
+	// Opaque, as one made by hand may be: its type is immutable, and the
+	// replacement must leave it.
+	if err := c.Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: testSecretNS, Name: TLSSecret}, Type: corev1.SecretTypeOpaque, Data: other.data()}); err != nil {
 		t.Fatal(err)
 	}
 	cert, _, b := start(t, c)
@@ -175,7 +243,7 @@ func replaced(t *testing.T, make func() (tlsPair, error)) {
 		t.Fatal("the pair in the Secret was served, not replaced")
 	}
 	var s corev1.Secret
-	if err := c.Get(ctx, types.NamespacedName{Namespace: testNS, Name: TLSSecret}, &s); err != nil {
+	if err := c.Get(ctx, types.NamespacedName{Namespace: testSecretNS, Name: TLSSecret}, &s); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(s.Data[secretCert], cert) {
@@ -193,7 +261,7 @@ func TestTwoFirstStartsServeOnePair(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			dir := t.TempDir()
-			if err := BootstrapCerts(context.Background(), c, dir, testSvc, testNS, testConfig); err != nil {
+			if err := BootstrapCerts(context.Background(), c, dir, testSvc, testNS, testSecretNS, testConfig); err != nil {
 				t.Error(err)
 				return
 			}
@@ -209,5 +277,24 @@ func TestTwoFirstStartsServeOnePair(t *testing.T) {
 		if !verifies(t, b, cert) {
 			t.Fatalf("the bundle does not verify manager %d's certificate", i)
 		}
+	}
+}
+
+// With signing off there is no Secret: a manager makes its own pair, and
+// the bundle is its CA alone.
+func TestWithoutASigningNamespaceEachStartMakesItsOwn(t *testing.T) {
+	c := envClient(t)
+	dir := t.TempDir()
+	if err := BootstrapCerts(context.Background(), c, dir, testSvc, testNS, "", testConfig); err != nil {
+		t.Fatal(err)
+	}
+	cert, _ := os.ReadFile(filepath.Join(dir, "tls.crt"))
+	b := caBundle(t, c)
+	if !verifies(t, b, cert) || bytes.Count(b, []byte("BEGIN CERTIFICATE")) != 1 {
+		t.Fatal("the bundle is not the start's own CA")
+	}
+	var s corev1.Secret
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: testSecretNS, Name: TLSSecret}, &s); err == nil {
+		t.Fatal("a Secret was made with signing off")
 	}
 }

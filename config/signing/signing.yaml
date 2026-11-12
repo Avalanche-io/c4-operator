@@ -72,8 +72,16 @@ rules:
   resources: [secrets]
   resourceNames: [c4-farm-book, c4-farm-book-sealer]
   verbs: [get, update]
+# The webhook's serving certificate (internal/webhook/certs.go): made once
+# and served by every manager, so a rolling update fails no admission;
+# here, not in c4-system, whose Secrets node and regional agents may read.
+- apiGroups: [""]
+  resources: [secrets]
+  resourceNames: [c4-webhook-tls]
+  verbs: [get, update]
 # create cannot be limited by name; the namespace holds nothing else but
-# the people's issuer's, the system store's and the farm book's Secrets.
+# the people's issuer's, the system store's, the farm book's and the
+# webhook certificate's Secrets.
 - apiGroups: [""]
   resources: [secrets]
   verbs: [create]

@@ -26,8 +26,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// TLSSecret is the Secret, in the operator's namespace, that holds the
-// webhook's serving certificate and the CA that signed it. Every manager
+// TLSSecret is the Secret, in the signing namespace (readable only by the
+// manager: not in the operator's, whose Secrets node and regional agents
+// may read), that holds the webhook's serving certificate and the CA that
+// signed it. Every manager
 // serves the same one, so the webhook configuration's CA bundle is right
 // for all of them at once: during a rolling update a request reaching the
 // old manager or the new one is admitted alike. Until 2026-11-12 each
@@ -37,6 +39,12 @@ import (
 // The CA's private key is not kept: it signs the serving certificate once
 // and is dropped. A new pair is made only when the Secret's is missing,
 // unreadable, for other service names, or within renewBefore of expiry.
+// Only the start that makes one keeps the CAs the bundle held before (a
+// manager still running may serve one of their certificates); every other
+// start leaves the bundle the Secret's CA alone. So a leaked key is
+// revoked by deleting the Secret and starting the manager twice: the first
+// start makes a new pair and keeps the old CA for the managers still on
+// it, the second drops it.
 const TLSSecret = "c4-webhook-tls"
 
 const (
@@ -53,9 +61,19 @@ const renewBefore = 30 * 24 * time.Hour
 // the Secret TLSSecret (made by the first manager that finds none), writes
 // it to dir, and puts its CA into the MutatingWebhookConfiguration, ahead
 // of the CAs the bundle held before (bundle).
-func BootstrapCerts(ctx context.Context, c client.Client, dir, service, namespace, configName string) error {
+//
+// With secretNamespace empty (signing off) there is no Secret: each start
+// makes its own pair and the bundle is its CA, as before 2026-11-12.
+func BootstrapCerts(ctx context.Context, c client.Client, dir, service, namespace, secretNamespace, configName string) error {
 	names := dnsNames(service, namespace)
-	pair, err := sharedPair(ctx, c, namespace, names)
+	var pair tlsPair
+	made := true
+	var err error
+	if secretNamespace == "" {
+		pair, err = newPair(names)
+	} else {
+		pair, made, err = sharedPair(ctx, c, secretNamespace, names)
+	}
 	if err != nil {
 		return err
 	}
@@ -75,7 +93,11 @@ func BootstrapCerts(ctx context.Context, c client.Client, dir, service, namespac
 		}
 		changed := false
 		for i := range cfg.Webhooks {
-			b := bundle(pair.ca, cfg.Webhooks[i].ClientConfig.CABundle)
+			var before []byte
+			if made && secretNamespace != "" {
+				before = cfg.Webhooks[i].ClientConfig.CABundle
+			}
+			b := bundle(pair.ca, before)
 			if !bytes.Equal(b, cfg.Webhooks[i].ClientConfig.CABundle) {
 				cfg.Webhooks[i].ClientConfig.CABundle = b
 				changed = true
@@ -90,11 +112,12 @@ func BootstrapCerts(ctx context.Context, c client.Client, dir, service, namespac
 
 type tlsPair struct{ ca, cert, key []byte }
 
-// sharedPair reads the Secret's pair, or makes one and stores it. Two
-// managers starting together both create; the one refused takes the
-// winner's. A pair that will not serve these names is replaced, guarded
-// by the Secret's resourceVersion, and the loser of that race reads again.
-func sharedPair(ctx context.Context, c client.Client, namespace string, names []string) (tlsPair, error) {
+// sharedPair reads the Secret's pair, or makes one and stores it, and says
+// whether it made it. Two managers starting together both create; the one
+// refused takes the winner's. A pair that will not serve these names is
+// replaced, guarded by the Secret's resourceVersion, and the loser of that
+// race reads again.
+func sharedPair(ctx context.Context, c client.Client, namespace string, names []string) (tlsPair, bool, error) {
 	key := types.NamespacedName{Namespace: namespace, Name: TLSSecret}
 	for range 5 {
 		var s corev1.Secret
@@ -103,36 +126,35 @@ func sharedPair(ctx context.Context, c client.Client, namespace string, names []
 		case apierrors.IsNotFound(err):
 			p, err := newPair(names)
 			if err != nil {
-				return tlsPair{}, err
+				return tlsPair{}, false, err
 			}
 			s = corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: TLSSecret}, Type: corev1.SecretTypeTLS, Data: p.data()}
 			if err := c.Create(ctx, &s); apierrors.IsAlreadyExists(err) {
 				continue
 			} else if err != nil {
-				return tlsPair{}, fmt.Errorf("webhook TLS Secret %s: %w", TLSSecret, err)
+				return tlsPair{}, false, fmt.Errorf("webhook TLS Secret %s: %w", TLSSecret, err)
 			}
-			return p, nil
+			return p, true, nil
 		case err != nil:
-			return tlsPair{}, fmt.Errorf("webhook TLS Secret %s: %w", TLSSecret, err)
+			return tlsPair{}, false, fmt.Errorf("webhook TLS Secret %s: %w", TLSSecret, err)
 		}
 		p := tlsPair{ca: s.Data[secretCA], cert: s.Data[secretCert], key: s.Data[secretKey]}
 		if p.serves(names, time.Now()) {
-			return p, nil
+			return p, false, nil
 		}
 		np, err := newPair(names)
 		if err != nil {
-			return tlsPair{}, err
+			return tlsPair{}, false, err
 		}
-		s.Data = np.data()
-		s.Type = corev1.SecretTypeTLS
+		s.Data = np.data() // its type is left as it is: a Secret's type is immutable
 		if err := c.Update(ctx, &s); apierrors.IsConflict(err) {
 			continue
 		} else if err != nil {
-			return tlsPair{}, fmt.Errorf("webhook TLS Secret %s: %w", TLSSecret, err)
+			return tlsPair{}, false, fmt.Errorf("webhook TLS Secret %s: %w", TLSSecret, err)
 		}
-		return np, nil
+		return np, true, nil
 	}
-	return tlsPair{}, fmt.Errorf("webhook TLS Secret %s: it kept changing while it was read", TLSSecret)
+	return tlsPair{}, false, fmt.Errorf("webhook TLS Secret %s: it kept changing while it was read", TLSSecret)
 }
 
 func (p tlsPair) data() map[string][]byte {
@@ -221,13 +243,22 @@ func newPairUntil(names []string, notAfter time.Time) (tlsPair, error) {
 	}, nil
 }
 
-// bundle is ca, then the CAs the bundle held before that are still good,
-// at most two: a manager serving one of their certificates (started before
-// the Secret, or before a renewal) is admitted while it runs, however often
-// the new one restarts. A CA kept after its manager stopped trusts nothing
-// anyone can still sign: its key was never kept.
+// bundle is ca, then the CAs before held that are still good, at most two
+// and each once (compared by their bytes, not their text), every block
+// ending in a newline. before is nil but on the start that made the pair.
 func bundle(ca, before []byte) []byte {
-	out := append([]byte(nil), ca...)
+	var out []byte
+	seen := map[string]bool{}
+	add := func(der []byte) {
+		if seen[string(der)] {
+			return
+		}
+		seen[string(der)] = true
+		out = append(out, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})...)
+	}
+	if block, _ := pem.Decode(ca); block != nil {
+		add(block.Bytes)
+	}
 	kept := 0
 	for rest := before; kept < 2; {
 		var block *pem.Block
@@ -235,17 +266,13 @@ func bundle(ca, before []byte) []byte {
 		if block == nil {
 			break
 		}
-		if block.Type != "CERTIFICATE" {
-			continue
-		}
-		prev := pem.EncodeToMemory(block)
-		if bytes.Equal(prev, ca) {
+		if block.Type != "CERTIFICATE" || seen[string(block.Bytes)] {
 			continue
 		}
 		if c, err := x509.ParseCertificate(block.Bytes); err != nil || !c.IsCA || time.Now().After(c.NotAfter) {
 			continue
 		}
-		out = append(out, prev...)
+		add(block.Bytes)
 		kept++
 	}
 	return out

@@ -871,15 +871,22 @@ volumes:
 - `NodeUnpublishVolume` captures (section 4.4) and unmounts.
 - The mutating webhook stays as a convenience. It turns the MVP's
   annotations into the `csi` volume and mounts, and nothing more. Every
-  manager serves one certificate, kept in the Secret `c4-webhook-tls`
-  (made by the first manager that finds none, replaced within 30 days of
-  expiry or when the service's names change; the CA's key is not kept),
-  and the configuration's CA bundle holds its CA and at most two before it,
-  so during a rolling update, the old manager's and the new one's
-  certificates are both trusted and no admission fails (with
-  `failurePolicy: Fail`, a pod could not be made). Until 2026-11-12 each
-  manager made its own CA at start, and the one still running failed
-  every admission it served until it stopped.
+  manager serves one certificate, kept in the Secret `c4-webhook-tls` in
+  the signing namespace (which only the manager may read: not c4-system,
+  whose Secrets node and regional agents may read). The first manager that
+  finds none makes it; it is replaced within 30 days of expiry, when its CA
+  did not sign it, or when the service's names change, and the CA's key is
+  not kept. The configuration's CA bundle is that CA, and on the start that
+  made the pair also at most two CAs it held before, so a manager still
+  serving an older certificate (from before the Secret, or before a
+  renewal) is trusted through that update; the next start drops them. So
+  a rolling update fails no admission (with `failurePolicy: Fail` a pod
+  could not be made), and a leaked key is revoked by deleting the Secret
+  and starting the manager twice. A rollback to a manager from before
+  2026-11-12 makes its own CA again, as each manager did until then, when
+  the one still running failed every admission it served until it stopped.
+  With signing off (no signing namespace) each manager makes its own pair,
+  as before.
 
 ## 6. Per-project isolation
 

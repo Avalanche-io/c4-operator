@@ -155,7 +155,7 @@ func runManager(args []string) error {
 		return err
 	}
 	ctx := ctrl.SetupSignalHandler()
-	if err := c4webhook.BootstrapCerts(ctx, direct, *certDir, *service, *namespace, *webhookConfig); err != nil {
+	if err := c4webhook.BootstrapCerts(ctx, direct, *certDir, *service, *namespace, *signingNS, *webhookConfig); err != nil {
 		return fmt.Errorf("webhook certificates: %w", err)
 	}
 	kube, err := kubernetes.NewForConfig(cfg)
