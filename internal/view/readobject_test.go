@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -210,5 +211,61 @@ func TestTheOnceAMinuteRuleIsPerStore(t *testing.T) {
 	ReadObject(a, asked)
 	if len(told) != 2 || told[0] != "project-a" || told[1] != "project-b" {
 		t.Fatalf("told %v, want project-a then project-b, once each", told)
+	}
+}
+
+// The once-a-minute rule tells two projects' stores apart even when both
+// name their one shard "s0" (the independent reader of this branch): it is
+// keyed by the store behind the shard, not the shard's name. Each store
+// here holds the same wrong bytes under the same ID, and is read-only, so
+// its re-file cannot be done and the rule applies.
+func TestTheOnceAMinuteRuleTellsShardsNamedAlikeApart(t *testing.T) {
+	freshTries(t)
+	asked := c4.Identify(strings.NewReader("shared content"))
+	open := func() *storeurl.Sharded {
+		t.Helper()
+		dir := t.TempDir()
+		ts, err := store.NewTreeStore(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w, err := ts.Create(asked)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.Write([]byte("not it"))
+		w.Close()
+		filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+			if err == nil && d.IsDir() {
+				os.Chmod(p, 0o555)
+			}
+			return nil
+		})
+		t.Cleanup(func() {
+			filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+				if err == nil && d.IsDir() {
+					os.Chmod(p, 0o755)
+				}
+				return nil
+			})
+		})
+		s, err := storeurl.OpenSharded([]storeurl.Spec{{Name: "s0", URL: dir}}, storeurl.Credentials{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	a, b := open(), open()
+	var told []error
+	was := OnMismatch
+	t.Cleanup(func() { OnMismatch = was })
+	OnMismatch = func(_ string, _, _ c4.ID, refiled error) { told = append(told, refiled) }
+	for _, st := range []*storeurl.Sharded{a, b, a} {
+		if _, err := ReadObject(st, asked); !errors.Is(err, ErrNotItsID) {
+			t.Fatalf("a read of the wrong bytes: %v", err)
+		}
+	}
+	if len(told) != 2 || told[0] == nil || told[1] == nil {
+		t.Fatalf("told %v: want each store's failed re-file once", told)
 	}
 }

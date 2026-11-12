@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -109,6 +110,9 @@ func (s *Sharded) Refile(ctx context.Context, asked, got c4.ID, data []byte) err
 			return fmt.Errorf("re-file %s: taking it from under its ID: %w", asked, err)
 		}
 		return nil
+	}
+	if s.holdsOwn(ctx, asked) {
+		return nil // a correct Put since the read: nothing to take
 	}
 	// A tree store takes whatever asked holds now aside, and settles it:
 	// got's bytes, filed already, dedupe; asked's own, a correct Put
@@ -260,7 +264,9 @@ func (s *Sharded) mend(ctx context.Context) {
 			if err != nil {
 				continue // settled by another process meanwhile
 			}
-			s.settle(ctx, aside, b)
+			if err := s.settle(ctx, aside, b); err != nil {
+				log.Printf("c4: store %s: a file set aside by a re-file (%s) is not placed yet, and stays: %v", t.Name(), e.Name(), err)
+			}
 		}
 	}
 }

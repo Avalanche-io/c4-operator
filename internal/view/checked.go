@@ -81,7 +81,7 @@ const refileTimeout = 30 * time.Second
 // a re-file cannot move (a c4d's, or two objects under each other's IDs)
 // does not make every read a re-file and a log line.
 func mismatch(st Store, asked, got c4.ID, data []byte) error {
-	key := triedKey{storeName(st, asked), asked}
+	key := triedKey{storeKey(st, asked), asked}
 	if recentlyTried(key) {
 		return &notItsID{asked: asked, got: got, refiled: errRecentlyTried}
 	}
@@ -134,6 +134,17 @@ func noteTried(id triedKey) {
 		}
 	}
 	tried[id] = time.Now()
+}
+
+// storeKey is the backing store id was read from (a tree store's root, an
+// S3 bucket and prefix, a c4d's address), which is one store however many
+// projects name their shard "s0", and the same store when a project's
+// stores are opened again.
+func storeKey(st Store, id c4.ID) string {
+	if s, ok := st.(*storeurl.Sharded); ok {
+		return s.For(id).Name()
+	}
+	return storeName(st, id)
 }
 
 // storeName names the store id was read from, for OnMismatch: the shard
