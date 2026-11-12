@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -21,10 +20,7 @@ import (
 // Secret (without reading it) and says why.
 func TestCredentialLeaseEnds(t *testing.T) {
 	ctx := context.Background()
-	ns := fmt.Sprintf("lease-%d", time.Now().UnixNano()%1e9)
-	if err := k8s.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
-		t.Fatal(err)
-	}
+	ns := newNamespace(t, "lease")
 	now := time.Now()
 	lease := func(name string, expires time.Time) *c4v1.CredentialLease {
 		l := &c4v1.CredentialLease{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}, Spec: c4v1.CredentialLeaseSpec{

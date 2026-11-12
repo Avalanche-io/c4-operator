@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,9 +24,17 @@ import (
 )
 
 // newNamespace makes a namespace of the test's own.
+// nsSeq numbers the namespaces the package's tests make.
+var nsSeq atomic.Int64
+
+// newNamespace makes a namespace for one test, named so that no two are
+// alike in a process: envtest never deletes one, and a name from the clock
+// alone (once, the nanoseconds within the second, which macOS counts in
+// microseconds) was made twice in 2 of 750 runs under -race, and the test
+// failed on "already exists".
 func newNamespace(t *testing.T, prefix string) string {
 	t.Helper()
-	ns := fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano()%1e9)
+	ns := fmt.Sprintf("%s-%d-%d", prefix, nsSeq.Add(1), time.Now().UnixNano()%1e6)
 	if err := k8s.Create(context.Background(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
 		t.Fatal(err)
 	}

@@ -2,12 +2,7 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"testing"
-	"time"
-
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/view"
@@ -40,10 +35,7 @@ func TestGrantByTheViewAChangesetMakes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ns := fmt.Sprintf("rootid-%d", time.Now().UnixNano()%1e9)
-	if err := k8s.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
-		t.Fatal(err)
-	}
+	ns := newNamespace(t, "rootid")
 	putProject(t, "rootid", []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: applied.ID.String()}})
 	putMat(t, ns, "whole", byID(csID))
 	m := waitMat(t, ns, "whole", c4v1.PhaseReady, "Ready")
