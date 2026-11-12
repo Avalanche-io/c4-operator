@@ -16,10 +16,11 @@ const managerLease = "c4-manager"
 // manager ran everything, and a rolling update (which starts the new pod
 // before it stops the old) ran two queues at once.
 //
-// A manager that stops cleanly gives the lease up as it goes, so the next
-// takes it on its next try (2 s by default) rather than when it expires
-// (15 s). That is safe only because the process ends when the manager
-// does: runManager returns mgr.Start's result.
+// A manager that stops cleanly gives the lease up once everything that
+// needs it has stopped, so the next takes it on its next try (every 2 s,
+// jittered: 4 s in a rolling update on a local farm) rather than when it
+// expires (15 s). That is safe only because the process ends when the
+// manager does: runManager returns mgr.Start's result.
 func electLeader(o ctrl.Options, namespace string) ctrl.Options {
 	o.LeaderElection = true
 	o.LeaderElectionID = managerLease

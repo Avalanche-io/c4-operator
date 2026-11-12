@@ -2083,8 +2083,11 @@ pod with a frozen priority. The cluster never holds 100,000 pending pods.
 Capacity hooks see a clean signal: pending pods mean real shortage, not queue
 depth.
 
-**As built** (`internal/work/queue`). The queue runs under leader election and
-ticks every two seconds: it reads Pools, Projects, WorkJobs and its own unit
+**As built** (`internal/work/queue`). The queue runs under leader election
+(the Lease `c4-manager` in the operator's namespace, given up on a clean
+stop once everything that needs it has stopped, so the next manager leads
+within a few seconds, 4 s measured in a rolling update, rather than the
+lease's 15 s) and ticks every two seconds: it reads Pools, Projects, WorkJobs and its own unit
 pods from the manager's cache, builds a snapshot, calls the policy
 (`sched.Decide`, a pure function), and carries out the decisions: create
 pods for released units, ask units to yield or stop them, write
