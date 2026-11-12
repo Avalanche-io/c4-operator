@@ -79,3 +79,24 @@ func TestC4dPutOfOtherBytesIsNotItsID(t *testing.T) {
 		t.Fatalf("other bytes: %v, want ErrNotItsID", err)
 	}
 }
+
+// A tree shard that already holds an ID hashes what a Put of it is given:
+// other bytes are ErrNotItsID, as on S3, and the object stays.
+func TestTreePutOverItsIDChecksTheBytes(t *testing.T) {
+	ctx := context.Background()
+	right, wrong := []byte("the record"), []byte("not the record")
+	id := c4.Identify(bytes.NewReader(right))
+	s, _ := treeWith(t, c4.Identify(bytes.NewReader([]byte("unrelated"))), []byte("unrelated"))
+	if err := s.Put(ctx, id, bytes.NewReader(right), int64(len(right))); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Put(ctx, id, bytes.NewReader(right), int64(len(right))); err != nil {
+		t.Fatalf("the same bytes again: %v", err)
+	}
+	if err := s.Put(ctx, id, bytes.NewReader(wrong), int64(len(wrong))); !errors.Is(err, ErrNotItsID) {
+		t.Fatalf("other bytes over a held ID: %v, want ErrNotItsID", err)
+	}
+	if b, ok := read(t, s, id); !ok || !bytes.Equal(b, right) {
+		t.Fatalf("the object under its ID is now %q (%v)", b, ok)
+	}
+}

@@ -15,6 +15,7 @@ package storeurl
 import (
 	"bytes"
 	"context"
+	"crypto/sha512"
 	"errors"
 	"fmt"
 	"io"
@@ -499,10 +500,15 @@ func (s *treeShard) Head(_ context.Context, id c4.ID) (int64, error) {
 // is there, and leaves nothing on any error. So bytes that are not id's
 // are never under id (they are under their own, harmless, for GC), and a
 // Put that fails takes nothing away from a concurrent one that did not.
+// When id is already held, what is read is hashed and not written: other
+// bytes are ErrNotItsID here too, as on every shard.
 func (s *treeShard) Put(_ context.Context, id c4.ID, r io.Reader, _ int64) error {
 	if s.ts.Has(id) {
-		_, err := io.Copy(io.Discard, r)
-		return err
+		h := sha512.New()
+		if _, err := io.Copy(h, r); err != nil {
+			return err
+		}
+		return sameID(id, h)
 	}
 	got, err := s.ts.Put(r)
 	if err != nil {

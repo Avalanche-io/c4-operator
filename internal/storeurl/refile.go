@@ -30,7 +30,7 @@ import (
 
 // ErrNotItsID is bytes that are not the C4 ID they were stored or asked
 // under: never kept under it, and never served (view.ReadObject).
-var ErrNotItsID = errors.New("the store served bytes that are not this ID's")
+var ErrNotItsID = errors.New("bytes that are not this ID's")
 
 // Copy stores the object id from another store in this one, hashed as it
 // streams: bytes that are not id's are refused at their end (ErrNotItsID),

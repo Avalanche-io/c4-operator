@@ -177,8 +177,10 @@ Project says not to, and are trusted from the local cache from then on.**
 - **A Put is checked, on every shard.** No store publishes bytes under an
   ID they are not: a caller's ID is checked, never trusted. A tree store's
   Put is its own, which hashes as it writes and publishes under the ID it
-  computed. An S3 Put hashes what it sends: a single PUT (an object up to
-  one part, 8 MiB or more) is sent only once its bytes hash to the ID, and
+  computed, and a Put of an ID it already holds hashes what it is given.
+  An S3 Put hashes what it sends: a single PUT (an object shorter than one
+  part, which is 8 MiB or more) is sent only once its bytes hash to the
+  ID, and
   a multipart upload, whose parts are invisible until it completes, is
   completed only then and otherwise aborted; an object already under the
   ID is never replaced by other bytes. A c4d computes the ID itself. Each
