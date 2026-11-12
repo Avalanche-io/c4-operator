@@ -786,14 +786,11 @@ func TestARestartWhileAnOldIndexWaits(t *testing.T) {
 
 			// The status's index as the manager before the upgrade stored it.
 			ixID, _ := c4.Parse(got.Status.Output.Provenance)
-			data, err := c4view.ReadObject(st, ixID)
+			head, err := ReadIndex(st, ixID) // the whole index, its segments folded
 			if err != nil {
 				t.Fatal(err)
 			}
-			var cur Index
-			if err := json.Unmarshal(data, &cur); err != nil {
-				t.Fatal(err)
-			}
+			cur := *head
 			old := oldIndex{Job: cur.Job, Output: cur.Output, Records: cur.Records, Units: cur.Units}
 			for _, f := range cur.Folds {
 				old.Folds = append(old.Folds, oldFold{Unit: f.Unit, Changeset: f.Changeset, Record: f.Record})
@@ -853,11 +850,80 @@ func TestARestartWhileAnOldIndexWaits(t *testing.T) {
 				t.Fatalf("the status still says it waits: %+v", end.Status.Conditions)
 			}
 			id, _ := c4.Parse(end.Status.Output.Provenance)
-			data, err = c4view.ReadObject(st, id)
-			var ix Index
-			if err != nil || json.Unmarshal(data, &ix) != nil || ix.Version != indexVersion || len(ix.Folds) != 2 || ix.Folds[0].Run != string(p1.UID) {
-				t.Fatalf("the index the status names at the end: %v, %s", err, data)
+			ix, err := ReadIndex(st, id)
+			if err != nil || ix.Version != indexVersion || len(ix.Folds) != 2 || ix.Folds[0].Run != string(p1.UID) {
+				t.Fatalf("the index the status names at the end: %v, %+v", err, ix)
 			}
 		})
+	}
+}
+
+// A job's provenance index is stored as segments, each holding what one
+// save changed and naming the one before, with the whole index again every
+// indexCheckpointEvery segments: read from its head it is the whole index,
+// every fold and every path's record, and a reader follows at most
+// indexCheckpointEvery segments. Before, every fold stored the whole index
+// again (a job folded n times stored about n²/2 folds' worth).
+func TestTheIndexIsStoredInSegments(t *testing.T) {
+	ns, q, now, st := graphFarm(t)
+	ctx := context.Background()
+	if err := k8s.Create(ctx, job(ns, "segs", "graph", "cpu-"+ns, nil, now.Add(8*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	const n = indexCheckpointEvery + 6
+	var units []string
+	for i := 1; i <= n; i++ {
+		units = append(units, fmt.Sprintf(`{"name": "u%d"}`, i))
+	}
+	doc := putDoc(t, st, `{"version": 1, "units": [`+strings.Join(units, ", ")+`]}`)
+	finishUnit(t, now, ns, "segs", 0, map[string]string{c4v1.AnnotationOutputExpand: doc})
+	tick(t, q)
+	for i := 1; i <= n; i++ {
+		for try := 0; ; try++ {
+			running := false
+			for _, p := range unitPods(t, ns, "segs") {
+				running = running || (unitOf(p) == i && (p.Status.Phase == "" || p.Status.Phase == corev1.PodPending))
+			}
+			if running {
+				break
+			}
+			if try > 200 {
+				t.Fatalf("unit %d never launched", i)
+			}
+			tick(t, q)
+		}
+		finishUnit(t, now, ns, "segs", i, map[string]string{c4v1.AnnotationOutputChangeset: writeChangeset(t, st, fmt.Sprintf("out/f%03d.txt", i), fmt.Sprintf("unit %d\n", i))})
+		tick(t, q)
+	}
+	tick(t, q)
+	o := get(t, ns, "segs").Status.Output
+	head, err := c4.Parse(o.Provenance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ix, segs, err := readIndex(st, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ix.Folds) != n || ix.Output != o.View || ix.Prev != "" {
+		t.Fatalf("read from its head: %d folds, output %s (the job's %s)", len(ix.Folds), ix.Output, o.View)
+	}
+	for i := 1; i <= n; i++ {
+		if ix.Folds[i-1].Unit != i {
+			t.Fatalf("fold %d is unit %d's", i-1, ix.Folds[i-1].Unit)
+		}
+	}
+	if segs < 1 || segs > indexCheckpointEvery {
+		t.Fatalf("%d segments after the whole index; a checkpoint comes every %d", segs, indexCheckpointEvery)
+	}
+	// The head itself holds one fold, not all of them.
+	data, err := c4view.ReadObject(st, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var one Index
+	if err := json.Unmarshal(data, &one); err != nil || one.Prev == "" || len(one.Folds) != 1 {
+		t.Fatalf("the head segment: prev %q, %d folds, %v", one.Prev, len(one.Folds), err)
 	}
 }

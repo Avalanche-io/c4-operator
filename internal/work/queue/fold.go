@@ -49,6 +49,15 @@ type output struct {
 	units   map[int]string // unit -> its latest task record
 	index   c4.ID
 	dirty   bool
+	// What changed since index was stored, for the next segment: records
+	// and units set, folds appended (the last newFolds), and whether an
+	// earlier fold was changed in place (rewrite: the next is a checkpoint).
+	// segs counts the segments since the last checkpoint.
+	newRecords map[string]string
+	newUnits   map[int]string
+	newFolds   int
+	rewrite    bool
+	segs       int
 	// folds is every fold in order, kept in the index, so the output can
 	// be rebuilt without some units' changesets (refoldOutput).
 	folds []Fold
@@ -84,16 +93,85 @@ func newOutput() *output {
 // indexVersion is the version of an index whose folds name their runs.
 const indexVersion = 2
 
-// Index is a job's provenance index as stored.
+// Index is a job's provenance index as stored: one object, or (since
+// 2026-11-12) a segment that names the one before it (Prev) and holds only
+// what changed since: the records and units set, the folds appended, and
+// the output after them. A segment with no Prev is the whole index, a
+// checkpoint, written every indexCheckpointEvery segments and whenever an
+// earlier fold changes. ReadIndex folds a head's segments into one Index.
+// Before, every change stored the whole index again, so a job folded n
+// times stored n indexes of up to n folds each: quadratic.
 type Index struct {
 	// Version is indexVersion, or absent in an index written before folds
 	// named their runs (loadIndex gives those their runs).
 	Version int               `json:"version,omitempty"`
 	Job     string            `json:"job"`
 	Output  string            `json:"output"`
-	Records map[string]string `json:"records"` // path -> task record ID
-	Units   map[int]string    `json:"units"`   // unit -> its latest task record ID
+	Prev    string            `json:"prev,omitempty"` // the segment before; empty in a whole index
+	Records map[string]string `json:"records"`        // path -> task record ID
+	Units   map[int]string    `json:"units"`          // unit -> its latest task record ID
 	Folds   []Fold            `json:"folds,omitempty"`
+}
+
+// indexCheckpointEvery is how many segments follow a whole index before
+// the next: a reader reads at most this many and one more, and a job
+// folded n times stores n/64 whole indexes, not n.
+const indexCheckpointEvery = 64
+
+// maxIndexSegments bounds how many segments ReadIndex follows.
+const maxIndexSegments = 4 * indexCheckpointEvery
+
+// ReadIndex reads the provenance index whose head is id: a whole index,
+// or a segment, folded with the ones it names back to a whole index.
+func ReadIndex(st c4view.Store, id c4.ID) (*Index, error) {
+	ix, _, err := readIndex(st, id)
+	return ix, err
+}
+
+// readIndex is ReadIndex, saying also how many segments came after the
+// whole index.
+func readIndex(st c4view.Store, id c4.ID) (*Index, int, error) {
+	var segs []Index
+	for cur := id; ; {
+		if len(segs) > maxIndexSegments {
+			return nil, 0, fmt.Errorf("provenance index %s: more than %d segments", id, maxIndexSegments)
+		}
+		data, err := c4view.ReadObject(st, cur)
+		if err != nil {
+			return nil, 0, err
+		}
+		var ix Index
+		if err := json.Unmarshal(data, &ix); err != nil {
+			return nil, 0, fmt.Errorf("provenance index segment %s: %w", cur, err)
+		}
+		segs = append(segs, ix)
+		if ix.Prev == "" {
+			break
+		}
+		if cur, err = c4.Parse(ix.Prev); err != nil {
+			return nil, 0, fmt.Errorf("provenance index segment %s: prev: %w", cur, err)
+		}
+	}
+	out := segs[len(segs)-1]
+	if out.Records == nil {
+		out.Records = map[string]string{}
+	}
+	if out.Units == nil {
+		out.Units = map[int]string{}
+	}
+	for i := len(segs) - 2; i >= 0; i-- {
+		d := segs[i]
+		for k, v := range d.Records {
+			out.Records[k] = v
+		}
+		for k, v := range d.Units {
+			out.Units[k] = v
+		}
+		out.Folds = append(out.Folds, d.Folds...)
+		out.Output, out.Version = d.Output, d.Version
+	}
+	out.Prev = ""
+	return &out, len(segs) - 1, nil
 }
 
 // saveIndex stores the provenance index when it changed.
@@ -101,7 +179,15 @@ func (o *output) saveIndex(ctx context.Context, st *storeurl.Sharded, job string
 	if !o.dirty {
 		return nil
 	}
-	b, err := json.Marshal(Index{Version: indexVersion, Job: job, Output: o.view.String(), Records: o.records, Units: o.units, Folds: o.folds})
+	ix := Index{Version: indexVersion, Job: job, Output: o.view.String()}
+	full := o.index.IsNil() || o.rewrite || o.segs >= indexCheckpointEvery || o.newFolds > len(o.folds)
+	if full {
+		ix.Records, ix.Units, ix.Folds = o.records, o.units, o.folds
+	} else {
+		ix.Prev = o.index.String()
+		ix.Records, ix.Units, ix.Folds = o.newRecords, o.newUnits, o.folds[len(o.folds)-o.newFolds:]
+	}
+	b, err := json.Marshal(ix)
 	if err != nil {
 		return err
 	}
@@ -110,6 +196,12 @@ func (o *output) saveIndex(ctx context.Context, st *storeurl.Sharded, job string
 		return err
 	}
 	o.index, o.dirty = id, false
+	o.newRecords, o.newUnits, o.newFolds, o.rewrite = nil, nil, 0, false
+	if full {
+		o.segs = 0
+	} else {
+		o.segs++
+	}
 	return nil
 }
 
@@ -147,14 +239,11 @@ func (o *output) loadIndex(ctx context.Context, st *storeurl.Sharded, id, job st
 	if err != nil {
 		return nil, err
 	}
-	data, err := c4view.ReadObject(st, pid)
+	head, segs, err := readIndex(st, pid)
 	if err != nil {
 		return nil, err
 	}
-	var ix Index
-	if err := json.Unmarshal(data, &ix); err != nil {
-		return nil, err
-	}
+	ix := *head
 	// Every fold with no run is settled, whatever the others have: an old
 	// index a run-naming manager later added to has both kinds.
 	if ix.Version < indexVersion {
@@ -196,9 +285,9 @@ func (o *output) loadIndex(ctx context.Context, st *storeurl.Sharded, id, job st
 		o.units = ix.Units
 	}
 	o.folds = ix.Folds
-	o.index = pid
+	o.index, o.segs = pid, segs
 	if ix.Version < indexVersion && len(ix.Folds) > 0 {
-		o.dirty = true
+		o.dirty, o.rewrite = true, true // its folds were given their runs: stored whole
 		if err := o.saveIndex(ctx, st, job); err != nil {
 			*o = was
 			return nil, fmt.Errorf("%w: saving it: %v", errIndexNotConverted, err)
@@ -447,10 +536,18 @@ func (q *Queue) fold(ctx context.Context, st *storeurl.Sharded, o *output, f Fol
 		o.fresh = append(o.fresh, freshPath{unit: idx, path: p})
 		if f.Record != "" {
 			o.records[p] = f.Record
+			if o.newRecords == nil {
+				o.newRecords = map[string]string{}
+			}
+			o.newRecords[p] = f.Record
 		}
 	}
 	if f.Record != "" {
 		o.units[idx] = f.Record
+		if o.newUnits == nil {
+			o.newUnits = map[int]string{}
+		}
+		o.newUnits[idx] = f.Record
 	}
 	if f.Run != "" {
 		// A pod whose unit and changeset match a fold from before runs
@@ -462,6 +559,7 @@ func (q *Queue) fold(ctx context.Context, st *storeurl.Sharded, o *output, f Fol
 		for i := range o.folds {
 			if d := &o.folds[i]; d.BeforeRuns && d.Unit == idx && d.Changeset == f.Changeset {
 				d.BeforeRuns = false
+				o.rewrite = true // an earlier fold changed: the next is whole
 				conflicts = append(conflicts, fmt.Sprintf("a run of unit %d may have been folded twice after an upgrade: a fold of it from before names no run and has no task record that can be believed, so this pod may be that same run or a later one; if it is the same, and another unit wrote the same paths in between, this unit's older write now stands", idx))
 			}
 		}
@@ -470,6 +568,7 @@ func (q *Queue) fold(ctx context.Context, st *storeurl.Sharded, o *output, f Fol
 	o.folded[idx]++
 	o.count++
 	o.folds = append(o.folds, f)
+	o.newFolds++
 	o.dirty = true
 	return nil
 }

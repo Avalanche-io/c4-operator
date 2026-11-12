@@ -2340,6 +2340,14 @@ the index cannot be saved, the job's status stays as last written, with the
 condition `OutputRecorded` false and the reason `IndexNotSaved`. That is tried again every
 tick for as long as the store refuses, and no finished pod is deleted
 meanwhile.
+The index is stored in segments: each save stores what it changed (the
+records and units set, the folds appended, the output after them) and names
+the segment before, and every 64 segments, or when an earlier fold changes,
+the whole index is stored again, which names nothing before it. Read from
+its head (the status names the head) it is the whole index, in at most 65
+reads. Until 2026-11-12 every save stored the whole index again, so a job
+folded n times stored about n²/2 folds' worth of index: 3.3 MB at 200 folds,
+151 KB now, measured on the queue's test harness.
 
 A downstream job's `fromJob` input mounts that view. The dependency graph (sim to render to comp to transcode to
 delivery) is therefore also a data-flow graph of content-addressed trees, and

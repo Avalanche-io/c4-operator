@@ -174,12 +174,7 @@ func (s *Server) index(ctx context.Context, rec *jobRec) (*queue.Index, error) {
 	if err != nil {
 		return nil, err
 	}
-	data, err := c4view.ReadObject(st, id)
-	if err != nil {
-		return nil, err
-	}
-	var ix queue.Index
-	return &ix, json.Unmarshal(data, &ix)
+	return queue.ReadIndex(st, id)
 }
 
 // handleTrace is GET /trace/{ns}/{name}?path=P or ?unit=N: the signed task
