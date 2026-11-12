@@ -19,6 +19,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/Avalanche-io/c4"
@@ -775,16 +776,15 @@ func (s *Server) spreadTool(ctx context.Context, m *model, ver c4v1.ToolVersion)
 			}
 		}
 		if p.Spec.Scope == c4v1.ScopeGrants && !granted(p.Spec.Grants, ver.View) {
-			var cur c4v1.Project
-			if err := s.Client.Get(ctx, types.NamespacedName{Name: p.Name}, &cur); err != nil {
-				return fmt.Errorf("project %s: %v", p.Name, err)
-			}
-			if !granted(cur.Spec.Grants, ver.View) {
-				patch := client.MergeFrom(cur.DeepCopy())
-				cur.Spec.Grants = append(cur.Spec.Grants, c4v1.Grant{Tree: ver.View})
-				if err := s.Client.Patch(ctx, &cur, patch); err != nil {
-					return fmt.Errorf("project %s: granting the tool: %v", p.Name, err)
+			err := s.editGrants(ctx, p.Name, func(cur *c4v1.Project) bool {
+				if granted(cur.Spec.Grants, ver.View) {
+					return false
 				}
+				cur.Spec.Grants = append(cur.Spec.Grants, c4v1.Grant{Tree: ver.View})
+				return true
+			})
+			if err != nil {
+				return fmt.Errorf("project %s: granting the tool: %v", p.Name, err)
 			}
 		}
 		s.markSpread(p.Name, ver.View)
@@ -869,21 +869,44 @@ func (s *Server) reconcileFarmTools(ctx context.Context, m *model) {
 		if !slices.ContainsFunc(p.Spec.Grants, drop) {
 			continue
 		}
-		var cur c4v1.Project
-		if err := s.Client.Get(ctx, types.NamespacedName{Name: p.Name}, &cur); err != nil {
+		var dropped []string
+		err := s.editGrants(ctx, p.Name, func(cur *c4v1.Project) bool {
+			dropped = dropped[:0]
+			for _, g := range cur.Spec.Grants {
+				if drop(g) {
+					dropped = append(dropped, g.Tree)
+				}
+			}
+			cur.Spec.Grants = slices.DeleteFunc(cur.Spec.Grants, drop)
+			return len(dropped) > 0
+		})
+		if err != nil {
+			s.Log.V(1).Info("farm tool grants", "project", p.Name, "error", err.Error())
 			continue
 		}
-		patch := client.MergeFrom(cur.DeepCopy())
-		for _, g := range cur.Spec.Grants {
-			if drop(g) {
-				s.unmarkSpread(p.Name, g.Tree)
-			}
-		}
-		cur.Spec.Grants = slices.DeleteFunc(cur.Spec.Grants, drop)
-		if err := s.Client.Patch(ctx, &cur, patch); err != nil {
-			s.Log.V(1).Info("farm tool grants", "project", p.Name, "error", err.Error())
+		for _, tree := range dropped {
+			s.unmarkSpread(p.Name, tree)
 		}
 	}
+}
+
+// editGrants changes a project's grants as edit says, on the project read
+// from the API server and written with its resourceVersion: a grant
+// someone changed meanwhile (a person, another manager's HUD) is never
+// written over, since the list is replaced whole. On a conflict it reads
+// again and edits that. edit reports whether it changed anything.
+func (s *Server) editGrants(ctx context.Context, name string, edit func(*c4v1.Project) bool) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var cur c4v1.Project
+		if err := s.reader().Get(ctx, types.NamespacedName{Name: name}, &cur); err != nil {
+			return err
+		}
+		patch := client.MergeFromWithOptions(cur.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		if !edit(&cur) {
+			return nil
+		}
+		return s.Client.Patch(ctx, &cur, patch)
+	})
 }
 
 // projectTools are the Tools a project may use: its namespace's (scope
