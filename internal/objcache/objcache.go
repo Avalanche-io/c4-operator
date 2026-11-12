@@ -649,6 +649,47 @@ func (s *Set) Evict() EvictStats {
 	return st
 }
 
+// Refused takes out the copy of id that a store refused as bytes that are
+// not id's. Committing an ID already cached keeps what is there, so
+// without this every later send of id would send those bytes again. The
+// plain object goes only if it is still seen, the file that was sent: a
+// copy committed since is another file and stays. The executable variant
+// is copied from the plain object without being hashed, so it is hashed
+// here and goes only if it is not id's either. Refused reports whether it
+// took the plain object out.
+func (c *Cache) Refused(id c4.ID, seen os.FileInfo) (bool, error) {
+	removed := false
+	fi, err := os.Lstat(c.Path(id))
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+	case err != nil:
+		return false, err
+	case seen == nil || os.SameFile(fi, seen):
+		if err := c.Remove(id); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return false, err
+		}
+		removed = true
+	}
+	xp := c.ExecPathOf(id)
+	xfi, err := os.Lstat(xp)
+	if err != nil {
+		return removed, nil
+	}
+	f, err := os.Open(xp)
+	if err != nil {
+		return removed, nil
+	}
+	got := c4.Identify(f)
+	f.Close()
+	if got == id {
+		return removed, nil
+	}
+	if now, err := os.Lstat(xp); err == nil && os.SameFile(now, xfi) && os.Remove(xp) == nil {
+		c.set.add(-xfi.Size())
+	}
+	return removed, nil
+}
+
 // Remove deletes one object (tests, scrub).
 func (c *Cache) Remove(id c4.ID) error {
 	fi, err := os.Lstat(c.Path(id))

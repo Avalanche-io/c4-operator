@@ -397,13 +397,14 @@ func upload(ctx context.Context, in Input, changed map[c4.ID]bool, paths map[c4.
 					err = in.Cache.Commit(paths[id], id)
 				}
 				if err == nil {
+					sent, _ := os.Lstat(in.Cache.Path(id))
 					err = in.Sink.PutFile(ctx, in.Project, id, in.Cache.Path(id))
-					if errors.Is(err, storeurl.ErrNotItsID) {
+					if errors.Is(err, storeurl.ErrNotItsID) && sent != nil {
 						// The cached copy is not id's: Commit kept it over
 						// this capture's own. Evict it, so the next
 						// capture's copy is the one cached and sent.
-						if rerr := in.Cache.Remove(id); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
-							err = errors.Join(err, rerr)
+						if _, rerr := in.Cache.Refused(id, sent); rerr != nil {
+							err = errors.Join(err, fmt.Errorf("evicting the cached copy: %w", rerr))
 						}
 					}
 				}

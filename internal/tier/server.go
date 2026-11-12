@@ -388,10 +388,14 @@ func (s *Server) writeThrough(ctx context.Context, st *storeurl.Sharded, cache *
 			// try would upload these bytes again: evict them, and that
 			// try commits what it sends, hashed on the way in.
 			f.Close()
-			if rerr := cache.Remove(id); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
-				err = errors.Join(err, rerr)
+			removed, rerr := cache.Refused(id, info)
+			switch {
+			case rerr != nil:
+				err = errors.Join(err, fmt.Errorf("evicting the cached copy: %w", rerr))
+			case removed:
+				err = fmt.Errorf("the cached copy of %s is not its bytes, evicted: %w", id, err)
 			}
-			return "", fmt.Errorf("the cached copy of %s is not its bytes, evicted: %w", id, err)
+			return "", err
 		}
 		return "", err
 	}

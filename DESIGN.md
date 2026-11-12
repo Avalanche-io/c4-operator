@@ -201,6 +201,9 @@ Project says not to, and are trusted from the local cache from then on.**
   that does not hash to its claimed ID) evicts the cached copy: the tier's
   client heals it on its next try, which is cached and stored as sent, and
   a capture fails once and the next one caches and sends its own copy.
+  Only the file that was sent goes (a copy committed since stays), and the
+  executable variant, made from the plain copy without a hash, goes only
+  if it is not the ID's either. Any other failure keeps the cached copy.
 - **A fill is checked.** A node cache filling from a peer or the regional
   tier, and the regional tier filling from the store, hash what arrives and
   refuse bytes that are not the ID asked for. `spec.store.verifyFill`

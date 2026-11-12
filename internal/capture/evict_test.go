@@ -67,3 +67,20 @@ func TestAWrongCachedCopyIsEvictedOnRefusal(t *testing.T) {
 		t.Fatalf("stored: %q", got)
 	}
 }
+
+// Any other failure to store keeps the cached copy: only bytes a store
+// refused as not the ID's are taken out.
+func TestOtherStoreFailuresKeepTheCachedCopy(t *testing.T) {
+	f := newLiveFixture(t)
+	upper := filepath.Join(f.root, "upper")
+	writeUpper(t, upper, "#!/bin/sh\necho one\n")
+	id := c4.Identify(strings.NewReader("notes\n"))
+	in := f.input(upper, false)
+	f.sink.down.Store(true)
+	if _, err := Run(context.Background(), in); err == nil {
+		t.Fatal("a capture to a store that is down succeeded")
+	}
+	if !f.cache.Has(id) {
+		t.Fatal("a store that was down took a cached copy out")
+	}
+}

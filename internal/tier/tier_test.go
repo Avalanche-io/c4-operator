@@ -671,3 +671,33 @@ func readShard(t *testing.T, s *storeurl.Sharded, id c4.ID) ([]byte, bool) {
 	b, err := io.ReadAll(rc)
 	return b, err == nil
 }
+
+// A write-through that fails for any other reason keeps the cached copy.
+func TestWriteThroughFailureKeepsTheCachedCopy(t *testing.T) {
+	h := newHarness(t, fill.Limits{}, nil)
+	// A store that says it lacks the object, then fails to write it for a
+	// reason that is not the bytes: its root is read-only.
+	root := t.TempDir()
+	down, err := storeurl.OpenSharded([]storeurl.Spec{{Name: "s0", URL: root}}, storeurl.Credentials{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(root, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(root, 0o755) })
+	h.srv.Store = func(string) (*storeurl.Sharded, error) { return down, nil }
+	data := []byte("frame 1001")
+	id := c4.Identify(bytes.NewReader(data))
+	src := &HTTPSource{SourceName: "regional-0", SourceKind: "regional", Base: h.http.URL, Client: http.DefaultClient}
+	up := &Uploader{Candidates: func(string, c4.ID) []*HTTPSource { return []*HTTPSource{src} }, Breakers: NewBreakers(), Rounds: 1}
+	if err := up.PutBytes(context.Background(), "show", id, data); err == nil {
+		t.Fatal("an upload to a store that cannot write succeeded")
+	} else if errors.Is(err, storeurl.ErrNotItsID) {
+		t.Fatalf("an upload to a store that cannot write: %v", err)
+	}
+	cache, _ := h.caches.Partition("p-show")
+	if b, _ := cache.ReadAll(id); !bytes.Equal(b, data) {
+		t.Fatalf("a store that could not write took the cached copy out: %q", b)
+	}
+}
