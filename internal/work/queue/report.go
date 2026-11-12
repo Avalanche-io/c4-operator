@@ -187,6 +187,11 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	}
 	if m.planErr != nil || m.plan == nil {
 		st.Phase = "Failed"
+		// What the job has spent stays recorded, with the pods it counted:
+		// a refused plan, or a restart while it is refused, loses none of
+		// it, and an edit the planner takes again starts from it.
+		old := v.job.Status
+		st.Spend, st.ModelUsage, st.ModelUsageOlder, st.CountedPods = old.Spend, old.ModelUsage, old.ModelUsageOlder, old.CountedPods
 		msg := "no plan"
 		if m.planErr != nil {
 			msg = m.planErr.Error()

@@ -2811,7 +2811,11 @@ and a sweep planner that spawns trials are all generators.
     across a restart too: `status.countedPods` names the pods counted
     that are still there (finished, not yet deleted), and a queue that
     starts again does not count those again. Until 2026-11-12 it did: a
-    restart while a finished pod was still listed charged it twice.
+    restart while a finished pod was still listed charged it twice. The
+    list holds only the pods finished and not yet deleted, about as many
+    as the farm runs at once plus any the queue still waits on. A job whose
+    plan is refused (an edit the planner cannot take) keeps its spend in
+    status as it fails; until then its status was written without it.
   - **Reuse** is C4-native memoization, which Argo's string-keyed one
     cannot be.
     - **What is reused.** A procedural unit ready to run reuses an earlier
