@@ -21,10 +21,17 @@ func TestS3PutPublishesOnlyItsBytes(t *testing.T) {
 	minPartSize = 5
 	ctx := context.Background()
 	for _, n := range []int{4, 23} { // one PUT; five parts
-		for _, size := range []int64{int64(n), -1} {
+		for _, c := range []struct {
+			size int64
+			last bool // only the last byte differs
+		}{{int64(n), false}, {-1, false}, {int64(n), true}, {-1, true}} {
+			size, last := c.size, c.last
 			bucket, sh := testBucket(t)
 			right := bytes.Repeat([]byte("abcdefg"), 4)[:n]
 			wrong := bytes.Repeat([]byte("gfedcba"), 4)[:n]
+			if last {
+				wrong = append(bytes.Clone(right[:n-1]), right[n-1]^1)
+			}
 			id := c4.Identify(bytes.NewReader(right))
 			key := "p/" + id.String()
 
