@@ -140,6 +140,7 @@ func runManager(args []string) error {
 
 	ctrl.SetLogger(zap.New())
 	log := ctrl.Log.WithName("manager")
+	watchMismatches(log)
 	scheme := newScheme()
 	cfg := ctrl.GetConfigOrDie()
 

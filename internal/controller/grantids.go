@@ -18,7 +18,7 @@ import (
 // it, so what a grant is matched against is what is mounted, never a
 // separate reading of the patch. A RootID, the description's root lines as
 // stated, is not one: a hand-made c4m can state any. Every read is hashed
-// (view.Checked), and the result is remembered by project and source byte
+// (view.ReadObject), and the result is remembered by project and source byte
 // ID, since a source never changes: a hit reads nothing, so it is never
 // carried from one project's store to another's.
 func (r *MaterializationReconciler) grantIDs(ctx context.Context, project string, store view.Store, data []byte, sourceID c4.ID) ([]c4.ID, error) {
@@ -30,12 +30,11 @@ func (r *MaterializationReconciler) grantIDs(ctx context.Context, project string
 	if err != nil {
 		return nil, err
 	}
-	checked := view.Checked(store)
 	var res *view.Resolved
 	if data != nil {
-		res, err = view.FromBytes(data, checked, all)
+		res, err = view.FromBytes(data, store, all)
 	} else {
-		res, err = view.FromID(sourceID, checked, all)
+		res, err = view.FromID(sourceID, store, all)
 	}
 	if err != nil {
 		return nil, err

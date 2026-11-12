@@ -248,9 +248,11 @@ func TestAnIndexFromBeforeRunsTakesThemFromItsRecords(t *testing.T) {
 // says whether a listed pod of that unit and changeset is its run or a
 // later one. It is folded, and reported, once. The cases: no record at all
 // (the node had no signer, or the signing failed); a record the store does
-// not hold; an object under the record's ID that is not that object; a
-// record signed by nobody the farm knows, or by a component of the farm
-// that does not sign task records; a record of another changeset.
+// not hold, and an object under the record's ID that is not that object,
+// which is no record either (not present: the read is counted and logged,
+// and nothing about it is said in the job); a record signed by nobody the
+// farm knows, or by a component of the farm that does not sign task
+// records; a record of another changeset.
 func TestAnOldFoldWithNoRecordToSayIsFoldedAndReported(t *testing.T) {
 	ctx := context.Background()
 	rs := newRecordSigner(t)
@@ -268,7 +270,7 @@ func TestAnOldFoldWithNoRecordToSayIsFoldedAndReported(t *testing.T) {
 			id := rs.record(t, st, "pod-a", cs)
 			overwriteObject(t, dir, id, []byte("not the record"))
 			return id
-		}, "a wrong object under its task record"},
+		}, ""},
 		{"a record no key of the farm signed", func(t *testing.T, st *storeurl.Sharded, _, cs string) string {
 			return other.record(t, st, "pod-a", cs)
 		}, "does not verify"},
@@ -280,6 +282,16 @@ func TestAnOldFoldWithNoRecordToSayIsFoldedAndReported(t *testing.T) {
 		}, "is of another changeset"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
+			var told []string
+			was := c4view.OnMismatch
+			t.Cleanup(func() { c4view.OnMismatch = was })
+			c4view.OnMismatch = func(_ string, asked, _ c4.ID) { told = append(told, asked.String()) }
+			defer func() {
+				wrong := c.name == "a wrong object under the record's ID"
+				if wrong != (len(told) > 0) {
+					t.Errorf("reads told as wrong objects: %v (want some: %v)", told, wrong)
+				}
+			}()
 			st, dir := foldStore(t)
 			q := &Queue{}
 			o, a, _ := history(t, st, q,

@@ -47,6 +47,7 @@ func runRegional(args []string) error {
 
 	ctrl.SetLogger(zap.New())
 	log := ctrl.Log.WithName("regional")
+	watchMismatches(log)
 	rate, err := resource.ParseQuantity(*maxRate)
 	if err != nil {
 		return fmt.Errorf("--max-rate: %w", err)

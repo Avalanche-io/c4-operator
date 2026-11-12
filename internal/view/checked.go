@@ -1,32 +1,55 @@
 package view
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
+	"io/fs"
+	"log"
 
 	"github.com/Avalanche-io/c4"
+
+	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 )
 
-// ErrNotItsID is what Checked reports for an object whose bytes are not the
-// C4 ID it was asked for: a store that serves them has lost or swapped it.
+// ErrNotItsID is a read whose bytes are not the C4 ID asked for: a store
+// that serves them has lost or swapped the object. Such an object is not
+// present (Joshua, 2026-11-11): a ReadObject that finds one returns an error
+// that is also ErrIncomplete, storeurl.ErrNotFound and fs.ErrNotExist, so
+// every caller degrades as it does for a missing object, and the wrong
+// bytes are never passed on. An ID is checked, never trusted, and a store's
+// own reads do not rehash.
 var ErrNotItsID = errors.New("the store served bytes that are not this ID's")
 
-// Checked is st with every object it serves hashed first. One whose bytes
-// are not its ID's is refused (ErrNotItsID), never passed on: an ID is
-// checked, not trusted, and a store's own reads do not rehash.
-func Checked(st Store) Store { return checkedStore{st} }
+// notItsID is the error ReadObject returns for a mismatch.
+type notItsID struct{ asked, got c4.ID }
 
-type checkedStore struct{ st Store }
+func (e *notItsID) Error() string {
+	return fmt.Sprintf("%s: %v (they are %s)", e.asked, ErrNotItsID, e.got)
+}
 
-func (c checkedStore) Open(id c4.ID) (io.ReadCloser, error) {
-	data, err := ReadObject(c.st, id)
-	if err != nil {
-		return nil, err
+func (e *notItsID) Is(target error) bool {
+	switch target {
+	case ErrNotItsID, ErrIncomplete, storeurl.ErrNotFound, fs.ErrNotExist:
+		return true
 	}
-	if got := c4.Identify(bytes.NewReader(data)); got != id {
-		return nil, fmt.Errorf("%s: %w (they are %s)", id, ErrNotItsID, got)
+	return false
+}
+
+// OnMismatch is told of every read whose bytes were not the ID asked for:
+// the ID asked for, the one the bytes are, and the store. It logs by
+// default; the operator's main counts it too. It must not block.
+var OnMismatch = func(store string, asked, got c4.ID) {
+	log.Printf("c4: store %s served bytes that are not %s; they are %s", store, asked, got)
+}
+
+// storeName names the store id was read from, for OnMismatch: the shard
+// that holds it, on a sharded store.
+func storeName(st Store, id c4.ID) string {
+	switch s := st.(type) {
+	case *storeurl.Sharded:
+		return s.NameFor(id)
+	case interface{ Name() string }:
+		return s.Name()
 	}
-	return io.NopCloser(bytes.NewReader(data)), nil
+	return fmt.Sprintf("%T", st)
 }

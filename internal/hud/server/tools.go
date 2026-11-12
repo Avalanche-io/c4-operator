@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"path"
 	"slices"
@@ -125,23 +124,19 @@ func (s *Server) rootWarning(ctx context.Context, image string) string {
 	return fmt.Sprintf("%s runs as root, and the farm runs units as user 65532 (Pod Security restricted), so its first write may fail with permission denied: build it FROM c4/runtime-base, or add USER 65532 to its Dockerfile", image)
 }
 
-// readFile is a file of a view, from a store.
+// readFile is a file of a view, from a store, checked as it is read: a
+// tool's tool.yaml and tool.lock are its egress and its image pins.
 func readFile(ctx context.Context, st *storeurl.Sharded, v *c4view.View, p string, limit int64) ([]byte, bool, error) {
 	for _, f := range v.Files {
 		if f.Path != p {
 			continue
 		}
-		r, err := st.Open(f.ID)
-		if err != nil {
-			return nil, true, err
-		}
-		defer r.Close()
-		b, err := io.ReadAll(io.LimitReader(r, limit+1))
-		if err != nil {
-			return nil, true, err
-		}
-		if int64(len(b)) > limit {
+		if f.Size > limit {
 			return nil, true, fmt.Errorf("%s is over %d bytes", p, limit)
+		}
+		b, err := c4view.ReadObject(st, f.ID)
+		if err != nil {
+			return nil, true, err
 		}
 		return b, true, nil
 	}

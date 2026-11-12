@@ -65,6 +65,11 @@ var (
 	TierIngest        = counter("c4_tier_ingest_total", "Objects written through PUT, by result (stored, present, mismatch, error).", "tier", "project", "result")
 	TierIngestBytes   = counter("c4_tier_ingest_bytes_total", "Bytes received through PUT.", "tier", "project")
 	TierAuth          = counter("c4_tier_auth_total", "Tier authentication decisions, by result (ok, cached, denied, invalid).", "tier", "result")
+
+	// StoreMismatch counts the reads (view.ReadObject) whose bytes were not
+	// the C4 ID asked for: not present to their reader. The IDs are in the
+	// log line, never a label.
+	StoreMismatch = counter("c4_store_mismatch_total", "Reads whose bytes were not the C4 ID asked for, by the shard that served them.", "shard")
 )
 
 // Node daemon.

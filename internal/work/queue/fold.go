@@ -1,7 +1,6 @@
 package queue
 
 import (
-	"bytes"
 	"context"
 	"crypto/x509"
 	"encoding/base64"
@@ -258,9 +257,6 @@ func runOfRecord(st *storeurl.Sharded, roots *x509.CertPool, job string, f *Fold
 		return recordRun{}, err
 	}
 	short := shortRecord(f.Record)
-	if got := c4.Identify(bytes.NewReader(data)); got != id {
-		return wrong("the store holds a wrong object under its task record %s", short)
-	}
 	var pred json.RawMessage
 	if roots != nil {
 		vr, err := provenance.VerifyBundle(data, roots)

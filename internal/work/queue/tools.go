@@ -3,7 +3,6 @@ package queue
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 	"slices"
 	"sort"
@@ -397,12 +396,11 @@ func (q *Queue) declaredNetworks(ctx context.Context, project, view string) ([]s
 		if f.Path != "tool.yaml" {
 			continue
 		}
-		r, err := st.Open(f.ID)
-		if err != nil {
-			return nil, err
+		// checked as read: what it declares becomes the tool's egress
+		if f.Size > 1<<20 {
+			return nil, fmt.Errorf("the tool's tool.yaml is over 1 MiB")
 		}
-		b, err := io.ReadAll(io.LimitReader(r, 1<<20))
-		r.Close()
+		b, err := c4view.ReadObject(st, f.ID)
 		if err != nil {
 			return nil, err
 		}

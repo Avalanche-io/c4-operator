@@ -54,6 +54,7 @@ func runNode(args []string) error {
 
 	ctrl.SetLogger(zap.New())
 	log := ctrl.Log.WithName("node")
+	watchMismatches(log)
 	if *nodeName == "" {
 		return errors.New("--node or NODE_NAME is required")
 	}

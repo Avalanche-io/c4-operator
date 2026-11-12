@@ -17,7 +17,10 @@ are all addressed by those identifiers.
 1. **Grab objects, do not re-check them on a read.** A reader asks for an
    ID and uses the bytes it gets. Bytes are checked when they enter the
    system and when a cache takes them from another machine (section 1.1),
-   never per read.
+   never per read. This is content a pod reads, through a cache that
+   checked it. The small objects the operator itself reads whole from a
+   store, with no cache between (records, changesets, tool files), are
+   checked on every read (section 1.1, "A read of the store").
 2. **Track what a job changes.** A job's writes become a changeset against
    the tree it was given: a c4m patch over a parent, with content-addressed
    pointers to new objects. Cost is proportional to the change.
@@ -101,6 +104,21 @@ After that, the rule is one sentence: **bytes are checked against their C4
 ID every time they cross a machine boundary into a cache, unless the
 Project says not to, and are trusted from the local cache from then on.**
 
+- **A read of the store is checked.** What the operator reads whole from a
+  store by its C4 ID (`view.ReadObject`: records, changesets, indexes, a
+  tool's `tool.yaml` and `tool.lock`) is hashed as it is read; there is no
+  cache to have checked it, and a store is checked at PUT only when it is a
+  c4d (`s3` and tree shards keep whatever they are given under the ID the
+  writer states). Bytes that are not the ID asked for are not present
+  (Joshua, 2026-11-11): the reader gets the error it gets for a missing
+  object (`view.ErrNotItsID`, which is also `ErrIncomplete`,
+  `storeurl.ErrNotFound` and `fs.ErrNotExist`), never the bytes, and the
+  read is counted (`c4_store_mismatch_total`, by shard) and logged with
+  both IDs. A tool's egress and image pins, once read unchecked, come only
+  from its own files. It costs under 2% of a resolve (50,000 files: 565 ms
+  against 561). An import from c4git still copies an object without
+  hashing it (c4git verified it at `git add`), and a reader finds it not
+  present if it is not its ID's.
 - **A fill is checked.** A node cache filling from a peer or the regional
   tier, and the regional tier filling from the store, hash what arrives and
   refuse bytes that are not the ID asked for. `spec.store.verifyFill`

@@ -2,12 +2,14 @@ package gitimport
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/Avalanche-io/c4"
 	"github.com/Avalanche-io/c4/store"
 
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
@@ -181,7 +183,8 @@ func TestChangesetsResolveToCommitViews(t *testing.T) {
 // the file's ID, take the size from the store, and copy the bytes as they
 // are: c4git is an ingest point that verified the ID at `git add`, so the
 // importer does not verify it again. This is the trust boundary the
-// package comment describes.
+// package comment describes. Every read checks, though: the bytes copied
+// are not that label's, and a reader finds them not present.
 func TestC4GitObjectsAreTrustedNotRehashed(t *testing.T) {
 	r := newRepo(t)
 	label := idOf("the bytes c4git hashed")
@@ -224,9 +227,21 @@ func TestC4GitObjectsAreTrustedNotRehashed(t *testing.T) {
 	if cs.puts[idOf("plain\n")] != 1 {
 		t.Fatal("plain.txt was not put under its hash")
 	}
-	data, err := view.ReadObject(cs.Sink.(*TreeSink), label)
-	if err != nil || string(data) != stored {
-		t.Fatalf("project store holds %q, %v", data, err)
+	rc, err := cs.Sink.(*TreeSink).Open(label)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(raw) != stored {
+		t.Fatalf("project store holds %q, want the bytes as c4git holds them", raw)
+	}
+	var told c4.ID
+	was := view.OnMismatch
+	t.Cleanup(func() { view.OnMismatch = was })
+	view.OnMismatch = func(_ string, asked, _ c4.ID) { told = asked }
+	if data, err := view.ReadObject(cs.Sink.(*TreeSink), label); !errors.Is(err, view.ErrNotItsID) || data != nil || told != label {
+		t.Fatalf("a read of bytes that are not the label's: %q, %v, told %s", data, err, told)
 	}
 	if c.C4GitObjects != 1 {
 		t.Fatalf("c4git objects used: %d", c.C4GitObjects)

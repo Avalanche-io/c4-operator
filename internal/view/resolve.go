@@ -85,8 +85,10 @@ func FromID(id c4.ID, st Store, f Filter) (*Resolved, error) {
 	return res, nil
 }
 
-// ReadObject reads a whole (small) object. It does not rehash: bytes are
-// checked where they cross into a cache or the store (DESIGN.md section 1).
+// ReadObject reads a whole (small) object and checks it: bytes that are not
+// id's are not present (ErrNotItsID, which is also ErrIncomplete,
+// storeurl.ErrNotFound and fs.ErrNotExist), told to OnMismatch, and never
+// returned. Every reader of a stored object by ID goes through it.
 func ReadObject(st Store, id c4.ID) ([]byte, error) {
 	rc, err := st.Open(id)
 	if err != nil {
@@ -96,6 +98,10 @@ func ReadObject(st Store, id c4.ID) ([]byte, error) {
 	data, err := io.ReadAll(rc)
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", id, err)
+	}
+	if got := c4.Identify(bytes.NewReader(data)); got != id {
+		OnMismatch(storeName(st, id), id, got)
+		return nil, &notItsID{asked: id, got: got}
 	}
 	return data, nil
 }

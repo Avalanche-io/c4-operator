@@ -568,9 +568,6 @@ func (s *Server) summaryText(ctx context.Context, project string, sm c4v1.WorkUn
 	if err != nil {
 		return "", errors.New("the store does not have the summary")
 	}
-	if c4.Identify(bytes.NewReader(data)) != id {
-		return "", errors.New("the stored summary does not match its ID")
-	}
 	if len(data) > maxSummaryText {
 		data = data[:maxSummaryText]
 		for len(data) > 0 && !utf8.Valid(data) {

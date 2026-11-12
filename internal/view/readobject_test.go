@@ -1,0 +1,84 @@
+package view
+
+import (
+	"bytes"
+	"errors"
+	"io/fs"
+	"strings"
+	"testing"
+
+	"github.com/Avalanche-io/c4"
+	"github.com/Avalanche-io/c4/c4m"
+
+	"github.com/Avalanche-io/c4-operator/internal/storeurl"
+)
+
+// Bytes that are not the ID asked for are not present (Joshua,
+// 2026-11-11): ReadObject returns none of them, with an error every
+// caller already takes for a missing object, and tells OnMismatch both
+// IDs. The right bytes read as ever, and tell nothing.
+func TestBytesThatAreNotTheIDAskedForAreNotPresent(t *testing.T) {
+	st := objStore{}
+	asked := c4.Identify(strings.NewReader("the record"))
+	other := []byte("not the record")
+	got := c4.Identify(bytes.NewReader(other))
+	st[asked] = other
+	var told [][2]c4.ID
+	was := OnMismatch
+	t.Cleanup(func() { OnMismatch = was })
+	OnMismatch = func(_ string, a, g c4.ID) { told = append(told, [2]c4.ID{a, g}) }
+
+	data, err := ReadObject(st, asked)
+	if data != nil || err == nil {
+		t.Fatalf("a read of another object's bytes: %q, %v", data, err)
+	}
+	for _, missing := range []error{ErrNotItsID, ErrIncomplete, storeurl.ErrNotFound, fs.ErrNotExist} {
+		if !errors.Is(err, missing) {
+			t.Errorf("%v is not %v: a caller that degrades on that would not", err, missing)
+		}
+	}
+	if !strings.Contains(err.Error(), asked.String()) || !strings.Contains(err.Error(), got.String()) {
+		t.Errorf("the error names neither or one of the IDs: %v", err)
+	}
+	if len(told) != 1 || told[0] != [2]c4.ID{asked, got} {
+		t.Errorf("told %v, want [%s %s]", told, asked, got)
+	}
+
+	right := []byte("the record")
+	st[asked] = right
+	told = nil
+	if data, err := ReadObject(st, asked); err != nil || !bytes.Equal(data, right) || len(told) != 0 {
+		t.Errorf("a read of the right bytes: %q, %v, told %v", data, err, told)
+	}
+}
+
+// A view one of whose records is another object's bytes resolves as
+// incomplete, never as another tree.
+func TestAViewWithASwappedRecordIsIncomplete(t *testing.T) {
+	st := objStore{}
+	all, _ := NewFilter(nil)
+	m := c4m.NewManifest()
+	m.AddEntry(&c4m.Entry{Name: "shots/", Size: -1, Timestamp: c4m.NullTimestamp()})
+	m.AddEntry(&c4m.Entry{Name: "a.exr", Depth: 1, Size: 1, Timestamp: c4m.NullTimestamp(), C4ID: c4.Identify(strings.NewReader("a"))})
+	b, err := c4m.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := FromBytes(b, st, all)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := res.View()
+	recs, _ := v.Records()
+	for _, r := range recs {
+		st[r.ID] = r.Data
+	}
+	sub := v.Root.Dirs["shots/"].Entry.C4ID
+	was := OnMismatch
+	t.Cleanup(func() { OnMismatch = was })
+	OnMismatch = func(string, c4.ID, c4.ID) {}
+	st[sub] = st[v.ID] // the root's record under the subdirectory's ID
+	if r, err := FromID(v.ID, st, all); !errors.Is(err, ErrIncomplete) {
+		t.Fatalf("a view whose record is another's bytes: %v, %v", r, err)
+	}
+}
