@@ -2280,8 +2280,8 @@ library under a first line naming the block before (the spec's external
 base reference), and status names the newest. Every 64 blocks, and before
 the first, a block names the view it was made over instead, whose listing
 is stored, so resolving a head (`c4m.ResolveBaseID`, every block's bytes
-checked) reads at most 64 blocks: 4 ms at 1,000 folds, where the chain as
-one object took 1.06 s, and about 307 bytes stored per fold. Until
+checked) reads at most 64 blocks: 9.6 ms at 10,000 folds, where the chain
+as one object took 99 s, and about 307 bytes stored per fold. Until
 2026-11-12 every fold stored the whole chain again: 6.2 MB of chain at 200
 folds, 62 KB now. A block holds one section: c4 before 80b7dda (#136)
 resolves a block of more than one wrongly, and the operator's pin is
