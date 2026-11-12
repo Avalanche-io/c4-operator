@@ -575,7 +575,7 @@ func (d *Daemon) annotate(ctx context.Context, vol *Volume, res *capture.Result,
 type captureSink = capture.Sink
 
 // directSink writes a Direct project's captures to its store. The node
-// computed every ID; in Direct mode it is trusted to.
+// computed every ID, and the store checks each as it writes it.
 type directSink struct{ st *storeurl.Sharded }
 
 func (s directSink) PutFile(ctx context.Context, _ string, id c4.ID, path string) error {

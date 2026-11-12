@@ -16,12 +16,14 @@ import (
 // Sink is where an import writes objects: the project store.
 type Sink interface {
 	// Put stores size bytes from r under id. The importer computed id from
-	// those same bytes, so Put does not rehash. It reports false, without
-	// consuming r, when the store already holds id.
+	// those same bytes; a project store checks it again as it writes (every
+	// shard does), TreeSink does not. It reports false, without consuming
+	// r, when the store already holds id.
 	Put(ctx context.Context, id c4.ID, size int64, r io.Reader) (stored bool, err error)
-	// Copy copies the object id from src, trusting src's binding of id to
-	// its bytes (nothing is rehashed). It reports false when the store
-	// already holds id.
+	// Copy copies the object id from src. Reading src is not rehashed; a
+	// project store hashes what it writes and refuses bytes that are not
+	// id's (TreeSink does not). It reports false when the store already
+	// holds id.
 	Copy(ctx context.Context, id c4.ID, size int64, src Source) (stored bool, err error)
 }
 

@@ -172,9 +172,25 @@ Project says not to, and are trusted from the local cache from then on.**
   come only from its own files. It costs under 2% of a resolve (50,000 files: 565 ms
   against 561). An import from c4git still copies an object without
   hashing it (c4git verified it at `git add`), and a reader finds it not
-  present if it is not its ID's. Into a tree store the copy is hashed now
-  (a tree store's Put is self-checking, below); into S3 it is not, until
-  every shard checks a Put.
+  present if it is not its ID's. Into any store the copy is hashed now,
+  since every shard checks a Put (below).
+- **A Put is checked, on every shard.** No store publishes bytes under an
+  ID they are not: a caller's ID is checked, never trusted. A tree store's
+  Put is its own, which hashes as it writes and publishes under the ID it
+  computed. An S3 Put hashes what it sends: a single PUT (an object up to
+  one part, 8 MiB or more) is sent only once its bytes hash to the ID, and
+  a multipart upload, whose parts are invisible until it completes, is
+  completed only then and otherwise aborted; an object already under the
+  ID is never replaced by other bytes. A c4d computes the ID itself. Each
+  answers `ErrNotItsID` for other bytes. Measured from a worker node of a
+  local farm to its Garage (five runs, 64 MiB to 1 GiB): about 210 MB/s
+  without the hash, 174 to 185 MB/s hashing each part before sending it,
+  196 to 203 MB/s hashing it while it is sent, which is what ships. On the
+  same node a tree store's Put ran at 0.94 to 1.1 GB/s, against 2.4 to 4.5
+  GB/s for a copy the kernel makes (`copy_file_range`, ext4), which a check
+  has to give up: 0.7 s more per GiB put into a file:// shard. The four
+  callers that hash an object before putting it (a node's publish, the
+  tier's write-through, a HUD upload, `c4-operator ingest`) hash it twice.
 - **A fill is checked.** A node cache filling from a peer or the regional
   tier, and the regional tier filling from the store, hash what arrives and
   refuse bytes that are not the ID asked for. `spec.store.verifyFill`
