@@ -1081,22 +1081,48 @@ func (r *runner) queuePreview(n int, path string) {
 	}
 }
 
-// makePreviews makes each queued frame into preview/<frame>.png. A frame
-// whose preview fails is said so and tried once more after the run, when
-// the tool has finished writing it; one frame's failure never ends the
-// others' previews (once, every frame after the first was given up).
+// makePreviews makes each queued frame into preview/<frame>.png. One
+// frame's failure never ends the others' (once, every frame after the
+// first was given up). A frame whose preview fails is tried once more
+// after the run, if its file has changed since (the tool was still
+// writing it); one that failed complete would only fail again. A failure
+// is said once, when it is final. A missing oiiotool is not a frame's
+// failure: it is said once, and no frame that needs it is tried again;
+// PNG and JPEG frames, which do not, go on.
 func (r *runner) makePreviews() {
-	var again []previewJob
+	type failure struct {
+		j    previewJob
+		err  error
+		size int64
+		mod  time.Time
+	}
+	var failed []failure
+	noTool := false
 	for j := range r.previewQ {
-		if err := r.makePreview(j); err != nil {
-			fmt.Fprintf(r.e.errOut(), "c4-unit: no preview of frame %d yet: %v; trying again after the run\n", j.frame, err)
-			again = append(again, j)
+		if noTool && needsOiiotool(j.src) {
+			continue
+		}
+		err := r.makePreview(j)
+		switch {
+		case err == nil:
+		case errors.Is(err, errNoOiiotool):
+			fmt.Fprintf(r.e.errOut(), "c4-unit: no previews: %v (PNG and JPEG frames are made without it)\n", err)
+			noTool = true
+		default:
+			f := failure{j: j, err: err, size: -1}
+			if info, serr := os.Stat(j.src); serr == nil {
+				f.size, f.mod = info.Size(), info.ModTime()
+			}
+			failed = append(failed, f)
 		}
 	}
-	for _, j := range again {
-		if err := r.makePreview(j); err != nil {
-			fmt.Fprintf(r.e.errOut(), "c4-unit: no preview of frame %d: %v\n", j.frame, err)
+	for _, f := range failed {
+		if info, err := os.Stat(f.j.src); err == nil && (info.Size() != f.size || !info.ModTime().Equal(f.mod)) {
+			if f.err = r.makePreview(f.j); f.err == nil {
+				continue
+			}
 		}
+		fmt.Fprintf(r.e.errOut(), "c4-unit: no preview of frame %d: %v\n", f.j.frame, f.err)
 	}
 }
 
@@ -1136,8 +1162,11 @@ type fileState struct {
 // end, final), and once only, unless it is written again. An empty one
 // never counts while the tool runs, however long it holds: a writer that
 // opens before it writes (GNU cp) leaves the file empty until its bytes
-// come, and an empty file is not a frame yet. seen nil is the final scan:
-// anything written since the run began counts, as the tool left it.
+// come, and an empty file is not a frame yet. So an empty file is no sign
+// of work for the stall rule either, while the tool runs: a tool whose only
+// output is empty per-frame markers, silent for the stall's quiet minutes,
+// is ended as stalled. seen nil is the final scan: anything written since
+// the run began counts, as the tool left it.
 func (r *runner) scanTree(seen map[string]fileState, final bool) {
 	root := r.tree
 	if pre := fixedPrefix(r.tool.Previews); pre != "" {

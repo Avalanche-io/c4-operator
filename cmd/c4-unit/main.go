@@ -89,6 +89,7 @@ import (
 	_ "image/jpeg"
 	"image/png"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -793,9 +794,27 @@ func preview(e env, src, dst string, width int) error {
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		os.Remove(tmp)
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) && (errors.Is(err, exec.ErrNotFound) || errors.Is(err, fs.ErrNotExist)) {
+			return fmt.Errorf("%w: %s", errNoOiiotool, tool)
+		}
 		return fmt.Errorf("%s: %w", tool, err)
 	}
 	return os.Rename(tmp, dst)
+}
+
+// errNoOiiotool is a preview's failure that is not its frame's: the image
+// has no oiiotool to make it with.
+var errNoOiiotool = errors.New("oiiotool not found")
+
+// needsOiiotool reports whether a frame's preview goes through oiiotool:
+// everything but PNG and JPEG, which preview converts itself.
+func needsOiiotool(src string) bool {
+	switch strings.ToLower(filepath.Ext(src)) {
+	case ".png", ".jpg", ".jpeg":
+		return false
+	}
+	return true
 }
 
 // previewNative decodes a PNG or JPEG and writes it, scaled down to width

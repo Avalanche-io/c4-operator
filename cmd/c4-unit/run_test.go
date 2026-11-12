@@ -397,7 +397,8 @@ previews: "render/**/*.$F4.png"
 // its preview tried on an empty file and failed, and every later frame's
 // preview was given up with it (main's CI, 2026-11-11: "preview of 1001:
 // false" and 1003, progress right). Here the frame sits empty for ten
-// scans before its bytes come.
+// scans before its bytes come; once they have, its preview is made while
+// the tool runs (the tool itself looks), not only after.
 func TestAFrameWrittenInTwoStepsIsCountedOnceWritten(t *testing.T) {
 	r := newToolRun(t, `
 c4: tool/1
@@ -405,7 +406,7 @@ name: x
 kind: frames
 runs:
   image: c4/runtime-base
-  command: [bash, -c, ': > render/beauty/sm.1001.png; sleep 0.2; cat "$C4_TOOLS/f.png" > render/beauty/sm.1001.png; sleep 0.1; cp "$C4_TOOLS/f.png" render/beauty/sm.1003.png; sleep 0.2']
+  command: [bash, -c, ': > render/beauty/sm.1001.png; sleep 0.2; cat "$C4_TOOLS/f.png" > render/beauty/sm.1001.png; for i in $(seq 100); do [ -e preview/1001.png ] && break; sleep 0.02; done; [ -e preview/1001.png ] || echo "no preview of 1001 while running"; cp "$C4_TOOLS/f.png" render/beauty/sm.1003.png; sleep 0.2']
   workdir: "{{Job.Tree}}"
 previews: "render/**/*.$F4.png"
 `)
@@ -423,17 +424,20 @@ previews: "render/**/*.$F4.png"
 			t.Errorf("preview of %s: %v\nstderr: %s", f, err, r.errs.String())
 		}
 	}
-	// not counted while empty: no preview of it was even tried
-	if strings.Contains(r.errs.String(), "preview of frame 1001") {
-		t.Errorf("frame 1001 was counted while it was empty:\n%s", r.errs.String())
+	// counted while empty, its preview failed, and only the run's end
+	// would mend it
+	if strings.Contains(r.out.String(), "no preview of 1001 while running") || strings.Contains(r.errs.String(), "preview of frame") {
+		t.Errorf("frame 1001 was counted while it was empty:\nlog: %s\nstderr: %s", r.out.String(), r.errs.String())
 	}
 }
 
 // One frame's preview failing does not end the others', and a frame whose
-// preview fails while the tool runs is tried again after it. Here the
-// image's oiiotool never takes frame 1001, and takes 1003 only the second
-// time: 1003's preview is made, 1001's is said to be missing, and the run
-// goes on. Once, the first failure ended previews for the whole unit.
+// preview failed while the tool was still writing it is tried again after
+// the run. Here the image's oiiotool never takes frame 1001, and refuses
+// 1003 while it holds "partial", which the tool replaces before it exits:
+// 1003's preview is made, 1001's is said to be missing once, and 1001,
+// which did not change, is not tried twice. Once, the first failure ended
+// previews for the whole unit.
 func TestAPreviewThatFailsEndsOnlyItsOwn(t *testing.T) {
 	r := newToolRun(t, `
 c4: tool/1
@@ -441,17 +445,19 @@ name: x
 kind: frames
 runs:
   image: c4/runtime-base
-  command: [bash, -c, 'echo a > render/sm.1001.exr; sleep 0.1; echo b > render/sm.1003.exr; sleep 0.2']
+  command: [bash, -c, 'echo a > render/sm.1001.exr; echo partial > render/sm.1003.exr; sleep 0.2; echo b > render/sm.1003.exr; sleep 0.2']
   workdir: "{{Job.Tree}}"
 previews: "render/*.$F4.exr"
 `)
 	r.vars["C4_FRAME_END"], r.vars["C4_FRAME_STEP"] = "1003", "2"
 	os.MkdirAll(filepath.Join(r.tree, "render"), 0o755)
 	r.oiiotool = filepath.Join(r.dir, "oiiotool")
+	calls := filepath.Join(r.dir, "calls")
 	fake := `#!/bin/bash
 src=$1; out=${@: -1}
-case $src in *1001*) echo "cannot read $src" >&2; exit 1 ;; esac
-if [ ! -e "$src.tried" ]; then : > "$src.tried"; echo "not yet: $src" >&2; exit 1; fi
+echo "$src" >> ` + calls + `
+case $src in *.1001.exr) exit 1 ;; esac
+grep -q partial "$src" && exit 1
 cp "$src" "$out"
 `
 	if err := os.WriteFile(r.oiiotool, []byte(fake), 0o755); err != nil {
@@ -461,14 +467,71 @@ cp "$src" "$out"
 		t.Fatalf("exit %d\n%s", c, r.errs.String())
 	}
 	if _, err := os.Stat(filepath.Join(r.tree, "preview", "1003.png")); err != nil {
-		t.Errorf("preview of 1003, which takes a second try: %v\nstderr: %s", err, r.errs.String())
+		t.Errorf("preview of 1003, rewritten after its first try: %v\nstderr: %s", err, r.errs.String())
 	}
 	if _, err := os.Stat(filepath.Join(r.tree, "preview", "1001.png")); err == nil {
 		t.Error("a preview of 1001, which oiiotool never takes")
 	}
 	errs := r.errs.String()
-	if !strings.Contains(errs, "no preview of frame 1001:") || !strings.Contains(errs, "no preview of frame 1003 yet") || strings.Contains(errs, "no preview of frame 1003:") {
+	if strings.Count(errs, "no preview of frame 1001:") != 1 || strings.Contains(errs, "frame 1003") {
 		t.Errorf("what the run said about its previews:\n%s", errs)
+	}
+	b, _ := os.ReadFile(calls)
+	if n := strings.Count(string(b), "sm.1001.exr"); n != 1 {
+		t.Errorf("frame 1001, unchanged after its failure, was tried %d times", n)
+	}
+}
+
+// A frame the tool writes a part of, holds, then finishes gets its preview:
+// the part held for a scan and counted, its preview failed on the part, and
+// the frame, changed since, is tried again after the run.
+func TestAFramePartlyWrittenGetsItsPreviewAfterTheRun(t *testing.T) {
+	r := newToolRun(t, `
+c4: tool/1
+name: x
+kind: frames
+runs:
+  image: c4/runtime-base
+  command: [bash, -c, 'head -c 40 "$C4_TOOLS/f.png" > render/sm.1001.png; sleep 0.3; cat "$C4_TOOLS/f.png" > render/sm.1001.png; sleep 0.2']
+  workdir: "{{Job.Tree}}"
+previews: "render/*.$F4.png"
+`)
+	r.vars["C4_FRAME_END"], r.vars["C4_FRAME_STEP"] = "1001", "1"
+	writePNG(t, filepath.Join(r.dir, "f.png"))
+	os.MkdirAll(filepath.Join(r.tree, "render"), 0o755)
+	if c := r.run(); c != 0 {
+		t.Fatalf("exit %d\n%s", c, r.errs.String())
+	}
+	if _, err := os.Stat(filepath.Join(r.tree, "preview", "1001.png")); err != nil {
+		t.Errorf("preview of 1001: %v\nstderr: %s", err, r.errs.String())
+	}
+	if strings.Contains(r.errs.String(), "preview") {
+		t.Errorf("a failure the retry mended was said:\n%s", r.errs.String())
+	}
+}
+
+// An image without oiiotool is said once, whatever the number of frames,
+// and none is tried after: not a failure of each frame.
+func TestAMissingOiiotoolIsSaidOnce(t *testing.T) {
+	r := newToolRun(t, `
+c4: tool/1
+name: x
+kind: frames
+runs:
+  image: c4/runtime-base
+  command: [bash, -c, 'for f in 1001 1002 1003 1004 1005; do echo x > render/sm.$f.exr; sleep 0.05; done']
+  workdir: "{{Job.Tree}}"
+previews: "render/*.$F4.exr"
+`)
+	r.vars["C4_FRAME_END"], r.vars["C4_FRAME_STEP"] = "1005", "1"
+	os.MkdirAll(filepath.Join(r.tree, "render"), 0o755)
+	r.oiiotool = filepath.Join(r.dir, "no-oiiotool-here")
+	if c := r.run(); c != 0 {
+		t.Fatalf("exit %d\n%s", c, r.errs.String())
+	}
+	errs := strings.TrimSpace(r.errs.String())
+	if strings.Count(errs, "\n") != 0 || !strings.Contains(errs, "no previews: oiiotool not found") {
+		t.Errorf("want one line saying oiiotool is not found, got:\n%s", errs)
 	}
 }
 
