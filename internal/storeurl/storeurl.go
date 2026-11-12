@@ -42,8 +42,9 @@ type Shard interface {
 	Get(ctx context.Context, id c4.ID, offset int64) (body io.ReadCloser, total, start int64, err error)
 	// Head returns the object's size, or ErrNotFound.
 	Head(ctx context.Context, id c4.ID) (int64, error)
-	// Put writes size bytes from r under id. The caller computed id; only
-	// trusted ingest points call Put.
+	// Put writes size bytes from r under id, and publishes them only if
+	// they are id's (ErrNotItsID otherwise): every shard hashes what it
+	// stores, so a caller's ID is checked, never trusted.
 	Put(ctx context.Context, id c4.ID, r io.Reader, size int64) error
 }
 
@@ -438,7 +439,7 @@ func (s *c4dShard) Put(ctx context.Context, id c4.ID, r io.Reader, size int64) e
 		return fmt.Errorf("c4d put %s: status %d: %s", id, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	if got := strings.TrimSpace(string(body)); got != id.String() {
-		return fmt.Errorf("c4d stored %s as %s", id, got)
+		return fmt.Errorf("c4d put %s: %w (c4d stored them as %s)", id, ErrNotItsID, got)
 	}
 	return nil
 }

@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/hex"
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"math/rand/v2"
 	"net/http"
@@ -36,8 +38,13 @@ func partSizeFor(size int64) int64 {
 	return p
 }
 
-// Put writes size bytes from r under id (size < 0: unknown). The caller
-// computed id; only trusted ingest points call Put.
+// Put writes size bytes from r under id (size < 0: unknown). It hashes
+// what it sends and publishes only bytes that are id's: a single PUT is
+// sent only once its bytes hash to id, and a multipart upload, whose parts
+// are invisible until it completes, is completed only then, and aborted
+// otherwise (ErrNotItsID). An S3 PUT replaces whatever the key holds; what
+// it replaces is id's bytes again, or other bytes, which no read takes as
+// id's.
 func (s *s3Shard) Put(ctx context.Context, id c4.ID, r io.Reader, size int64) error {
 	key := s.prefix + id.String()
 	part := partSizeFor(size)
@@ -51,9 +58,14 @@ func (s *s3Shard) Put(ctx context.Context, id c4.ID, r io.Reader, size int64) er
 	if err != nil {
 		return fmt.Errorf("s3 put %s: %w", id, err)
 	}
+	h := sha512.New()
+	h.Write(first)
 	if int64(len(first)) < first0 || first0 < part {
 		if size >= 0 && int64(len(first)) != size {
 			return fmt.Errorf("s3 put %s: read %d bytes, expected %d", id, len(first), size)
+		}
+		if err := sameID(id, h); err != nil {
+			return fmt.Errorf("s3 put %w", err)
 		}
 		resp, err := s.send(ctx, http.MethodPut, key, "", first, true)
 		if err != nil {
@@ -62,7 +74,17 @@ func (s *s3Shard) Put(ctx context.Context, id c4.ID, r io.Reader, size int64) er
 		resp.Body.Close()
 		return nil
 	}
-	return s.multipart(ctx, id, key, first, r, part, size)
+	return s.multipart(ctx, id, key, first, h, r, part, size)
+}
+
+// sameID says whether what h has hashed is id's bytes.
+func sameID(id c4.ID, h hash.Hash) error {
+	var got c4.ID
+	copy(got[:], h.Sum(nil))
+	if got != id {
+		return fmt.Errorf("%s: %w (they are %s)", id, ErrNotItsID, got)
+	}
+	return nil
 }
 
 func readPart(r io.Reader, n int64) ([]byte, error) {
@@ -74,7 +96,7 @@ func readPart(r io.Reader, n int64) ([]byte, error) {
 	return buf[:got], err
 }
 
-func (s *s3Shard) multipart(ctx context.Context, id c4.ID, key string, first []byte, r io.Reader, part, size int64) (err error) {
+func (s *s3Shard) multipart(ctx context.Context, id c4.ID, key string, first []byte, h hash.Hash, r io.Reader, part, size int64) (err error) {
 	// Creating an upload isn't idempotent: if the reply is lost, a retry
 	// would make a second upload and leave the first open, billed. So a
 	// transport failure here is not retried.
@@ -144,9 +166,15 @@ func (s *s3Shard) multipart(ctx context.Context, id c4.ID, key string, first []b
 		if buf, err = readPart(r, part); err != nil {
 			return fmt.Errorf("s3 put %s: %w", id, err)
 		}
+		h.Write(buf)
 	}
 	if size >= 0 && total != size {
 		return fmt.Errorf("s3 put %s: read %d bytes, expected %d", id, total, size)
+	}
+	// The last chance to keep other bytes from id's key: an upload that is
+	// never completed publishes nothing, and the deferred abort removes it.
+	if err := sameID(id, h); err != nil {
+		return fmt.Errorf("s3 put %w", err)
 	}
 	body, _ := xml.Marshal(struct {
 		XMLName xml.Name `xml:"CompleteMultipartUpload"`
