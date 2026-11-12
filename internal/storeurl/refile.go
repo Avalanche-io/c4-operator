@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Avalanche-io/c4"
 )
@@ -93,20 +94,128 @@ func (s *Sharded) Refile(ctx context.Context, asked, got c4.ID, data []byte) err
 	if !ok {
 		return ErrNoRefile
 	}
-	if !s.holdsOwn(ctx, got) {
-		if err := s.Put(ctx, got, bytes.NewReader(data), int64(len(data))); err != nil {
-			return fmt.Errorf("re-file %s under %s: %w", asked, got, err)
-		}
-		// A store keeps what it has under an ID: if got held another wrong
-		// object, the Put took nothing, and these bytes are got's only copy.
-		if !s.holdsOwn(ctx, got) {
-			return fmt.Errorf("re-file %s: %s holds other bytes too, so these stay where they are", asked, got)
-		}
+	if err := s.place(ctx, got, data, 0); err != nil {
+		return fmt.Errorf("re-file %s under %s: %w", asked, got, err)
+	}
+	if err := step("placed"); err != nil {
+		return err
 	}
 	if err := rf.removeWrong(ctx, asked, got); err != nil {
 		return fmt.Errorf("re-file %s: taking it from under its ID: %w", asked, err)
 	}
 	return nil
+}
+
+// maxRefileHops bounds a chain of re-files (wrong objects under each
+// other's IDs, a swap or a longer cycle): past it, what is left stays
+// aside, never deleted, and its ID not present.
+const maxRefileHops = 8
+
+// ErrRefileTooFar is a chain of wrong objects longer than maxRefileHops.
+var ErrRefileTooFar = errors.New("a chain of wrong objects longer than a re-file follows")
+
+// place puts data, id's own bytes, under id. A slot that holds id's own
+// already is left as it is; an empty one is written. One that holds other
+// bytes (another wrong object: the bytes there are not id's, so nothing of
+// id's is in it to keep) has them set aside first, durably, and they are
+// placed under their own ID by the same rule, one hop further; the aside
+// goes only once they verify there. So a swap, or a cycle of any length,
+// comes apart, and no bytes that are not under their own ID somewhere are
+// ever deleted. A slot whose bytes verify is never written over.
+func (s *Sharded) place(ctx context.Context, id c4.ID, data []byte, hop int) error {
+	if s.holdsOwn(ctx, id) {
+		return nil
+	}
+	if _, err := s.Head(ctx, id); errors.Is(err, ErrNotFound) {
+		return s.Put(ctx, id, bytes.NewReader(data), int64(len(data)))
+	}
+	mover, ok := s.For(id).(asideTaker)
+	if !ok {
+		return fmt.Errorf("%s holds other bytes, and this store does not set them aside to make room", id)
+	}
+	if hop >= maxRefileHops {
+		return ErrRefileTooFar
+	}
+	aside, other, err := mover.setAside(id)
+	if err != nil {
+		return err
+	}
+	if err := step("aside"); err != nil {
+		return err
+	}
+	if err := s.Put(ctx, id, bytes.NewReader(data), int64(len(data))); err != nil {
+		return err
+	}
+	if err := step("written"); err != nil {
+		return err
+	}
+	if other != nil {
+		if err := s.place(ctx, c4.Identify(bytes.NewReader(other)), other, hop+1); err != nil {
+			return err // the aside stays: those bytes are nowhere else yet
+		}
+	}
+	if err := step("chained"); err != nil {
+		return err
+	}
+	return os.Remove(aside)
+}
+
+// asideTaker is a shard that can set an object's bytes aside durably to
+// make room under its ID: a tree store, by a rename into its root.
+type asideTaker interface {
+	setAside(id c4.ID) (aside string, data []byte, err error)
+}
+
+// setAside renames the file under id into the store's root under a dot
+// name, named by the ID it was under, and answers its bytes. A store
+// opened again places whatever is left aside (Sharded.mend).
+func (s *treeShard) setAside(id c4.ID) (string, []byte, error) {
+	p, ok := s.ts.ContentPath(id)
+	if !ok {
+		return "", nil, nil
+	}
+	if filepath.Base(p) != id.String() {
+		return "", nil, fmt.Errorf("%s is still being written", id)
+	}
+	var suffix [8]byte
+	rand.Read(suffix[:])
+	aside := filepath.Join(s.ts.Root(), refileAside+id.String()+"."+hex.EncodeToString(suffix[:]))
+	if err := os.Rename(p, aside); err != nil {
+		return "", nil, err
+	}
+	b, err := os.ReadFile(aside)
+	return aside, b, err
+}
+
+// step, in tests, stops a re-file between its steps, as a crash would.
+var step = func(string) error { return nil }
+
+// mend places what a re-file a crash cut short left aside in a tree
+// store's root: each file's bytes go under their own ID by place's rule,
+// and the file goes once they verify there. Bytes that cannot be placed
+// stay aside, and are tried again the next time the store is opened.
+func (s *Sharded) mend(ctx context.Context) {
+	for _, sh := range s.byName {
+		t, ok := sh.(*treeShard)
+		if !ok {
+			continue
+		}
+		entries, _ := os.ReadDir(t.ts.Root())
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasPrefix(e.Name(), refileAside) {
+				continue
+			}
+			aside := filepath.Join(t.ts.Root(), e.Name())
+			b, err := os.ReadFile(aside)
+			if err != nil {
+				continue
+			}
+			id := c4.Identify(bytes.NewReader(b))
+			if s.place(ctx, id, b, 0) == nil && s.holdsOwn(ctx, id) {
+				os.Remove(aside)
+			}
+		}
+	}
 }
 
 // holdsOwn reports whether the store holds id's own bytes under id.
@@ -126,7 +235,7 @@ func (s *Sharded) holdsOwn(ctx context.Context, id c4.ID) bool {
 // ones re-filed, are removed; anything else goes back under id through the
 // store's own Create, which finds id's path as it is now and keeps an
 // object put there since. An object still pending publication is left
-// alone: it is being written. sweepRefiles mends what a crash leaves.
+// alone: it is being written. Sharded.mend places what a crash leaves.
 func (s *treeShard) removeWrong(_ context.Context, id, got c4.ID) error {
 	p, ok := s.ts.ContentPath(id)
 	if !ok {
@@ -187,40 +296,6 @@ func (s *treeShard) settleAside(aside string, id, got c4.ID) error {
 		return err
 	}
 	return os.Remove(aside)
-}
-
-// sweepRefiles mends what a re-file a crash cut short left in the store's
-// root: a file taken aside that is the ID it was taken from goes back under
-// it; any other was got's, filed under got before it was taken, and goes.
-func (s *treeShard) sweepRefiles() {
-	entries, _ := os.ReadDir(s.ts.Root())
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || len(name) <= len(refileAside) || name[:len(refileAside)] != refileAside {
-			continue
-		}
-		rest := name[len(refileAside):]
-		dot := len(rest) - 17 // "." and 16 hex digits
-		if dot <= 0 || rest[dot] != '.' {
-			continue
-		}
-		id, err := c4.Parse(rest[:dot])
-		if err != nil {
-			continue
-		}
-		aside := filepath.Join(s.ts.Root(), name)
-		f, err := os.Open(aside)
-		if err != nil {
-			continue
-		}
-		held := c4.Identify(f)
-		f.Close()
-		got := held
-		if held == id {
-			got = c4.ID{} // id's own: back under it
-		}
-		s.settleAside(aside, id, got)
-	}
 }
 
 // refileTook, in tests, runs after a tree store has taken an object's file

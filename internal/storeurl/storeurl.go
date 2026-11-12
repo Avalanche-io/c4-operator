@@ -132,6 +132,10 @@ func OpenShardedWith(specs []Spec, src CredentialSource) (*Sharded, error) {
 		s.names = append(s.names, sp.Name)
 		s.byName[sp.Name] = sh
 	}
+	// what a re-file a crash cut short left aside goes under its own ID
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	s.mend(ctx)
+	cancel()
 	return s, nil
 }
 
@@ -451,9 +455,7 @@ func openTree(root string) (Shard, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &treeShard{root: root, ts: ts}
-	s.sweepRefiles()
-	return s, nil
+	return &treeShard{root: root, ts: ts}, nil
 }
 
 func (s *treeShard) Name() string { return "file://" + s.root }

@@ -106,17 +106,25 @@ func TestTheRefileKeepsWhatIsRight(t *testing.T) {
 		t.Error("with got stored already: still under asked")
 	}
 
-	// got holds other wrong bytes: these are got's only copy, and stay
+	// got holds other wrong bytes: those are not got's, so nothing of got's
+	// is there to keep; they are set aside and placed under their own ID,
+	// and got takes its own (2026-11-11)
 	s, _ = treeWith(t, asked, wrong)
 	ts, _ := store.NewTreeStore(strings.TrimPrefix(s.For(got).Name(), "file://"))
 	w, _ := ts.Create(got)
 	io.WriteString(w, "neither")
 	w.Close()
-	if err := s.Refile(ctx, asked, got, wrong); err == nil {
-		t.Error("with other bytes under got: re-filed")
+	if err := s.Refile(ctx, asked, got, wrong); err != nil {
+		t.Errorf("with other bytes under got: %v", err)
 	}
-	if b, _ := read(t, s, asked); !bytes.Equal(b, wrong) {
-		t.Errorf("with other bytes under got: asked holds %q, want the only copy kept", b)
+	if b, _ := read(t, s, got); !bytes.Equal(b, wrong) {
+		t.Errorf("with other bytes under got: got holds %q", b)
+	}
+	if b, _ := read(t, s, c4.Identify(strings.NewReader("neither"))); string(b) != "neither" {
+		t.Errorf("the other bytes are not under their own ID: %q", b)
+	}
+	if _, ok := read(t, s, asked); ok {
+		t.Error("with other bytes under got: still under asked")
 	}
 
 	// asked holds its own bytes by the time the re-file looks: kept
@@ -479,5 +487,140 @@ func TestTheRefileLeavesAnObjectBeingWritten(t *testing.T) {
 		t.Error("the pending object is gone")
 	} else if b, _ := os.ReadFile(p); string(b) != "not yet" {
 		t.Errorf("the pending object holds %q", b)
+	}
+}
+
+// swapped puts each of objs' bytes under the next one's ID, a cycle (two
+// is a swap), and answers the store and the IDs.
+func swapped(t *testing.T, objs ...string) (*Sharded, string, []c4.ID) {
+	t.Helper()
+	dir := t.TempDir()
+	ts, err := store.NewTreeStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]c4.ID, len(objs))
+	for i, o := range objs {
+		ids[i] = c4.Identify(strings.NewReader(o))
+	}
+	for i, o := range objs {
+		w, err := ts.Create(ids[(i+1)%len(objs)])
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.WriteString(w, o)
+		w.Close()
+	}
+	s, err := OpenSharded([]Spec{{Name: "s0", URL: dir}}, Credentials{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, dir, ids
+}
+
+// healed checks every object of a cycle is under its own ID, and nothing
+// is left aside.
+func healed(t *testing.T, s *Sharded, dir string, objs []string, ids []c4.ID) {
+	t.Helper()
+	for i, o := range objs {
+		if b, ok := read(t, s, ids[i]); !ok || string(b) != o {
+			t.Errorf("%q under its own ID: %q, %v", o, b, ok)
+		}
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, refileAside+"*")); len(left) != 0 {
+		t.Errorf("left aside: %v", left)
+	}
+}
+
+// Wrong objects under each other's IDs come apart (2026-11-11,
+// within Joshua's ruling: the bytes in A's slot are not A, so nothing of
+// A's is there to keep): re-filing A's bytes, found under B, sets aside
+// what A's slot holds, writes A, and re-files what it set aside by the
+// same rule. A swap and a 3-cycle each heal from one read.
+func TestASwapAndACycleHeal(t *testing.T) {
+	ctx := context.Background()
+	for _, objs := range [][]string{{"alpha", "beta"}, {"alpha", "beta", "gamma"}} {
+		s, dir, ids := swapped(t, objs...)
+		// a read of ids[1] finds objs[0]'s bytes
+		if err := s.Refile(ctx, ids[1], ids[0], []byte(objs[0])); err != nil {
+			t.Fatalf("%d-cycle: %v", len(objs), err)
+		}
+		healed(t, s, dir, objs, ids)
+	}
+}
+
+// A crash between any two steps of a chained re-file loses nothing: every
+// byte string is under its own ID or set aside, and the store, opened
+// again, places what was aside. Here the re-file stops at each step in
+// turn, of a swap and of a 3-cycle.
+func TestACrashedRefileHealsOnOpen(t *testing.T) {
+	ctx := context.Background()
+	crash := errors.New("crash")
+	for _, objs := range [][]string{{"alpha", "beta"}, {"alpha", "beta", "gamma"}} {
+		for _, at := range []string{"aside", "written", "chained", "placed"} {
+			for nth := 1; nth <= len(objs); nth++ {
+				s, dir, ids := swapped(t, objs...)
+				n := 0
+				step = func(name string) error {
+					if name == at {
+						n++
+						if n == nth {
+							return crash
+						}
+					}
+					return nil
+				}
+				err := s.Refile(ctx, ids[1], ids[0], []byte(objs[0]))
+				step = func(string) error { return nil }
+				if n < nth {
+					continue // the chain is shorter than that: no crash there
+				}
+				if !errors.Is(err, crash) {
+					t.Fatalf("%d-cycle, crash at %s #%d: %v", len(objs), at, nth, err)
+				}
+				again, err := OpenSharded([]Spec{{Name: "s0", URL: dir}}, Credentials{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				// what the crash left under a wrong ID is found by a read,
+				// and re-filed, as any wrong object is
+				for i := range objs {
+					if b, ok := read(t, again, ids[i]); ok && c4.Identify(bytes.NewReader(b)) != ids[i] {
+						again.Refile(ctx, ids[i], c4.Identify(bytes.NewReader(b)), b)
+					}
+				}
+				healed(t, again, dir, objs, ids)
+			}
+		}
+	}
+	t.Cleanup(func() { step = func(string) error { return nil } })
+}
+
+// A chain longer than a re-file follows stops, and deletes nothing: what
+// it could not place stays aside, its ID not present.
+func TestAChainTooLongStopsAndKeepsEverything(t *testing.T) {
+	ctx := context.Background()
+	objs := make([]string, maxRefileHops+3)
+	for i := range objs {
+		objs[i] = fmt.Sprintf("object %d", i)
+	}
+	s, dir, ids := swapped(t, objs...)
+	if err := s.Refile(ctx, ids[1], ids[0], []byte(objs[0])); !errors.Is(err, ErrRefileTooFar) {
+		t.Fatalf("a %d-cycle: %v", len(objs), err)
+	}
+	// every object's bytes are somewhere: under their own ID, under
+	// another's, or aside
+	have := map[string]bool{}
+	filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			b, _ := os.ReadFile(p)
+			have[string(b)] = true
+		}
+		return nil
+	})
+	for _, o := range objs {
+		if !have[o] {
+			t.Errorf("%q is gone", o)
+		}
 	}
 }

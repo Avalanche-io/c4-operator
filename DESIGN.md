@@ -137,10 +137,19 @@ Project says not to, and are trusted from the local cache from then on.**
   back through the store's own write, which finds the ID's path as it is
   then; one a crash leaves is mended when the store is next opened. The
   re-file removes from under the ID only the bytes it filed under their
-  own: anything else there by then stays. Two wrong objects under each
-  other's IDs are not moved (each one's slot holds the other's bytes,
-  perhaps their only copy), so neither ID heals: what happens then waits on
-  a ruling. A git import whose changeset is found wrong then makes
+  own: anything else there by then stays. Wrong objects under each other's
+  IDs (a swap, or a longer cycle) come apart (2026-11-11, within
+  the ruling: the bytes in A's slot are not A, so nothing of A's is there
+  to keep): re-filing bytes to their own ID's slot, which holds other
+  bytes, sets those aside first, writes, and re-files what it set aside by
+  the same rule, at most 8 hops, after which what is left stays aside and
+  its ID not present; an aside goes only once its bytes verify under their
+  own ID, and a slot whose bytes verify is never written over. A crash at
+  any step loses nothing: opening the store places what is aside. On S3
+  a slot holding other bytes is not moved yet (S3 has no listing here to
+  mend an aside after a crash), so there a swap stays not present. Nothing
+  reclaims a re-filed object yet: the operator has no GC of the store, and
+  "eventually garbage collected" waits on one. A git import whose changeset is found wrong then makes
   it again in the same import, where before the store kept it and the
   import stopped. A copy from one store to another (a tool published to
   more projects than its own) is hashed as it streams, and bytes that are
