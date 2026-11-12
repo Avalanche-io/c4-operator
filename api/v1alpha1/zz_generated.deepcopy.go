@@ -3259,6 +3259,11 @@ func (in *WorkJobStatus) DeepCopyInto(out *WorkJobStatus) {
 		*out = new(WorkUsageFold)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.CountedPods != nil {
+		in, out := &in.CountedPods, &out.CountedPods
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Interruptions != nil {
 		in, out := &in.Interruptions, &out.Interruptions
 		*out = make([]WorkInterruption, len(*in))

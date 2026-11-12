@@ -2807,7 +2807,11 @@ and a sweep planner that spawns trials are all generators.
     are folded into one sum, `status.modelUsageOlder`, so a job of many
     units stays within what etcd holds and its totals never change. The
     HUD's job summary shows `spend`, and its unit list `kind` and
-    `usage` (`usageFolded` for an older unit).
+    `usage` (`usageFolded` for an older unit). Each pod is counted once,
+    across a restart too: `status.countedPods` names the pods counted
+    that are still there (finished, not yet deleted), and a queue that
+    starts again does not count those again. Until 2026-11-12 it did: a
+    restart while a finished pod was still listed charged it twice.
   - **Reuse** is C4-native memoization, which Argo's string-keyed one
     cannot be.
     - **What is reused.** A procedural unit ready to run reuses an earlier

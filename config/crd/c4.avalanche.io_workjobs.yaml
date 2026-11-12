@@ -612,6 +612,15 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              countedPods:
+                description: |-
+                  CountedPods names the unit pods (by UID) whose use Spend and
+                  ModelUsage already count and that are still there, finished and not
+                  yet deleted, so a queue that starts again and sees them does not
+                  count them twice. A pod leaves the list once it is gone.
+                items:
+                  type: string
+                type: array
               deadline:
                 description: Deadline is the effective deadline.
                 format: date-time

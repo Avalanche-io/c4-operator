@@ -689,6 +689,12 @@ type WorkJobStatus struct {
 	// Spend's totals never change by a unit being folded.
 	// +optional
 	ModelUsageOlder *WorkUsageFold `json:"modelUsageOlder,omitempty"`
+	// CountedPods names the unit pods (by UID) whose use Spend and
+	// ModelUsage already count and that are still there, finished and not
+	// yet deleted, so a queue that starts again and sees them does not
+	// count them twice. A pod leaves the list once it is gone.
+	// +optional
+	CountedPods []string `json:"countedPods,omitempty"`
 	// Interruptions lists the most recent attempts the farm stopped (a
 	// drain, an eviction, a preemption, a node going away): they spent no
 	// retry and run again. Interrupted counts them all.

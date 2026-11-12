@@ -983,6 +983,18 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 	}
 	capture := needsCapture(j)
 
+	// A counted pod that is no longer listed is gone and is never seen
+	// again: the status stops naming it (CountedPods).
+	listed := make(map[types.UID]bool, len(pods))
+	for _, p := range pods {
+		listed[p.UID] = true
+	}
+	for uid := range m.spentPod {
+		if !listed[uid] {
+			delete(m.spentPod, uid)
+		}
+	}
+
 	for _, p := range pods {
 		if !metaOwned(p, j) {
 			continue

@@ -412,10 +412,30 @@ func money(x float64) string { return fmt.Sprintf("%.4f", x) }
 
 func hours(x float64) string { return fmt.Sprintf("%.4f", x) }
 
+// countedPods is the status's CountedPods: the pods counted so far that
+// are still listed, sorted.
+func countedPods(m *jobMem) []string {
+	if len(m.spentPod) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(m.spentPod))
+	for uid := range m.spentPod {
+		out = append(out, string(uid))
+	}
+	sort.Strings(out)
+	return out
+}
+
 // loadSpend restores what status recorded: each listed model unit's use,
-// the fold of the older ones, and the procedural units' slot cost as a
-// total.
+// the fold of the older ones, the procedural units' slot cost as a total,
+// and which pods still listed it has counted.
 func (m *jobMem) loadSpend(st *c4v1.WorkJobStatus) {
+	for _, uid := range st.CountedPods {
+		if m.spentPod == nil {
+			m.spentPod = map[types.UID]bool{}
+		}
+		m.spentPod[types.UID(uid)] = true
+	}
 	f := func(x string) float64 { v, _ := strconv.ParseFloat(x, 64); return v }
 	if s := st.Spend; s != nil {
 		m.procBase, m.procHours = f(s.ProceduralSlotCost), f(s.ProceduralSlotHours)
