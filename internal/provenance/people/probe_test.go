@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -266,4 +267,64 @@ func mustJSON(t *testing.T, v any) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// A record the issuer serves whole (GET /v1/people/records/{id}, to its own
+// person; anyone else gets a redacted entry from the index's own checked
+// copy) is checked as it is read again: other bytes under its ID are not
+// served. The index checked it when it loaded; the store does not, on a
+// later read.
+func TestAServedRecordIsItsID(t *testing.T) {
+	r := studio(t)
+	c := r.signIn(newDev(t), "dana", danaSub)
+	r.caller = "dana"
+	if code, _ := r.call("GET", "/v1/people/records/"+c.Record, "", nil, nil); code != http.StatusOK {
+		t.Fatalf("dana's own record: %d", code)
+	}
+	other := `{"not":"dana's record"}`
+	if err := r.store.Put(context.Background(), c.Record, []byte(other)); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := r.call("GET", "/v1/people/records/"+c.Record, "", nil, nil); code == http.StatusOK || strings.Contains(body, other) {
+		t.Fatalf("other bytes under dana's record ID were served: %d %s", code, body)
+	}
+}
+
+// The index page serves each entry's private part to its person, read from
+// the store again, and checked: other bytes under the part's ID are not
+// served.
+func TestAnIndexPagesPrivatePartsAreTheirIDs(t *testing.T) {
+	r := studio(t)
+	r.signIn(newDev(t), "dana", danaSub)
+	r.caller = "dana"
+	page := func() people.IndexPage {
+		t.Helper()
+		code, body := r.call("GET", "/v1/people/index", "", nil, nil)
+		if code != http.StatusOK {
+			t.Fatalf("the index, as dana: %d %s", code, body)
+		}
+		var p people.IndexPage
+		if err := json.Unmarshal([]byte(body), &p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	var private string
+	for _, e := range page().Entries {
+		if e.Entry != nil && e.Entry.Person == "dana" && e.Entry.Private != "" && len(e.Private) > 0 {
+			private = e.Entry.Private
+		}
+	}
+	if private == "" {
+		t.Fatal("no private part of dana's is served to her")
+	}
+	other := `{"addr":"198.51.100.7"}`
+	if err := r.store.Put(context.Background(), private, []byte(other)); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range page().Entries {
+		if strings.Contains(string(e.Private), "198.51.100.7") {
+			t.Fatalf("other bytes under a private part's ID were served: %s", e.Private)
+		}
+	}
 }

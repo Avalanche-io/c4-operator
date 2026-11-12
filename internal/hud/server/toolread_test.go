@@ -1,15 +1,19 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/Avalanche-io/c4"
 	"github.com/Avalanche-io/c4/c4m"
 	"github.com/Avalanche-io/c4/store"
 
+	"github.com/Avalanche-io/c4-operator/internal/farmbook"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
 )
@@ -65,5 +69,46 @@ func TestAToolLockIsReadChecked(t *testing.T) {
 	got, ok, err := readFile(ctx, st, v, lockFile, 1<<20)
 	if !errors.Is(err, c4view.ErrNotItsID) || got != nil || !ok || told != id {
 		t.Fatalf("another lock under its ID: %q, %v, %v, told %s", got, ok, err, told)
+	}
+}
+
+// A control record is booked by the ID of its bytes, so its bytes are
+// checked against the ID asked for first: another record's bytes under it
+// (here, a membership that makes kai an admin) are refused, and nothing is
+// booked. Once, the other record was booked as if it were this one.
+func TestAControlRecordIsBookedOnlyIfItIsItsID(t *testing.T) {
+	ctx := context.Background()
+	p := newPartyRig(t)
+	sign := func(purposes []string) []byte {
+		t.Helper()
+		rec, err := provenance.SignStatement(ctx, p.s.Signer, provenance.PredicateControl,
+			[]provenance.Subject{{Name: farmbook.MemberKey("kestrel", "kai"), Digest: map[string]string{"sha256": "00"}}},
+			controlPredicate{Actor: "noor", Action: "add-member", Target: farmbook.MemberKey("kestrel", "kai"),
+				Change: map[string]any{"party": "kestrel", "member": "kai", "purposes": purposes}}, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rec
+	}
+	asked := sign([]string{"member"})
+	other := sign([]string{"member", "admin"})
+	id := c4.Identify(bytes.NewReader(asked)).String()
+	if err := p.store.Put(ctx, id, other); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.s.bookChecked(ctx, id, nil); !errors.Is(err, storeurl.ErrNotItsID) {
+		t.Fatalf("another record's bytes under the ID: %v", err)
+	}
+	v, err := p.s.FarmBookReader.View(ctx, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.State.Pending) != 0 {
+		t.Fatalf("booked: %d entries pending the seal", len(v.State.Pending))
+	}
+	// a farm-level act's record, booked after the act, the same
+	p.s.bookFarm(ctx, id)
+	if v, err = p.s.FarmBookReader.View(ctx, time.Now()); err != nil || len(v.State.Pending) != 0 {
+		t.Fatalf("bookFarm booked another record's bytes: %v, %d pending", err, len(v.State.Pending))
 	}
 }

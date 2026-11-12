@@ -135,8 +135,14 @@ Project says not to, and are trusted from the local cache from then on.**
   more projects than its own) is hashed as it streams, and bytes that are
   not the ID's are refused at their end, so no shard keeps them; a tree
   store's Put whose reader fails leaves nothing under the ID (its writer
-  publishes on Close, and once kept a failed copy). A tool's egress and
-  image pins, once read unchecked, come only from its own files. It costs under 2% of a resolve (50,000 files: 565 ms
+  publishes on Close, and once kept a failed copy). The farm book's and
+  the people's index's own reads check every object they load
+  (`c4id(raw) != id`); their later reads are checked too: a control
+  record booked by the HUD (whose entry books the ID of the bytes, so
+  another record's bytes would be booked as this act's), and what the
+  people's issuer serves again (a device's private part, an index page's,
+  a whole record). A tool's egress and image pins, once read unchecked,
+  come only from its own files. It costs under 2% of a resolve (50,000 files: 565 ms
   against 561). An import from c4git still copies an object without
   hashing it (c4git verified it at `git add`), and a reader finds it not
   present if it is not its ID's.

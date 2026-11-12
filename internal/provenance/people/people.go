@@ -444,7 +444,7 @@ func Private(ctx context.Context, store Store, raw []byte, sees func(person stri
 	case !sees(e.Person):
 		return nil, Redacted{"private"}, nil
 	}
-	b, err := store.Get(ctx, e.Private)
+	b, err := getChecked(ctx, store, e.Private)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -530,7 +530,7 @@ func (i *Issuer) handleIndex(w http.ResponseWriter, r *http.Request) {
 		ie := IndexEntry{ID: ids[k], Entry: e, Redacted: red}
 		if p := es[k].Private; p != "" {
 			if i.sees(r.Context(), who, es[k].Person) {
-				ie.Private, _ = x.Store.Get(r.Context(), p)
+				ie.Private, _ = getChecked(r.Context(), x.Store, p)
 			} else {
 				ie.Redacted = append(ie.Redacted, "private")
 			}
@@ -588,7 +588,7 @@ func (i *Issuer) handleRecord(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	b, err := x.Store.Get(r.Context(), id)
+	b, err := getChecked(r.Context(), x.Store, id)
 	if err != nil {
 		fail(w, err)
 		return

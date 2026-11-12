@@ -516,7 +516,7 @@ func (x *Index) VerifyBookedToken(ctx context.Context, record string) error {
 	}
 	ins := StaticSignIns{}
 	if id := x.signInsAt(e.Position); id != "" {
-		b, err := x.Store.Get(ctx, id)
+		b, err := getChecked(ctx, x.Store, id)
 		if err != nil {
 			return err
 		}

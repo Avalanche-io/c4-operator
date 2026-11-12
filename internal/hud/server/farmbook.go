@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strconv"
@@ -25,6 +26,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
+	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 )
 
 const (
@@ -108,6 +110,11 @@ func (s *Server) bookFarm(ctx context.Context, record string) {
 		return
 	}
 	rec, err := s.FarmBook.Store.Get(ctx, record)
+	if err == nil && c4.Identify(bytes.NewReader(rec)).String() != record {
+		// the entry books the ID of the bytes, so another record's bytes
+		// would be booked as if they were this act's
+		err = fmt.Errorf("%s: %w", record, storeurl.ErrNotItsID)
+	}
 	if err != nil {
 		s.Log.Error(err, "book a control record in the farm book", "record", record)
 		return

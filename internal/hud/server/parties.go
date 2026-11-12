@@ -31,6 +31,7 @@ package server
 //     never members.
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -45,11 +46,14 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/Avalanche-io/c4"
+
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
+	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 )
 
 // The purposes a member may hold (ORGANIZATION 2).
@@ -954,6 +958,11 @@ func (s *Server) bookChecked(ctx context.Context, record string, check func(view
 	rec, err := s.FarmBook.Store.Get(ctx, record)
 	if err != nil {
 		return err
+	}
+	if c4.Identify(bytes.NewReader(rec)).String() != record {
+		// the entry books the ID of the bytes: another record's would be
+		// booked, and checked, as if they were this one
+		return fmt.Errorf("%s: %w", record, storeurl.ErrNotItsID)
 	}
 	for try := 0; try < 8; try++ {
 		view, err := s.FarmBookReader.View(ctx, time.Now())

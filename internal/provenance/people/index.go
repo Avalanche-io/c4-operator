@@ -16,6 +16,7 @@ import (
 
 	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
+	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	"github.com/Avalanche-io/c4-operator/schema"
 )
 
@@ -1075,3 +1076,18 @@ func (x *Index) books(id string) bool {
 }
 
 func c4id(b []byte) string { return c4.Identify(bytes.NewReader(b)).String() }
+
+// getChecked is st.Get, hashed: bytes that are not id's are not served
+// (storeurl.ErrNotItsID). A read the index made when it loaded was
+// checked then; one made again later, to serve or to decide, is checked
+// again, since the store's own reads do not rehash.
+func getChecked(ctx context.Context, st Store, id string) ([]byte, error) {
+	b, err := st.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if got := c4id(b); got != id {
+		return nil, fmt.Errorf("%s: %w (they are %s)", id, storeurl.ErrNotItsID, got)
+	}
+	return b, nil
+}
