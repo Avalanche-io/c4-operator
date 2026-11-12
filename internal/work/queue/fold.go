@@ -48,7 +48,13 @@ type output struct {
 	// base is the stored chain's first line as load read it: the input of a
 	// job whose chain is from before blocks and whose index has no input.
 	loadedBase c4.ID
-	folded     map[int]int // unit -> folds of it (a resumed unit folds each yield)
+	// cut lists, in order, every head a rest cut off from the head (a block,
+	// or a chain from before blocks): with the head they are the whole
+	// history, which the job record names (historyBytes). spine is cut as
+	// stored, an ID list; the index names it.
+	cut    []c4.ID
+	spine  c4.ID
+	folded map[int]int // unit -> folds of it (a resumed unit folds each yield)
 	// paths written by earlier folds, for conflict reports. In memory
 	// only: after a restart conflicts are found among new folds only.
 	writer    map[string]int
@@ -119,6 +125,7 @@ type Index struct {
 	Job     string            `json:"job"`
 	Output  string            `json:"output"`
 	Input   string            `json:"input,omitempty"` // the job's input view, the first fold's base
+	Spine   string            `json:"spine,omitempty"` // the heads the chain's rests cut off, an ID list
 	Prev    string            `json:"prev,omitempty"`  // the segment before; empty in a whole index
 	Records map[string]string `json:"records"`         // path -> task record ID
 	Units   map[int]string    `json:"units"`           // unit -> its latest task record ID
@@ -135,6 +142,7 @@ type segment struct {
 	Job      string            `json:"job"`
 	Output   string            `json:"output"`
 	Input    string            `json:"input,omitempty"`
+	Spine    string            `json:"spine,omitempty"`
 	Prev     string            `json:"prev"`
 	Records  map[string]string `json:"records"`
 	Units    map[int]string    `json:"units"`
@@ -221,6 +229,9 @@ func readIndex(st c4view.Store, id c4.ID) (*Index, int, error) {
 		if d.Input != "" {
 			out.Input = d.Input
 		}
+		if d.Spine != "" {
+			out.Spine = d.Spine
+		}
 	}
 	out.Prev = ""
 	return &out, len(segs) - 1, nil
@@ -235,9 +246,9 @@ func (o *output) saveIndex(ctx context.Context, st *storeurl.Sharded, job string
 	var b []byte
 	var err error
 	if full {
-		b, err = json.Marshal(Index{Version: indexVersion, Job: job, Output: o.view.String(), Input: idString(o.input), Records: o.records, Units: o.units, Folds: o.folds})
+		b, err = json.Marshal(Index{Version: indexVersion, Job: job, Output: o.view.String(), Input: idString(o.input), Spine: idString(o.spine), Records: o.records, Units: o.units, Folds: o.folds})
 	} else {
-		b, err = json.Marshal(segment{Version: indexVersion, Job: job, Output: o.view.String(), Input: idString(o.input), Prev: o.index.String(),
+		b, err = json.Marshal(segment{Version: indexVersion, Job: job, Output: o.view.String(), Input: idString(o.input), Spine: idString(o.spine), Prev: o.index.String(),
 			Records: o.newRecords, Units: o.newUnits, Appended: o.folds[len(o.folds)-o.newFolds:], Folds: segmentMark})
 	}
 	if err != nil {
@@ -342,6 +353,17 @@ func (o *output) loadIndex(ctx context.Context, st *storeurl.Sharded, id, job st
 		o.input = in
 	} else if o.input.IsNil() {
 		o.input = o.loadedBase // an index from before it kept the input
+	}
+	if ix.Spine != "" {
+		sp, err := c4.Parse(ix.Spine)
+		if err != nil {
+			return nil, fmt.Errorf("provenance index: spine: %w", err)
+		}
+		cut, err := readIDList(st, sp)
+		if err != nil {
+			return nil, fmt.Errorf("provenance index: spine %s: %w", sp, err)
+		}
+		o.spine, o.cut = sp, cut
 	}
 	if ix.Version < indexVersion && len(ix.Folds) > 0 {
 		o.dirty, o.rewrite = true, true // its folds were given their runs: stored whole
@@ -450,7 +472,7 @@ func runOfRecord(st *storeurl.Sharded, roots *x509.CertPool, job string, f *Fold
 // with that view's ID; the line is checked and not carried on, so the next
 // fold stores the chain in the form the format allows.
 func (o *output) load(st *storeurl.Sharded, chainID, viewID string) error {
-	id, err := c4.Parse(chainID)
+	id, err := c4.Parse(strings.TrimPrefix(chainID, chainField))
 	if err != nil {
 		return err
 	}
@@ -499,6 +521,52 @@ func chainBlock(changeset []byte, on c4.ID) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// chainField marks the chain in a job's status as a head of blocks, so that
+// a manager from before blocks, which parses the field as a C4 ID, fails on
+// it (its fold waits) rather than taking a block for a whole chain and
+// appending to it, which resolves wrong.
+const chainField = "blocks:"
+
+// idList is ids as an ID list, one per line, in order: the shape core's
+// GC walk reads.
+func idList(ids []c4.ID) []byte {
+	var b bytes.Buffer
+	for _, id := range ids {
+		b.WriteString(id.String())
+		b.WriteByte('\n')
+	}
+	return b.Bytes()
+}
+
+func readIDList(st c4view.Store, id c4.ID) ([]c4.ID, error) {
+	data, err := c4view.ReadObject(st, id)
+	if err != nil {
+		return nil, err
+	}
+	var out []c4.ID
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line == "" {
+			continue
+		}
+		x, err := c4.Parse(line)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, x)
+	}
+	return out, nil
+}
+
+// historyBytes is the job's whole chain history as an ID list: every head
+// a rest cut off, then the head. The job record names it (chain).
+func (o *output) historyBytes() []byte {
+	ids := o.cut[:len(o.cut):len(o.cut)]
+	if !o.id.IsNil() {
+		ids = append(ids, o.id)
+	}
+	return idList(ids)
 }
 
 func idString(id c4.ID) string {
@@ -575,7 +643,7 @@ func (q *Queue) fold(ctx context.Context, st *storeurl.Sharded, o *output, f Fol
 	}
 	// The head moves only when the whole fold is stored, so a fold that
 	// fails and is tried again never stores a section twice in the chain.
-	head, blocks := o.id, o.blocks
+	head, blocks, cut, spine := o.id, o.blocks, o.cut, o.spine
 	var paths, conflicts []string
 	named := map[string]bool{}
 	for _, sec := range cs.Sections {
@@ -608,6 +676,13 @@ func (q *Queue) fold(ctx context.Context, st *storeurl.Sharded, o *output, f Fol
 		if len(res.Changeset) > 0 {
 			on := head
 			if head.IsNil() || blocks >= chainRestEvery {
+				if !head.IsNil() && head != cur {
+					// The head this rest cuts off stays in the history.
+					cut = append(cut[:len(cut):len(cut)], head)
+					if spine, err = st.PutBytes(ctx, idList(cut)); err != nil {
+						return err
+					}
+				}
 				on, blocks = cur, 0
 			}
 			blk, err := chainBlock(res.Changeset, on)
@@ -626,7 +701,7 @@ func (q *Queue) fold(ctx context.Context, st *storeurl.Sharded, o *output, f Fol
 		// alone, whose listing is stored.
 		head = cur
 	}
-	o.view, o.id, o.blocks, o.input = cur, head, blocks, input
+	o.view, o.id, o.blocks, o.input, o.cut, o.spine = cur, head, blocks, input, cut, spine
 	for _, p := range paths {
 		o.writer[p] = idx
 		o.fresh = append(o.fresh, freshPath{unit: idx, path: p})
@@ -731,6 +806,19 @@ func (q *Queue) refoldOutput(ctx context.Context, v *view) bool {
 		return true
 	}
 	o := newOutput()
+	// The history so far stays the job's: the old chain's head joins what
+	// earlier rests cut off, and the rebuilt chain starts from the input.
+	o.cut = m.out.cut[:len(m.out.cut):len(m.out.cut)]
+	if !m.out.id.IsNil() && m.out.id != m.out.view && m.out.id != m.out.input {
+		o.cut = append(o.cut, m.out.id)
+	}
+	if len(o.cut) > 0 {
+		if o.spine, err = st.PutBytes(ctx, idList(o.cut)); err != nil {
+			q.Log.Error(err, "refold", "job", v.key)
+			return false
+		}
+	}
+	o.input = m.out.input
 	for _, f := range m.out.folds {
 		if m.superseded[f.Unit] {
 			continue

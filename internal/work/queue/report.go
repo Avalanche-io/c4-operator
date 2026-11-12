@@ -375,7 +375,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 		}
 	}
 	if o := m.out; o != nil && !o.view.IsNil() {
-		st.Output = &c4v1.WorkOutput{View: o.view.String(), Chain: o.id.String(), Changesets: int32(o.count)}
+		st.Output = &c4v1.WorkOutput{View: o.view.String(), Chain: chainField + o.id.String(), Changesets: int32(o.count)}
 		switch {
 		case m.outIndex != "":
 			// The index the last status named is not loaded yet (it could

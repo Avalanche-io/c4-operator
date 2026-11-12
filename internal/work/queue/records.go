@@ -88,14 +88,45 @@ func (q *Queue) recordDecision(ctx context.Context, v *view, idx int, kind, reas
 	v.mem.decisions = append(v.mem.decisions, d)
 }
 
+// storeHistory stores the job's chain history (output.historyBytes) and
+// returns its ID, or "" when the job has no store or no chain.
+func (q *Queue) storeHistory(ctx context.Context, v *view) (string, error) {
+	if q.Stores == nil || v.mem.out == nil {
+		return "", nil
+	}
+	st, err := q.Stores(ctx, v.project)
+	if err != nil || st == nil {
+		return "", err
+	}
+	if err := q.loadOutput(ctx, st, v); err != nil {
+		return "", err
+	}
+	if v.mem.out.id.IsNil() {
+		return "", nil
+	}
+	id, err := st.PutBytes(ctx, v.mem.out.historyBytes())
+	if err != nil {
+		return "", err
+	}
+	return id.String(), nil
+}
+
 // sealJob signs the job record once the job has ended.
 func (q *Queue) sealJob(ctx context.Context, v *view, st *c4v1.WorkJobStatus, now time.Time) {
 	m := v.mem
 	if q.Signer == nil || m.jobRecord != "" || st.Output == nil || st.Output.View == "" {
 		return
 	}
+	// The chain the record names is its whole history (every head the
+	// chain's rests cut off, then the head), not the head alone, which is
+	// only the read path: stored here, once, as an ID list.
+	chain, err := q.storeHistory(ctx, v)
+	if err != nil {
+		q.Log.Error(err, "job record: the chain's history", "job", v.key)
+		return
+	}
 	var subjects []provenance.Subject
-	for name, id := range map[string]string{"output": st.Output.View, "chain": st.Output.Chain, "index": st.Output.Provenance} {
+	for name, id := range map[string]string{"output": st.Output.View, "chain": chain, "index": st.Output.Provenance} {
 		if cid, err := c4.Parse(id); err == nil {
 			subjects = append(subjects, provenance.SubjectFor(name, cid))
 		}

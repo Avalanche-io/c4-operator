@@ -363,7 +363,10 @@ func TestOutputIsRestoredAfterARestartAndFoldedOnto(t *testing.T) {
 	if len(files) != 2 || files[0] != "a1.txt" || files[1] != "a2.txt" || got.Status.Output.Changesets != 2 {
 		t.Fatalf("after a restart and a second unit the output holds %v, %d changesets", files, got.Status.Output.Changesets)
 	}
-	id, err := c4.Parse(got.Status.Output.Chain)
+	if !strings.HasPrefix(got.Status.Output.Chain, chainField) {
+		t.Fatalf("the status's chain %q is not marked as a head of blocks", got.Status.Output.Chain)
+	}
+	id, err := c4.Parse(strings.TrimPrefix(got.Status.Output.Chain, chainField))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1809,5 +1812,107 @@ func TestARefoldAfterARestartStartsFromTheInput(t *testing.T) {
 	}
 	if m.out.view != in || len(m.out.folds) != 0 {
 		t.Fatalf("with every fold superseded after a restart the output is %s, want the input %s", m.out.view, in)
+	}
+}
+
+// The job record's chain is the whole history: every block a job's folds
+// ever stored is reachable from it (each head a rest cut off, then the
+// head, each walked back to the view it rests on), across restarts, which
+// rest the chain; and the head alone, the read path, resolves within
+// chainRestEvery blocks.
+func TestTheHistoryReachesEveryBlock(t *testing.T) {
+	ctx := context.Background()
+	st, _ := foldStore(t)
+	q := &Queue{}
+	in := inputView(t, st, map[string]string{"in.txt": "input"})
+	o := newOutput()
+	stored := map[c4.ID]bool{}
+	for i := 0; i < 200; i++ {
+		cs := unitChangeset(t, st, in, map[string]string{fmt.Sprintf("d%d/f%03d.txt", i/50, i): fmt.Sprint(i)})
+		if err := q.fold(ctx, st, o, Fold{Unit: i, Changeset: cs, Run: fmt.Sprint(i)}); err != nil {
+			t.Fatal(err)
+		}
+		stored[o.id] = true
+		if i%37 == 36 { // a restart: the chain and view from the status, then the index
+			if err := o.saveIndex(ctx, st, "ns/job"); err != nil {
+				t.Fatal(err)
+			}
+			re := newOutput()
+			if err := re.load(st, chainField+o.id.String(), o.view.String()); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := re.loadIndex(ctx, st, o.index.String(), "ns/job", nil, nil, nil); err != nil {
+				t.Fatal(err)
+			}
+			re.count, re.folded, re.writer = o.count, o.folded, o.writer
+			o = re
+		}
+	}
+	histID, err := st.PutBytes(ctx, o.historyBytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := c4view.ReadObject(st, histID)
+	if err != nil || !c4m.IsIDListContent(data) {
+		t.Fatalf("the history is not an ID list: %v\n%s", err, data)
+	}
+	heads, err := readIDList(st, histID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reached := map[c4.ID]bool{}
+	for _, h := range heads {
+		for cur := h; ; {
+			d, err := c4view.ReadObject(st, cur)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ch, err := c4view.ReadChain(d)
+			if err != nil {
+				break // a view
+			}
+			reached[cur] = true
+			cur = ch.Base
+		}
+	}
+	for b := range stored {
+		if !reached[b] {
+			t.Fatalf("block %s is not reachable from the job's history (%d heads)", b, len(heads))
+		}
+	}
+	n := 0
+	for cur := o.id; ; n++ {
+		d, _ := c4view.ReadObject(st, cur)
+		ch, err := c4view.ReadChain(d)
+		if err != nil {
+			break
+		}
+		cur = ch.Base
+	}
+	if n < 1 || n > chainRestEvery || resolveHead(t, st, o.id) != o.view {
+		t.Fatalf("the head reads %d blocks back to a view (at most %d), and must resolve to the output", n, chainRestEvery)
+	}
+}
+
+// A manager from before blocks reads the status's chain as a C4 ID: the
+// field is marked so it refuses it (its fold waits, FoldFailed) rather than
+// taking a block for a whole chain and appending to it, which resolves
+// wrong. The current reader takes the field as it is written.
+func TestAManagerFromBeforeBlocksRefusesTheChain(t *testing.T) {
+	ctx := context.Background()
+	st, _ := foldStore(t)
+	q := &Queue{}
+	in := inputView(t, st, map[string]string{"in.txt": "input"})
+	o := newOutput()
+	if err := q.fold(ctx, st, o, Fold{Unit: 0, Changeset: unitChangeset(t, st, in, map[string]string{"a.txt": "a"}), Run: "0"}); err != nil {
+		t.Fatal(err)
+	}
+	field := chainField + o.id.String()
+	if _, err := c4.Parse(field); err == nil {
+		t.Fatalf("the status's chain %q parses as a C4 ID, so a manager from before blocks would take it", field)
+	}
+	re := newOutput()
+	if err := re.load(st, field, o.view.String()); err != nil || re.id != o.id {
+		t.Fatalf("the current reader does not take the field it writes: %v", err)
 	}
 }

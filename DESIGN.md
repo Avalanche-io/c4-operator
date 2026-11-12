@@ -2290,6 +2290,21 @@ the newest block no longer reaches, is kept in the provenance index. A chain
 stored as one object before blocks still loads, and the next block rests on
 its view.
 
+The head is the read path; the history is the spine. A rest cuts the head
+off from the blocks before it (every 64 folds, and on a restart), so each
+head a rest cuts off is kept, in order, in an ID list the index names, and
+the job record's `chain` subject is that list with the final head: every
+block the job's folds stored is reachable from the signed record, as the
+whole chain once was. The status field reads `blocks:<head>`, so a manager
+from before blocks, which parses it as a C4 ID, refuses it and its folds
+wait, rather than appending to a block as to a whole chain, which resolves
+wrong. Two core facts this relies on, both fixed in c4 and reaching the
+operator with the pin move: resolving over a base listed one level deep
+gave nested entries wrong while the root ID was right (c4 #140 fetches each
+deepened directory's listing), and core's GC walk took an indented object
+for a leaf, so a block with nested paths was not walked (c4 #141 walks
+patch objects in full; the spine, an ID list, was always walked).
+
 A unit's changeset is a patch over the unit's own input, and a patch entry
 means a write or a removal by what its own base holds; the output is
 another view. So a fold reads each entry against the changeset's base and
