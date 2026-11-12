@@ -1081,20 +1081,27 @@ func (r *runner) queuePreview(n int, path string) {
 	}
 }
 
-// makePreviews makes each queued frame into preview/<frame>.png. After the
-// first failure (no oiiotool in the image, say) it stops trying.
+// makePreviews makes each queued frame into preview/<frame>.png. A frame
+// whose preview fails is said so and tried once more after the run, when
+// the tool has finished writing it; one frame's failure never ends the
+// others' previews (once, every frame after the first was given up).
 func (r *runner) makePreviews() {
-	failed := false
+	var again []previewJob
 	for j := range r.previewQ {
-		if failed {
-			continue
-		}
-		dst := filepath.Join(r.tree, "preview", strconv.Itoa(j.frame)+".png")
-		if err := preview(r.e, j.src, dst, 960); err != nil {
-			fmt.Fprintf(r.e.errOut(), "c4-unit: no previews: frame %d: %v\n", j.frame, err)
-			failed = true
+		if err := r.makePreview(j); err != nil {
+			fmt.Fprintf(r.e.errOut(), "c4-unit: no preview of frame %d yet: %v; trying again after the run\n", j.frame, err)
+			again = append(again, j)
 		}
 	}
+	for _, j := range again {
+		if err := r.makePreview(j); err != nil {
+			fmt.Fprintf(r.e.errOut(), "c4-unit: no preview of frame %d: %v\n", j.frame, err)
+		}
+	}
+}
+
+func (r *runner) makePreview(j previewJob) error {
+	return preview(r.e, j.src, filepath.Join(r.tree, "preview", strconv.Itoa(j.frame)+".png"), 960)
 }
 
 // watchTree finds frames the tool writes that match its previews pattern.
@@ -1126,8 +1133,11 @@ type fileState struct {
 
 // scanTree looks for frames under the previews pattern's fixed prefix. A
 // frame counts once its size and time have held for one scan (or at the
-// end, final), and once only, unless it is written again. seen nil is the
-// final scan: anything written since the run began counts.
+// end, final), and once only, unless it is written again. An empty one
+// never counts while the tool runs, however long it holds: a writer that
+// opens before it writes (GNU cp) leaves the file empty until its bytes
+// come, and an empty file is not a frame yet. seen nil is the final scan:
+// anything written since the run began counts, as the tool left it.
 func (r *runner) scanTree(seen map[string]fileState, final bool) {
 	root := r.tree
 	if pre := fixedPrefix(r.tool.Previews); pre != "" {
@@ -1169,6 +1179,8 @@ func (r *runner) scanTree(seen map[string]fileState, final bool) {
 			seen[rel] = fileState{size: info.Size(), mod: info.ModTime()}
 		case s.size != info.Size() || !s.mod.Equal(info.ModTime()):
 			seen[rel] = fileState{size: info.Size(), mod: info.ModTime()}
+		case info.Size() == 0:
+			// not written yet: it counts once its bytes have come and held
 		case !s.counted:
 			s.counted = true
 			seen[rel] = s
