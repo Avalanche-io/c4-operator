@@ -172,7 +172,7 @@ func runManager(args []string) error {
 		log.Info("signing", "ca", provenance.Fingerprint(sig.ca.Cert)[:16], "issuer", *signerAddr)
 	}
 
-	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
+	mgr, err := ctrl.NewManager(cfg, electLeader(ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsserver.Options{BindAddress: *metricsAddr, FilterProvider: metricsGuard(kube)},
 		HealthProbeBindAddress: *probeAddr,
@@ -184,7 +184,7 @@ func runManager(args []string) error {
 		Cache: cache.Options{ByObject: map[client.Object]cache.ByObject{
 			&corev1.Pod{}: {Label: unitPods()},
 		}},
-	})
+	}, *namespace))
 	if err != nil {
 		return err
 	}

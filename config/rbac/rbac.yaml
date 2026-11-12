@@ -400,6 +400,30 @@ roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: c4-queue-calibr
 subjects:
 - {kind: ServiceAccount, name: c4-manager, namespace: c4-system}
 ---
+# The manager's lease (cmd/c4-operator/leader.go): one manager at a time
+# runs the work queue, the farm book's sealer and the controllers. A Lease
+# that does not exist yet cannot be named, so create is for any.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: c4-manager-lease
+rules:
+- apiGroups: [coordination.k8s.io]
+  resources: [leases]
+  resourceNames: [c4-manager]
+  verbs: [get, update]
+- apiGroups: [coordination.k8s.io]
+  resources: [leases]
+  verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: c4-manager-lease
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: c4-manager-lease}
+subjects:
+- {kind: ServiceAccount, name: c4-manager, namespace: c4-system}
+---
 # The farm's telemetry key (internal/telemetry/farmkey): made the first time
 # the farm produces telemetry, read to name a diagnostic bundle's
 # pseudonyms, replaced by a rotation. Only the manager may read it.
