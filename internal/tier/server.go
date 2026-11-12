@@ -382,6 +382,17 @@ func (s *Server) writeThrough(ctx context.Context, st *storeurl.Sharded, cache *
 		return "", err
 	}
 	if err := st.Put(ctx, id, f, info.Size()); err != nil {
+		if errors.Is(err, storeurl.ErrNotItsID) {
+			// The cached copy is not id's (the store hashed it). Commit
+			// keeps a cached copy over a fresh one, so the client's next
+			// try would upload these bytes again: evict them, and that
+			// try commits what it sends, hashed on the way in.
+			f.Close()
+			if rerr := cache.Remove(id); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
+				err = errors.Join(err, rerr)
+			}
+			return "", fmt.Errorf("the cached copy of %s is not its bytes, evicted: %w", id, err)
+		}
 		return "", err
 	}
 	return "stored", nil

@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/Avalanche-io/c4"
+
+	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 )
 
 // Uploader writes objects through the regional tier with PUT, so the
@@ -124,7 +126,10 @@ func (u *Uploader) putOnce(ctx context.Context, c *HTTPSource, project string, i
 		return nil
 	case resp.StatusCode == http.StatusServiceUnavailable:
 		return ErrBusy
-	case resp.StatusCode == http.StatusUnprocessableEntity, resp.StatusCode == http.StatusBadRequest:
+	case resp.StatusCode == http.StatusUnprocessableEntity:
+		// The tier hashed the body: these bytes are not the ID's.
+		return fmt.Errorf("%w: %w: %s", errRejected, storeurl.ErrNotItsID, strings.TrimSpace(string(msg)))
+	case resp.StatusCode == http.StatusBadRequest:
 		return fmt.Errorf("%w: %s", errRejected, strings.TrimSpace(string(msg)))
 	}
 	return &StatusError{Source: c.Name(), Code: resp.StatusCode, Msg: "PUT " + id.String() + ": " + strings.TrimSpace(string(msg))}

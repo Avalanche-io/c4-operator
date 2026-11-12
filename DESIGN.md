@@ -193,6 +193,14 @@ Project says not to, and are trusted from the local cache from then on.**
   has to give up: 0.7 s more per GiB put into a file:// shard. The four
   callers that hash an object before putting it (a node's publish, the
   tier's write-through, a HUD upload, `c4-operator ingest`) hash it twice.
+  A cache that holds other bytes under an ID (rot, or a fill taken on its
+  source's word) keeps them over a fresh copy, since committing an ID
+  already cached keeps what is there. So a node's capture and the tier's
+  write-through, which send the cached copy, were refused on every try. Now
+  a refusal for those reasons (`ErrNotItsID`, or the tier's 422 for a body
+  that does not hash to its claimed ID) evicts the cached copy: the tier's
+  client heals it on its next try, which is cached and stored as sent, and
+  a capture fails once and the next one caches and sends its own copy.
 - **A fill is checked.** A node cache filling from a peer or the regional
   tier, and the regional tier filling from the store, hash what arrives and
   refuse bytes that are not the ID asked for. `spec.store.verifyFill`

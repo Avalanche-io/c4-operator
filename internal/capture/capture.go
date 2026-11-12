@@ -36,6 +36,7 @@ package capture
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -49,6 +50,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/metrics"
 	"github.com/Avalanche-io/c4-operator/internal/objcache"
 	"github.com/Avalanche-io/c4-operator/internal/overlay"
+	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	"github.com/Avalanche-io/c4-operator/internal/view"
 )
 
@@ -396,6 +398,14 @@ func upload(ctx context.Context, in Input, changed map[c4.ID]bool, paths map[c4.
 				}
 				if err == nil {
 					err = in.Sink.PutFile(ctx, in.Project, id, in.Cache.Path(id))
+					if errors.Is(err, storeurl.ErrNotItsID) {
+						// The cached copy is not id's: Commit kept it over
+						// this capture's own. Evict it, so the next
+						// capture's copy is the one cached and sent.
+						if rerr := in.Cache.Remove(id); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
+							err = errors.Join(err, rerr)
+						}
+					}
 				}
 				mu.Lock()
 				if err != nil && first == nil {

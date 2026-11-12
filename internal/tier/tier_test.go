@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -427,7 +429,7 @@ func TestIngestComputesTheKey(t *testing.T) {
 	// nowhere.
 	other := c4.Identify(strings.NewReader("something else"))
 	err = up.PutBytes(context.Background(), "show", other, []byte("poisoned bytes"))
-	if err == nil || !errors.Is(err, errRejected) {
+	if err == nil || !errors.Is(err, errRejected) || !errors.Is(err, storeurl.ErrNotItsID) {
 		t.Fatalf("mismatched upload: %v", err)
 	}
 	if _, err := shard.Head(context.Background(), other); !errors.Is(err, storeurl.ErrNotFound) {
@@ -618,4 +620,54 @@ func TestFillsVerifyForProjectsThatAsk(t *testing.T) {
 	if cache.Has(id) {
 		t.Fatal("a forged object was cached")
 	}
+}
+
+// The tier's cache holds other bytes under an ID (rot, a bad fill). Commit
+// keeps a cached copy over a fresh one, so the write-through sent those
+// bytes, the store refused them, and every try did the same. Now the
+// refusal evicts them, and the client's next try heals it: its upload,
+// hashed on the way in, is cached and stored.
+func TestWrongCachedCopyIsEvictedAndTheRetryHeals(t *testing.T) {
+	h := newHarness(t, fill.Limits{}, nil)
+	shard, err := storeurl.OpenSharded([]storeurl.Spec{{Name: "s0", URL: t.TempDir()}}, storeurl.Credentials{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.srv.Store = func(string) (*storeurl.Sharded, error) { return shard, nil }
+	data := []byte("frame 1001")
+	id := c4.Identify(bytes.NewReader(data))
+	cache, err := h.caches.Partition("p-show")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rot := filepath.Join(t.TempDir(), "rot")
+	if err := os.WriteFile(rot, []byte("frame 1002"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := cache.Commit(rot, id); err != nil {
+		t.Fatal(err)
+	}
+	src := &HTTPSource{SourceName: "regional-0", SourceKind: "regional", Base: h.http.URL, Client: http.DefaultClient}
+	up := &Uploader{Candidates: func(string, c4.ID) []*HTTPSource { return []*HTTPSource{src} }, Breakers: NewBreakers(), Rounds: 2,
+		Backoff: Backoff{Base: time.Millisecond, Max: time.Millisecond}}
+	if err := up.PutBytes(context.Background(), "show", id, data); err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	if b, _ := cache.ReadAll(id); !bytes.Equal(b, data) {
+		t.Fatalf("cached now: %q", b)
+	}
+	if b, ok := readShard(t, shard, id); !ok || !bytes.Equal(b, data) {
+		t.Fatalf("stored now: %q (%v)", b, ok)
+	}
+}
+
+func readShard(t *testing.T, s *storeurl.Sharded, id c4.ID) ([]byte, bool) {
+	t.Helper()
+	rc, err := s.Open(id)
+	if err != nil {
+		return nil, false
+	}
+	defer rc.Close()
+	b, err := io.ReadAll(rc)
+	return b, err == nil
 }
