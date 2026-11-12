@@ -2279,8 +2279,8 @@ one section (the changeset computed over the output) encoded by the c4m
 library under a first line naming the block before (the spec's external
 base reference), and status names the newest. Every 64 blocks, and before
 the first, a block names the view it was made over instead, whose listing
-is stored, so resolving a head (`c4m.ResolveBaseID`, every block's bytes
-checked) reads at most 64 blocks: 9.6 ms at 10,000 folds, where the chain
+is stored, so resolving a head to the output's ID (`c4m.ResolveBaseID`)
+reads at most 64 blocks: 9.6 ms at 10,000 folds, where the chain
 as one object took 99 s, and about 307 bytes stored per fold. Until
 2026-11-12 every fold stored the whole chain again: 6.2 MB of chain at 200
 folds, 62 KB now. A block holds one section: c4 before 80b7dda (#136)

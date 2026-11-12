@@ -504,8 +504,6 @@ func outputFilesOf(t *testing.T, st *storeurl.Sharded, id c4.ID) map[string]c4.I
 
 func idOf(content string) c4.ID { return c4.Identify(strings.NewReader(content)) }
 
-// checkChain reads the output's stored chain and checks it verifies, by
-// the plain patch rule, to the output.
 // logicalChain is the chain a head stands for, in the shape it had before
 // blocks: walked back block by block to the view the oldest rests on (an
 // object that is a listing, not a chain), its sections in order.
@@ -547,6 +545,8 @@ func logicalChain(t *testing.T, st *storeurl.Sharded, head c4.ID) *c4view.Chain 
 	return out
 }
 
+// checkChain reads the output's stored chain and checks it verifies, by
+// the plain patch rule, to the output, and that its head resolves to it.
 func checkChain(t *testing.T, st *storeurl.Sharded, o *output, sections int) {
 	t.Helper()
 	if sections > 0 && resolveHead(t, st, o.id) != o.view {

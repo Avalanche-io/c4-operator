@@ -607,7 +607,7 @@ func (q *Queue) fold(ctx context.Context, st *storeurl.Sharded, o *output, f Fol
 		// was made over. A section that changed nothing adds nothing.
 		if len(res.Changeset) > 0 {
 			on := head
-			if head.IsNil() || blocks >= chainRestEvery || head == cur {
+			if head.IsNil() || blocks >= chainRestEvery {
 				on, blocks = cur, 0
 			}
 			blk, err := chainBlock(res.Changeset, on)
