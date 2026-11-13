@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # P2: tiers. Thundering herds of pods reading one shot at once, measured
-# where it counts (GetObject requests the MinIO shards themselves served),
+# where it counts (GetObject requests the Garage shards themselves served),
 # for the tiered path, the Direct path (nodes read the store, each node
 # coalescing its own pods), and per-pod fetching (what init containers that
 # copy from S3 do). Then a regional replica is killed in the middle of a
@@ -100,7 +100,7 @@ k -n herd-direct create secret generic naive-s3 \
   --dry-run=client -o yaml | k apply -f - >/dev/null
 for ns in herd-tiered herd-direct; do k -n "$ns" delete materializations --all >/dev/null 2>&1 || true; done
 
-record "Each herd reads a shot of $FRAMES frames of $((FRAME_KIB / 1024)) MiB, unique content per run, so every run starts cold for that shot. Eight workers in two localities; three regional replicas; three MinIO shards. Store GETs are counted by MinIO itself (\`minio_s3_requests_total{api=\"getobject\"}\`). Objects per shot include the directory records nodes fetch to resolve the view."
+record "Each herd reads a shot of $FRAMES frames of $((FRAME_KIB / 1024)) MiB, unique content per run, so every run starts cold for that shot. Eight workers in two localities; three regional replicas; three Garage shards. Store GETs are counted by Garage itself (\`api_s3_request_counter{api_endpoint=\"GetObject\"}\`, each shard's). Objects per shot include the directory records nodes fetch to resolve the view."
 record ""
 record "| path | pods | objects | store GETs | store GETs per object | regional requests per object | peer requests per object | wall s |"
 record "|---|---|---|---|---|---|---|---|"
@@ -203,5 +203,6 @@ k -n herd-tiered delete materialization "$name" --ignore-not-found >/dev/null
 rm -rf "$OUT/p2-$name"
 # Free the space the herds used on the shared Docker disk.
 cold_start
-mc_run "for i in 0 1 2; do mc rm --recursive --force m\$i/herd-tiered m\$i/herd-direct >/dev/null 2>&1 || true; done"
+wipe herd-tiered
+wipe herd-direct
 echo "P2 PASS"

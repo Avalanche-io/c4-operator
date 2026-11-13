@@ -17,7 +17,7 @@ page is for a cluster of your own.
   runs where `topology.kubernetes.io/zone` is set, and nodes in the same zone
   serve each other's cache misses.
 - **A store per project.** S3-compatible object storage with path-style
-  addressing (tested with MinIO) or c4d, as one or more shards. Credentials
+  addressing (tested with Garage, and earlier MinIO) or c4d, as one or more shards. Credentials
   are a Secret in `c4-system`.
 
 ## Install a release

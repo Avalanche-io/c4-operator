@@ -118,7 +118,7 @@ down() {
   k delete project "$DEMO_NAME" --wait=true --timeout=120s >/dev/null 2>&1
   k delete pool "$DEMO_NAME" >/dev/null 2>&1
   k label node "$NODE" c4.avalanche.io/demo- >/dev/null 2>&1
-  mc_run "for i in 0 1 2; do mc rb --force m\$i/$DEMO_NAME >/dev/null 2>&1 || true; done" >/dev/null 2>&1
+  (wipe "$DEMO_NAME") >/dev/null 2>&1 || true # emptied; Garage keeps the bucket
   if had hud-svc-created; then k -n c4-system delete svc c4-hud-e2e c4-signer-e2e >/dev/null 2>&1; fi
   if [ -f "$SHOTS/.manager-args" ]; then
     k -n c4-system patch deploy c4-manager --type=json \
@@ -247,7 +247,7 @@ demo_lent() {
 demo_project() {
   log "project $DEMO_NAME: bucket, namespace, Project, Pool on $NODE"
   k label node "$NODE" c4.avalanche.io/demo="$DEMO_NAME" --overwrite >/dev/null
-  mc_run "for i in 0 1 2; do mc mb --ignore-existing m\$i/$DEMO_NAME >/dev/null; done" >/dev/null
+  for i in 0 1 2; do garage_bucket "garage-$i" "$DEMO_NAME"; done
   k create ns "$NS" --dry-run=client -o yaml | k apply -f - >/dev/null
   k label ns "$NS" pod-security.kubernetes.io/enforce=restricted --overwrite >/dev/null
   k apply -f - >/dev/null <<EOF

@@ -71,13 +71,16 @@ jobs:
         sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
         npx -y @puppeteer/browsers install chrome-headless-shell@stable --path "$RUNNER_TEMP/chs" >/dev/null
         echo "CHROME=$(find "$RUNNER_TEMP/chs" -type f -name chrome-headless-shell | head -1)" >> "$GITHUB_ENV"
-    # minio/minio and minio/mc are gone from Docker Hub; until the e2e farm
-    # moves to Garage, Chainguard's builds (with a shell, for mc_run) stand
-    # in under the names the scripts use, which pull only what is missing.
-    - name: MinIO images
+    # A checkout from before the e2e farm moved to Garage names minio/minio
+    # and minio/mc, which are gone from Docker Hub: Chainguard's builds (with
+    # a shell, for mc_run) stand in under those names, which its scripts
+    # pull only when missing.
+    - name: MinIO images, for a checkout from before Garage
       run: |
-        echo 'FROM cgr.dev/chainguard/minio:latest-dev' | docker build -q -t minio/minio:latest -
-        echo 'FROM cgr.dev/chainguard/minio-client:latest-dev' | docker build -q -t minio/mc:latest -
+        if grep -qs 'minio/minio' old/hack/e2e/up.sh new/hack/e2e/up.sh; then
+          echo 'FROM cgr.dev/chainguard/minio:latest-dev' | docker build -q -t minio/minio:latest -
+          echo 'FROM cgr.dev/chainguard/minio-client:latest-dev' | docker build -q -t minio/mc:latest -
+        fi
     - name: migrate
       run: new/hack/e2e/migrate.sh old new "$RUNNER_TEMP/e2e-migrate"
     - if: always()

@@ -1,0 +1,31 @@
+# The e2e farm's store: Garage instances in c4-store, each one node, made by
+# lib.sh's garage_up (garage-0, garage-1 and garage-2 are the authoritative
+# store's three shards; P3 adds one per project). Each is its own endpoint,
+# so no single S3 endpoint carries every read, and each serves Prometheus
+# metrics on its admin port, so the e2e counts the requests the store
+# itself served. This is the namespace and the configuration they share;
+# the token and secret are for this test farm only.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: c4-store
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: garage, namespace: c4-store}
+data:
+  garage.toml: |
+    metadata_dir = "/var/lib/garage/meta"
+    data_dir = "/var/lib/garage/data"
+    db_engine = "sqlite"
+    replication_factor = 1
+    rpc_bind_addr = "[::]:3901"
+    rpc_secret = "e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2"
+
+    [s3_api]
+    s3_region = "us-east-1"
+    api_bind_addr = "[::]:3900"
+
+    [admin]
+    api_bind_addr = "[::]:3903"
+    admin_token = "c4-e2e-admin"

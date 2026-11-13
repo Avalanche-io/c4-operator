@@ -9,10 +9,23 @@ nodes:
 - role: control-plane
   image: kindest/node:v1.36.1
   extraPortMappings:
-  # MinIO shards (S3 API), so the ingest tool on the host can upload.
+  # The Garage shards' S3 APIs, so the ingest tool on the host can upload,
+  # and their admin APIs (setup and request metrics); then P3's projects'
+  # own instances, the same two each (lib.sh's garage_nodeports).
   - {containerPort: 30900, hostPort: 30900, listenAddress: 127.0.0.1}
   - {containerPort: 30901, hostPort: 30901, listenAddress: 127.0.0.1}
   - {containerPort: 30902, hostPort: 30902, listenAddress: 127.0.0.1}
+  - {containerPort: 30910, hostPort: 30910, listenAddress: 127.0.0.1}
+  - {containerPort: 30911, hostPort: 30911, listenAddress: 127.0.0.1}
+  - {containerPort: 30912, hostPort: 30912, listenAddress: 127.0.0.1}
+  - {containerPort: 30920, hostPort: 30920, listenAddress: 127.0.0.1}
+  - {containerPort: 30921, hostPort: 30921, listenAddress: 127.0.0.1}
+  - {containerPort: 30922, hostPort: 30922, listenAddress: 127.0.0.1}
+  - {containerPort: 30923, hostPort: 30923, listenAddress: 127.0.0.1}
+  - {containerPort: 30930, hostPort: 30930, listenAddress: 127.0.0.1}
+  - {containerPort: 30931, hostPort: 30931, listenAddress: 127.0.0.1}
+  - {containerPort: 30932, hostPort: 30932, listenAddress: 127.0.0.1}
+  - {containerPort: 30933, hostPort: 30933, listenAddress: 127.0.0.1}
   # HUD and MCP (P5, P6).
   - {containerPort: 30080, hostPort: 30080, listenAddress: 127.0.0.1}
   - {containerPort: 30081, hostPort: 30081, listenAddress: 127.0.0.1}

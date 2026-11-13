@@ -24,7 +24,9 @@ exec > >(tee -a "$R/run.log") 2>&1
 CLUSTER=${CLUSTER:-c4-operator-e2e}
 export CLUSTER
 PO=${E2E_PORT_OFFSET:-1000}
-export AWS_ACCESS_KEY_ID=c4e2eaccess AWS_SECRET_ACCESS_KEY=c4e2esecretkey
+# The farm's store is the old checkout's harness's (MinIO before the e2e
+# moved to Garage, Garage after): its root key, as its lib.sh exports it.
+eval "$(grep -m1 '^export AWS_ACCESS_KEY_ID=' "$OLD/hack/e2e/lib.sh")"
 CTX=kind-$CLUSTER
 BIN=$R/bin
 mkdir -p "$BIN"
@@ -87,8 +89,15 @@ up() {
 }
 
 # host_shards PROJECT: --shard flags for the project's store, reached from
-# this machine (the spec's URLs are the cluster's).
+# this machine (the spec's URLs are the cluster's): by the old checkout's
+# harness where it says how (project_host_shards), else as the MinIO
+# harness's shards were.
 host_shards() {
+  if grep -q '^project_host_shards()' "$OLD/hack/e2e/lib.sh"; then
+    # shellcheck disable=SC1091
+    (source "$OLD/hack/e2e/lib.sh" && project_host_shards "$1")
+    return
+  fi
   k get project "$1" -o json | PO=$PO python3 -I -c '
 import json, os, sys
 po = int(os.environ["PO"])

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # P4: monorepo CI on the farm (Scion's case, DESIGN.md section 8.2). The
 # synthetic monorepo's history (hack/e2e/monorepo) is imported into project
-# mono's store, three MinIO shards. CI shards mount commit views instead of
+# mono's store, three Garage shards. CI shards mount commit views instead of
 # checking out; an API-only diff answers which files a change touched, from
 # records alone; a sparse view mounts one service.
 #
@@ -23,8 +23,8 @@ record "## P4: monorepo CI ($(date -u +%Y-%m-%dT%H:%MZ), build $BUILD)"
 record ""
 
 farm_manager
-log "import the history into project mono's three MinIO shards"
-mc_run "for i in 0 1 2; do mc rm --recursive --force m\$i/mono >/dev/null 2>&1 || true; done"
+log "import the history into project mono's three Garage shards"
+wipe mono
 for ns in mono; do
   k -n "$ns" delete workjobs,materializations --all --wait=true >/dev/null 2>&1 || true
   k -n "$ns" delete pods --all --wait=true >/dev/null 2>&1 || true
@@ -160,7 +160,7 @@ PY
 done
 grep -q '| NO |' <<<"$DIFFS" && fail "an API diff disagreed with git diff: $DIFFS"
 
-record "The synthetic monorepo (seed 1: 150 services, 400 commits after the initial one, 62 assets through the real c4git filter; head \`${HEAD:0:12}\`) imported into project \`mono\`'s three MinIO shards in ${IMPORT_S} s:"
+record "The synthetic monorepo (seed 1: 150 services, 400 commits after the initial one, 62 assets through the real c4git filter; head \`${HEAD:0:12}\`) imported into project \`mono\`'s three Garage shards in ${IMPORT_S} s:"
 record ""
 while IFS= read -r line; do record "- $line"; done <"$OUT/p4-import-summary.txt"
 record ""

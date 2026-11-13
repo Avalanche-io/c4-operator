@@ -443,7 +443,10 @@ views as stored, and its next fold would build on an old base), and is
 resumed by running again. Calibration keys are left: an old key misses, a
 cost, and never a wrong result, since reuse takes only units whose inputs
 are the job's input views, which the key hashes. The new CRDs are applied
-before it writes: the old Project CRD prunes `status.renames` silently.
+before it writes (`kubectl apply -k config/crd`, or each
+`c4.avalanche.io_*.yaml`: `-f` on the directory also reads its
+kustomization.yaml and fails): the old Project CRD prunes `status.renames`
+silently, and the run refuses until they are.
 
 ### 2.2 Records
 
@@ -4874,12 +4877,13 @@ with 8 workers in two localities. Results land in
   warm publish hashes nothing, captured output views equal views computed
   independently on the host, and v12 = v11 + 3 frames fetches 3 objects and
   adds one delta layer.
-- **P2: tiers.** Three MinIO shards, three regional replicas, peer homes in
-  two localities. Evidence: store GETs per object counted by MinIO itself,
+- **P2: tiers.** Three Garage shards, three regional replicas, peer homes in
+  two localities. Evidence: store GETs per object counted by the store itself,
   against the number of requesting pods, for the tiered path, the Direct
   path, and per-pod fetching; and a regional replica killed mid-run while
   the job completes, with the extra store GETs bounded.
-- **P3: isolation.** Two projects with separate buckets and MinIO users.
+- **P3: isolation.** Two projects with separate stores and keys, each key
+  granted only its own bucket.
   Evidence: project B cannot read A's objects by ID through any path
   (Materialization, ConfigMap c4m, tier API, peer port, forged volume
   context), strict partitions on a shared node, and grant paths.
@@ -4909,7 +4913,10 @@ with 8 workers in two localities. Results land in
 ### 18.1 As run
 
 What the phase scripts (`hack/e2e/p1.sh` to `p7.sh`) show, against the plan
-above. `REPORT-v2.md` has the numbers.
+above. `REPORT-v2.md` has the numbers, measured on MinIO; since 2026-11-13
+the e2e store is Garage (MinIO's images left Docker Hub), each P3 project
+its own Garage instance so that a store counting its requests is still the
+store itself.
 
 - **P1 to P3** ran as planned.
 - **P4** imports the synthetic monorepo into MinIO and runs CI shards on

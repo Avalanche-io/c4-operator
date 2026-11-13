@@ -1,19 +1,26 @@
 #!/usr/bin/env bash
 # P3: isolation between projects (DESIGN.md section 6). Two Strict projects
-# with their own buckets and MinIO users, two Shared projects in one sharing
-# group, and a vendor project that shares the show's store but may
-# materialize one shot of one version. Each way section 6.2 says project B
+# with their own stores and keys, two Shared projects in one sharing group,
+# and a vendor project that shares the show's store but may materialize one
+# shot of one version. Each project's store is its own Garage instance, one
+# shard, its key granted only its bucket: Garage counts requests per
+# instance, so what a project's store served is counted by the store. Each way section 6.2 says project B
 # cannot read project A's data is attempted for real, from B's namespace.
 #
 #   hack/e2e/p3.sh        (after hack/e2e/up.sh)
 source "$(dirname "$0")/lib.sh"
 
 NODE=$CLUSTER-worker3
-POL=$OUT/p3-policies
 P3NS="iso-a iso-b dept-1 dept-2 vendor"
+# p3_key USER: its Garage key "ID SECRET" (GK and 24 hex digits, 64).
+p3_key() {
+  local h
+  case $1 in iso-a) h=a1 ;; iso-b) h=b1 ;; dept-1) h=d1 ;; dept-2) h=d2 ;; vendor) h=f1 ;; esac
+  printf 'GK%s %s' "$(printf "$h%.0s" $(seq 12))" "$(printf "$h%.0s" $(seq 32))"
+}
 
 # p3_project NAME BUCKET ISOLATION [GROUP]: a Tiered project for namespace
-# NAME with its own MinIO user.
+# NAME on its own store, garage-BUCKET, with its own key.
 p3_project() {
   k apply -f - >/dev/null <<EOF
 apiVersion: c4.avalanche.io/v1alpha1
@@ -27,7 +34,7 @@ spec:
     access: Tiered
     credentialsSecretRef: {name: store-$1}
     shards:
-$(shards_yaml "$2")
+$(shards_yaml "$2" "garage-$2")
 EOF
 }
 
@@ -125,29 +132,23 @@ for ns in $P3NS; do
   k -n "$ns" delete configmaps -l c4e2e=p3 >/dev/null 2>&1 || true
 done
 
-log "stores: one bucket and one MinIO user per project"
-rm -rf "$POL"
-mkdir -p "$POL"
-for b in iso-a iso-b dept-1 dept-2; do
-  printf '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:*"],"Resource":["arn:aws:s3:::%s","arn:aws:s3:::%s/*"]}]}\n' "$b" "$b" >"$POL/$b.json"
+log "stores: one Garage instance and one key per project"
+# shellcheck disable=SC2086
+garage_up $(printf 'garage-%s ' $P3_STORES)
+for b in $P3_STORES; do
+  read -r id secret <<<"$(p3_key "$b")"
+  garage_key "garage-$b" "$id" "$secret" "$b"
+  garage_bucket "garage-$b" "$b" "$id"
+  wipe "$b" "garage-$b"
 done
-docker run --rm --network kind -v "$POL:/p:ro" --entrypoint sh minio/mc:latest -c '
-set -e
-for i in 0 1 2; do
-  mc alias set m$i http://'"$CLUSTER"'-control-plane:3090$i '"$AWS_ACCESS_KEY_ID $AWS_SECRET_ACCESS_KEY"' >/dev/null
-  for b in iso-a iso-b dept-1 dept-2; do
-    mc mb --ignore-existing m$i/$b >/dev/null
-    mc rm --recursive --force m$i/$b >/dev/null 2>&1 || true
-    mc admin policy create m$i rw-$b /p/$b.json >/dev/null
-    mc admin user add m$i $b $b-e2e-secret >/dev/null
-    mc admin policy attach m$i rw-$b --user $b >/dev/null 2>&1 || true
-  done
-  mc admin user add m$i vendor vendor-e2e-secret >/dev/null
-  mc admin policy attach m$i rw-iso-a --user vendor >/dev/null 2>&1 || true
-done' >/dev/null
+# The vendor reads iso-a's store with its own key, granted iso-a's bucket.
+read -r id secret <<<"$(p3_key vendor)"
+garage_key garage-iso-a "$id" "$secret" vendor
+garage_bucket garage-iso-a iso-a "$id"
 for u in iso-a iso-b dept-1 dept-2 vendor; do
-  k -n c4-system create secret generic "store-$u" --from-literal=AWS_ACCESS_KEY_ID="$u" \
-    --from-literal=AWS_SECRET_ACCESS_KEY="$u-e2e-secret" --dry-run=client -o yaml | k apply -f - >/dev/null
+  read -r id secret <<<"$(p3_key "$u")"
+  k -n c4-system create secret generic "store-$u" --from-literal=AWS_ACCESS_KEY_ID="$id" \
+    --from-literal=AWS_SECRET_ACCESS_KEY="$secret" --dry-run=client -o yaml | k apply -f - >/dev/null
 done
 for ns in $P3NS; do
   k create ns "$ns" --dry-run=client -o yaml | k apply -f - >/dev/null
@@ -164,13 +165,13 @@ rm -rf "$SHOW_DIR" "$SECRET_DIR" "$D1_DIR"
 "$TOOL" gen-show --out "$SHOW_DIR" --frame-kib 256 >/dev/null
 "$TOOL" gen-shot --out "$SECRET_DIR" --name sh900 --frames 4 --frame-kib 256 --seed p3-unreleased >/dev/null
 "$TOOL" gen-shot --out "$D1_DIR" --name sh500 --frames 4 --frame-kib 256 --seed p3-dept-1 >/dev/null
-SHOW=$(ingest iso-a "$SHOW_DIR")
+SHOW=$(ingest iso-a "$SHOW_DIR" garage-iso-a)
 for b in iso-b dept-1 dept-2; do
-  [ "$(ingest "$b" "$SHOW_DIR")" = "$SHOW" ] || fail "the show has a different ID in $b"
+  [ "$(ingest "$b" "$SHOW_DIR" "garage-$b")" = "$SHOW" ] || fail "the show has a different ID in $b"
 done
-SECRET=$(ingest iso-a "$SECRET_DIR")
-D1ONLY=$(ingest dept-1 "$D1_DIR")
-"$TOOL" objects --src "$SECRET_DIR" >"$OUT/p3-sh900.objects"
+SECRET=$(ingest iso-a "$SECRET_DIR" garage-iso-a)
+D1ONLY=$(ingest dept-1 "$D1_DIR" garage-dept-1)
+"$TOOL" objects --src "$SECRET_DIR" --shards s0 >"$OUT/p3-sh900.objects"
 "$TOOL" expect --src "$SECRET_DIR" --c4m "$OUT/p3-sh900.c4m" >/dev/null
 "$TOOL" expect --src "$D1_DIR" --c4m "$OUT/p3-sh500.c4m" >/dev/null
 SUB=$("$TOOL" expect --src "$SHOW_DIR" --include shots/sh010/ --c4m "$OUT/p3-sh010.c4m")
@@ -178,16 +179,19 @@ SECRET_OBJ=$("$TOOL" tree-id "$(find "$SECRET_DIR" -name '*.exr' | sort | head -
 PLATE=$("$TOOL" tree-id "$SHOW_DIR/shots/sh010/plates/sh010.1001.exr")
 k wait --for=condition=Ready project iso-a iso-b dept-1 dept-2 --timeout=60s >/dev/null
 
-record "Projects \`iso-a\` and \`iso-b\` are Strict, each with its own bucket and its own MinIO user whose policy allows only that bucket. \`dept-1\` and \`dept-2\` are Shared in sharing group \`show-x\`, also with their own buckets and users. The same show (134 files) is in all four buckets and has the same view ID in each, $SHOW. Shot sh900 is only in \`iso-a\`'s bucket (A's unreleased work); shot sh500 is only in \`dept-1\`'s. Every attempt below is made from project B's side."
+record "Projects \`iso-a\` and \`iso-b\` are Strict, each with its own store (a Garage instance holding its one bucket) and its own key, granted only that bucket. \`dept-1\` and \`dept-2\` are Shared in sharing group \`show-x\`, also with their own buckets and keys. The same show (134 files) is in all four buckets and has the same view ID in each, $SHOW. Shot sh900 is only in \`iso-a\`'s bucket (A's unreleased work); shot sh500 is only in \`dept-1\`'s. Every attempt below is made from project B's side."
 record ""
 
 log "1. the stores"
-out_b=$(AWS_ACCESS_KEY_ID=iso-b AWS_SECRET_ACCESS_KEY=iso-b-e2e-secret "$TOOL" s3get --list "$OUT/p3-sh900.objects" --bucket iso-a --endpoint-fmt "$S3_ENDPOINT_FMT" 2>&1 || true)
+read -r b_id b_secret <<<"$(p3_key iso-b)"
+read -r a_id a_secret <<<"$(p3_key iso-a)"
+A_S3="http://127.0.0.1:$(garage_port garage-iso-a s3)"
+out_b=$(AWS_ACCESS_KEY_ID=$b_id AWS_SECRET_ACCESS_KEY=$b_secret "$TOOL" s3get --list "$OUT/p3-sh900.objects" --bucket iso-a --endpoint "$A_S3" 2>&1 || true)
 case "$out_b" in
   *403* | *AccessDenied* | *"Access Denied"*) ;;
   *) fail "iso-b's credentials read iso-a's bucket: $out_b" ;;
 esac
-AWS_ACCESS_KEY_ID=iso-a AWS_SECRET_ACCESS_KEY=iso-a-e2e-secret "$TOOL" s3get --list "$OUT/p3-sh900.objects" --bucket iso-a --endpoint-fmt "$S3_ENDPOINT_FMT" >/dev/null ||
+AWS_ACCESS_KEY_ID=$a_id AWS_SECRET_ACCESS_KEY=$a_secret "$TOOL" s3get --list "$OUT/p3-sh900.objects" --bucket iso-a --endpoint "$A_S3" >/dev/null ||
   fail "iso-a cannot read its own bucket"
 
 log "2. by ID and by hand-written c4m"
@@ -280,7 +284,7 @@ record "### Attempts to read another project's data"
 record ""
 record "| attempt | made as | outcome |"
 record "|---|---|---|"
-record "| GET A's objects from A's bucket | B's MinIO user, from the host | refused by MinIO: $(cut_msg "$(printf '%s' "$out_b" | grep -o 'Access Denied[^,]*\|AccessDenied[^,]*\|40[0-9][^,]*' | head -1)") |"
+record "| GET A's objects from A's bucket | B's Garage key, from the host | refused by Garage: $(cut_msg "$(printf '%s' "$out_b" | grep -o 'Access Denied[^,]*\|AccessDenied[^,]*\|40[0-9][^,]*' | head -1)") |"
 record "| Materialization naming A's unreleased view by ID | namespace \`iso-b\` | $(cut_msg "$r_id") |"
 record "| ConfigMap c4m listing A's object IDs | namespace \`iso-b\` | $(cut_msg "$r_c4m") |"
 record "| GET an object of A from the regional tier, no token | pod in \`iso-b\` | $(cut_msg "$p_reg_none") |"
@@ -374,7 +378,7 @@ spec:
     access: Tiered
     credentialsSecretRef: {name: store-vendor}
     shards:
-$(shards_yaml iso-a)
+$(shards_yaml iso-a garage-iso-a)
 EOF
 k wait --for=condition=Ready project vendor --timeout=60s >/dev/null
 mat vendor show "$SHOW"
@@ -405,7 +409,7 @@ still=$(k -n vendor exec v-reader -- sh -c 'ls /show/shots/sh010/plates | wc -l'
 
 record "### Grants: a vendor project on the show's store"
 record ""
-record "Project \`vendor\` reads \`iso-a\`'s bucket through its own MinIO user, with scope Grants and one grant: the show's view, paths \`shots/sh010/\`."
+record "Project \`vendor\` reads \`iso-a\`'s bucket through its own Garage key, with scope Grants and one grant: the show's view, paths \`shots/sh010/\`."
 record ""
 record "| Materialization in \`vendor\` | outcome |"
 record "|---|---|"

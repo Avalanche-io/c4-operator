@@ -5,11 +5,13 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 CLUSTER=${CLUSTER:-c4-operator-e2e}
 CTX=kind-$CLUSTER
 # E2E_PORT_OFFSET moves every port the farm publishes on this machine (the
-# HUD, the signer, the three MinIO shards), so a second e2e cluster can run
-# beside another. A multiple of 10. The default, 1000, puts the HUD on 31080,
-# the signer on 31081 and the shards on 31900-31902, outside the ports a
-# person's `c4 farm up` takes (30080 and 30900), so the two never collide;
-# 0 keeps the old 30080, 30081 and 30900-30902.
+# HUD, the signer, the Garage instances' S3 and admin APIs), so a second e2e
+# cluster can run beside another. A multiple of 10. The default, 1000, puts
+# the HUD on 31080, the signer on 31081 and the shards' S3 APIs on
+# 31900-31902 (their admin APIs on 31910-31912, P3's instances on
+# 31920-31923 and 31930-31933), outside the ports a person's `c4 farm up`
+# takes (30080 and 30900), so the two never collide; 0 keeps 30080, 30081
+# and 30900-30902.
 PO=${E2E_PORT_OFFSET:-1000}
 if [ $((PO % 10)) -ne 0 ]; then echo "E2E_PORT_OFFSET must be a multiple of 10" >&2; exit 2; fi
 HUD_PORT=$((30080 + PO))
@@ -26,7 +28,11 @@ KIND=${KIND:-$(command -v kind || echo "$GOBIN/kind")}
 ARCH=$(go env GOARCH)
 OP=$ROOT/bin/c4-operator
 TOOL=$ROOT/bin/c4e2e
-export AWS_ACCESS_KEY_ID=c4e2eaccess AWS_SECRET_ACCESS_KEY=c4e2esecretkey
+# The store's root key, on every instance and every bucket (Garage has no
+# superuser: each bucket grants it). Key IDs are GK and 24 hex digits,
+# secrets 64 hex digits. hack/e2e/migrate.sh reads this line from the
+# checkout whose harness made the farm.
+export AWS_ACCESS_KEY_ID=GKe2e2e2e2e2e2e2e2e2e2e2e2 AWS_SECRET_ACCESS_KEY=e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2
 WORKERS=$(printf "$CLUSTER-worker %s" "$CLUSTER-worker2 $CLUSTER-worker3 $CLUSTER-worker4 $CLUSTER-worker5 $CLUSTER-worker6 $CLUSTER-worker7 $CLUSTER-worker8")
 
 mkdir -p "$OUT"
@@ -48,53 +54,205 @@ built_from() {
 record() { printf '%s\n' "$*" | tee -a "$RESULTS"; }
 since() { perl -e "printf '%.2f', $(now) - $1"; }
 
+# The store is Garage (the image `c4 farm up` runs). garage-0, garage-1 and
+# garage-2 are the three shards every project but P3's uses, each holding
+# one bucket per project. P3's projects each have their own instance
+# (garage-iso-a, ...), one shard: Garage counts requests per instance, not
+# per bucket, so a project's own store counting what it served is the
+# store itself counting. Each instance is one node (sqlite, replication 1)
+# on the control plane, with its S3 and admin APIs on NodePorts the kind
+# config maps to this machine.
+GARAGE_IMAGE=dxflrs/garage:v2.4.1
+GARAGE_TOKEN=c4-e2e-admin
+P3_STORES="iso-a iso-b dept-1 dept-2"
+
+# garage_nodeports NAME: the instance's S3 and admin NodePorts.
+garage_nodeports() {
+  case $1 in
+    garage-[0-2]) echo "$((30900 + ${1#garage-})) $((30910 + ${1#garage-}))" ;;
+    garage-iso-a) echo "30920 30930" ;;
+    garage-iso-b) echo "30921 30931" ;;
+    garage-dept-1) echo "30922 30932" ;;
+    garage-dept-2) echo "30923 30933" ;;
+    *) fail "no Garage instance $1" ;;
+  esac
+}
+# garage_port NAME s3|admin: where this machine reaches it.
+garage_port() {
+  local p
+  read -r -a p <<<"$(garage_nodeports "$1")"
+  if [ "$2" = s3 ]; then echo $((p[0] + PO)); else echo $((p[1] + PO)); fi
+}
+# garage_url NAME: where the cluster reaches its S3 API.
+garage_url() { echo "http://$1.c4-store:3900"; }
+
+# garage_yaml NAME: the instance's Deployment and NodePort Service.
+garage_yaml() {
+  local np
+  read -r -a np <<<"$(garage_nodeports "$1")"
+  cat <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: $1, namespace: c4-store}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: garage, instance: $1}}
+  template:
+    metadata: {labels: {app: garage, instance: $1}}
+    spec:
+      nodeSelector: {node-role.kubernetes.io/control-plane: ""}
+      tolerations: [{operator: Exists}]
+      containers:
+      - name: garage
+        image: $GARAGE_IMAGE
+        imagePullPolicy: IfNotPresent
+        ports: [{containerPort: 3900}, {containerPort: 3903}]
+        volumeMounts:
+        - {name: config, mountPath: /etc/garage.toml, subPath: garage.toml}
+        - {name: data, mountPath: /var/lib/garage}
+      volumes:
+      - {name: config, configMap: {name: garage}}
+      - {name: data, emptyDir: {}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: $1, namespace: c4-store}
+spec:
+  type: NodePort
+  selector: {app: garage, instance: $1}
+  ports:
+  - {name: s3, port: 3900, nodePort: ${np[0]}}
+  - {name: admin, port: 3903, nodePort: ${np[1]}}
+EOF
+}
+
+# garage_admin NAME CALL [JSON]: one admin API v2 call, from this machine.
+garage_admin() {
+  curl -sf -m 30 -H "Authorization: Bearer $GARAGE_TOKEN" -H 'Content-Type: application/json' \
+    "http://127.0.0.1:$(garage_port "$1" admin)/v2/$2" ${3:+-d "$3"}
+}
+
+# garage_up NAME...: each instance running, its layout applied (one node,
+# one zone), and the root key on it. Running it again changes nothing.
+garage_up() {
+  local n node ver
+  k apply -f "$ROOT/hack/e2e/garage.yaml" >/dev/null
+  for n in "$@"; do garage_yaml "$n" | k apply -f - >/dev/null; done
+  for n in "$@"; do
+    k -n c4-store rollout status "deploy/$n" --timeout=180s >/dev/null || fail "$n did not start"
+    until garage_admin "$n" GetClusterStatus >/dev/null; do sleep 1; done
+    if [ "$(garage_admin "$n" GetClusterLayout | jq '.roles | length')" = 0 ]; then
+      node=$(garage_admin "$n" GetClusterStatus | jq -r '.nodes[0].id')
+      garage_admin "$n" UpdateClusterLayout "{\"roles\":[{\"id\":\"$node\",\"zone\":\"e2e\",\"capacity\":100000000000,\"tags\":[]}]}" >/dev/null
+      ver=$(garage_admin "$n" GetClusterLayout | jq '.version + 1')
+      garage_admin "$n" ApplyClusterLayout "{\"version\":$ver}" >/dev/null || fail "$n: the layout"
+    fi
+    until curl -sf -m 5 -o /dev/null "http://127.0.0.1:$(garage_port "$n" admin)/health"; do sleep 1; done
+    garage_key "$n" "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY" root
+  done
+}
+
+# garage_key NAME ID SECRET LABEL: the key on the instance.
+garage_key() {
+  garage_admin "$1" "GetKeyInfo?id=$2" >/dev/null ||
+    garage_admin "$1" ImportKey "{\"accessKeyId\":\"$2\",\"secretAccessKey\":\"$3\",\"name\":\"$4\"}" >/dev/null ||
+    fail "$1: key $4"
+}
+
+# garage_bucket NAME BUCKET [KEY...]: the bucket on the instance, the root
+# key allowed everything on it, and each KEY reading and writing it.
+garage_bucket() {
+  local n=$1 b=$2 id key
+  shift 2
+  if ! id=$(garage_admin "$n" "GetBucketInfo?globalAlias=$b" | jq -r .id); then
+    id=$(garage_admin "$n" CreateBucket "{\"globalAlias\":\"$b\"}" | jq -r .id)
+  fi
+  [ -n "$id" ] && [ "$id" != null ] || fail "$n: bucket $b"
+  garage_admin "$n" AllowBucketKey "{\"bucketId\":\"$id\",\"accessKeyId\":\"$AWS_ACCESS_KEY_ID\",\"permissions\":{\"read\":true,\"write\":true,\"owner\":true}}" >/dev/null ||
+    fail "$n: bucket $b for the root key"
+  for key in "$@"; do
+    garage_admin "$n" AllowBucketKey "{\"bucketId\":\"$id\",\"accessKeyId\":\"$key\",\"permissions\":{\"read\":true,\"write\":true,\"owner\":false}}" >/dev/null ||
+      fail "$n: bucket $b for $key"
+  done
+}
+
+# wipe BUCKET [NAME...]: every object out of the bucket on each instance
+# (the three shards by default). Garage has no call that empties one.
+wipe() {
+  local b=$1 n
+  shift
+  for n in ${@:-garage-0 garage-1 garage-2}; do
+    "$TOOL" s3keys --endpoint "http://127.0.0.1:$(garage_port "$n" s3)" --bucket "$b" --delete >/dev/null || fail "wipe $b on $n"
+  done
+}
+
+# count_keys NAME BUCKET: the objects the bucket holds on the instance.
+count_keys() { "$TOOL" s3keys --endpoint "http://127.0.0.1:$(garage_port "$1" s3)" --bucket "$2"; }
+
 # shard_args PROJECT HOST|CLUSTER: --shard flags for a project's bucket.
 shard_args() {
   local bucket=$1 where=$2 i
   for i in 0 1 2; do
     if [ "$where" = host ]; then
-      printf -- '--shard s%d=s3://%s/c4/?endpoint=http://127.0.0.1:%d ' "$i" "$bucket" "$(s3port "$i")"
+      printf -- '--shard s%d=s3://%s/c4/?endpoint=http://127.0.0.1:%d ' "$i" "$bucket" "$(garage_port "garage-$i" s3)"
     else
-      printf -- '--shard s%d=s3://%s/c4/?endpoint=http://minio-%d.c4-store:9000 ' "$i" "$bucket" "$i"
+      printf -- '--shard s%d=s3://%s/c4/?endpoint=%s ' "$i" "$bucket" "$(garage_url "garage-$i")"
     fi
   done
 }
 
-# shards_yaml BUCKET: the Project's shard list.
+# shards_yaml BUCKET [NAME]: the Project's shard list: the three shards, or
+# one, the instance NAME.
 shards_yaml() {
   local bucket=$1 i
+  if [ -n "${2:-}" ]; then
+    printf '    - {name: s0, url: "s3://%s/c4/?endpoint=%s"}\n' "$bucket" "$(garage_url "$2")"
+    return
+  fi
   for i in 0 1 2; do
-    printf '    - {name: s%d, url: "s3://%s/c4/?endpoint=http://minio-%d.c4-store:9000"}\n' "$i" "$bucket" "$i"
+    printf '    - {name: s%d, url: "s3://%s/c4/?endpoint=%s"}\n' "$i" "$bucket" "$(garage_url "garage-$i")"
   done
 }
 
-# ingest BUCKET DIR: hash DIR into the bucket's three shards; prints the view ID.
+# project_host_shards PROJECT: --shard flags for a Project's store as this
+# machine reaches it, from its spec (hack/e2e/migrate.sh calls it).
+project_host_shards() {
+  local line name url g
+  k get project "$1" -o jsonpath='{range .spec.store.shards[*]}{.name}={.url}{"\n"}{end}' | while IFS= read -r line; do
+    name=${line%%=*} url=${line#*=}
+    for g in garage-0 garage-1 garage-2 garage-iso-a garage-iso-b garage-dept-1 garage-dept-2; do
+      url=${url/$(garage_url "$g")/http://127.0.0.1:$(garage_port "$g" s3)}
+    done
+    printf -- '--shard %s=%s ' "$name" "$url"
+  done
+}
+
+# ingest BUCKET DIR [NAME]: hash DIR into the bucket's three shards, or the
+# one on instance NAME; prints the view ID.
 ingest() {
+  if [ -n "${3:-}" ]; then
+    "$OP" ingest -q --shard "s0=s3://$1/c4/?endpoint=http://127.0.0.1:$(garage_port "$3" s3)" "$2"
+    return
+  fi
   # shellcheck disable=SC2046
   "$OP" ingest -q $(shard_args "$1" host) "$2"
 }
 
-# mc ARGS...: run the MinIO client in the cluster against all shards.
-mc_run() {
-  local name=mc-$RANDOM
-  k -n c4-store run "$name" --restart=Never --image=minio/mc:latest --image-pull-policy=IfNotPresent \
-    --overrides='{"spec":{"tolerations":[{"operator":"Exists"}],"nodeSelector":{"kubernetes.io/hostname":"'"$CLUSTER"'-control-plane"}}}' \
-    --command -- sh -c "for i in 0 1 2; do until mc alias set m\$i http://minio-\$i.c4-store:9000 c4e2eaccess c4e2esecretkey >/dev/null 2>&1; do sleep 1; done; done; $*" >/dev/null
-  k -n c4-store wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$name" --timeout=180s >/dev/null || {
-    k -n c4-store logs "$name" >&2 || true
-    fail "mc: $*"
-  }
-  k -n c4-store logs "$name"
-  k -n c4-store delete pod "$name" --wait=false >/dev/null
+# instance_requests NAME: "GETS HEADS" the instance's S3 API has served,
+# refused ones included (Garage counts every request it answers).
+instance_requests() {
+  curl -sf -m 30 "http://127.0.0.1:$(garage_port "$1" admin)/metrics" | awk '
+    /^api_s3_request_counter\{/ && /api_endpoint="GetObject"/ { g += $NF }
+    /^api_s3_request_counter\{/ && /api_endpoint="HeadObject"/ { h += $NF }
+    END { printf "%d %d", g, h }'
 }
 
-# store_gets: GetObject requests served by all three MinIO shards so far.
+# store_gets: GetObject requests served by the three shards so far.
 store_gets() {
-  local total=0 i n
+  local total=0 i line
   for i in 0 1 2; do
-    n=$(curl -sf "http://127.0.0.1:$(s3port "$i")/minio/v2/metrics/cluster" |
-      awk '/^minio_s3_requests_total\{/ && /api="getobject"/ {s+=$NF} END {printf "%d", s}')
-    total=$((total + ${n:-0}))
+    line=$(instance_requests "garage-$i")
+    total=$((total + ${line% *}))
   done
   echo "$total"
 }
@@ -212,14 +370,14 @@ cold_start() {
   k -n c4-system rollout status ds/c4-node --timeout=300s >/dev/null
 }
 
-# settled CMD...: CMD's output once two readings six seconds apart agree.
-# MinIO caches its metrics for about ten seconds.
+# settled CMD...: CMD's output once two readings three seconds apart
+# agree, so requests still in flight are counted.
 settled() {
   local a b
-  sleep 12
+  sleep 3
   a=$("$@")
   while :; do
-    sleep 6
+    sleep 3
     b=$("$@")
     [ "$a" = "$b" ] && break
     a=$b
@@ -229,21 +387,9 @@ settled() {
 
 store_gets_settled() { settled store_gets; }
 
-# bucket_requests BUCKET: "GETS HEADS" MinIO served for one bucket, summed
-# over the three shards.
-bucket_requests() {
-  local i g=0 h=0 line
-  for i in 0 1 2; do
-    line=$(curl -sf "http://127.0.0.1:$(s3port "$i")/minio/v2/metrics/bucket" |
-      awk -v b="bucket=\"$1\"" '
-        /^minio_bucket_requests_total\{/ && index($0, b) && /api="getobject"/ { g += $NF }
-        /^minio_bucket_requests_total\{/ && index($0, b) && /api="headobject"/ { h += $NF }
-        END { printf "%d %d", g, h }')
-    line=${line:-0 0}
-    g=$((g + ${line% *})) h=$((h + ${line#* }))
-  done
-  echo "$g $h"
-}
+# bucket_requests BUCKET: "GETS HEADS" P3's project BUCKET's own store has
+# served (its instance holds only its bucket).
+bucket_requests() { instance_requests "garage-$1"; }
 
 # mat_outcome NS NAME: once the Materialization is Ready or Failed,
 # "PHASE REASON: MESSAGE".

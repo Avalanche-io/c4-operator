@@ -11,7 +11,7 @@
 //	                                                  view ID of a subset, optionally after a render
 //	c4e2e add-frames --count N --dir REL --pod NAME DIR  add N new frames (keyed by pod) under DIR/REL
 //	c4e2e objects   --src DIR --shards s0,s1,s2        each object's shard, as "shard id" lines
-//	c4e2e s3get     --list FILE --bucket B --endpoint-fmt http://minio-%s.c4-store:9000
+//	c4e2e s3get     --list FILE --bucket B [--endpoint-fmt http://garage-%s.c4-store:3900 | --endpoint URL]
 //	                                                  read every listed object straight from S3
 //	c4e2e s3keys    --endpoint URL --bucket B [--prefix c4/] [--delete]
 //	                                                  count a bucket's keys, or empty it
@@ -504,7 +504,8 @@ func s3get(args []string) error {
 	list := fs.String("list", "", "file of \"shard id\" lines")
 	bucket := fs.String("bucket", "", "bucket")
 	prefix := fs.String("prefix", "c4/", "key prefix")
-	endpointFmt := fs.String("endpoint-fmt", "http://minio-%s.c4-store:9000", "endpoint, %s is the shard number")
+	endpointFmt := fs.String("endpoint-fmt", "http://garage-%s.c4-store:3900", "endpoint, %s is the shard number")
+	endpoint := fs.String("endpoint", "", "one endpoint for every shard, in place of --endpoint-fmt")
 	fs.Parse(args)
 	data, err := os.ReadFile(*list)
 	if err != nil {
@@ -521,7 +522,11 @@ func s3get(args []string) error {
 		}
 		sh, ok := shards[name]
 		if !ok {
-			url := fmt.Sprintf("s3://%s/%s?endpoint=%s", *bucket, *prefix, fmt.Sprintf(*endpointFmt, strings.TrimPrefix(name, "s")))
+			ep := *endpoint
+			if ep == "" {
+				ep = fmt.Sprintf(*endpointFmt, strings.TrimPrefix(name, "s"))
+			}
+			url := fmt.Sprintf("s3://%s/%s?endpoint=%s", *bucket, *prefix, ep)
 			sh, err = storeurl.Open(url, creds)
 			if err != nil {
 				return err

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Bring up the e2e cluster: kind with eight workers in two zones, three
-# MinIO shards, the operator, and the projects the phases use. Everything
+# Garage shards, the operator, and the projects the phases use. Everything
 # stays on this machine: images are built locally and loaded into kind.
 #
 #   hack/e2e/up.sh             create or update
@@ -26,16 +26,26 @@ CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" go build -trimpath -o "$ROOT/bin/linux_$
 go build -o "$TOOL" "$ROOT/hack/e2e/tool"
 go build -o "$OP" "$ROOT/cmd/c4-operator"
 docker build -q --build-arg TARGETARCH="$ARCH" -t c4-e2e:dev -f "$ROOT/hack/e2e/Dockerfile.tool" "$ROOT" >/dev/null
-for img in c4-operator:dev c4-e2e:dev minio/minio:latest minio/mc:latest registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.15.0; do
-  docker image inspect "$img" >/dev/null 2>&1 || docker pull -q "$img" >/dev/null
+# pulled IMAGE: the image here, as one platform. A pulled image can be a
+# multi-platform index naming layers of other platforms it never fetched,
+# which `kind load` refuses ("content digest ... not found", Docker
+# Desktop's containerd store); built FROM itself it is this machine's
+# platform alone.
+pulled() {
+  docker image inspect "$1" >/dev/null 2>&1 || docker pull -q "$1" >/dev/null
+  echo "FROM $1" | docker build -q -t "$1" - >/dev/null
+}
+for img in "$GARAGE_IMAGE" registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.15.0; do pulled "$img"; done
+for img in c4-operator:dev c4-e2e:dev "$GARAGE_IMAGE" registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.15.0; do
   "$KIND" load docker-image "$img" --name "$CLUSTER" >/dev/null
 done
 
-log "store: three MinIO shards"
-k apply -f "$ROOT/hack/e2e/minio.yaml" >/dev/null
-for i in 0 1 2; do k -n c4-store rollout status "deploy/minio-$i" --timeout=180s >/dev/null; done
-for i in 0 1 2; do until curl -sf "http://127.0.0.1:$(s3port "$i")/minio/health/ready" >/dev/null; do sleep 1; done; done
-mc_run 'for i in 0 1 2; do for b in show-a show-b herd-tiered herd-direct mono; do mc mb --ignore-existing m$i/$b >/dev/null; done; done; echo buckets ready'
+log "store: three Garage shards"
+garage_up garage-0 garage-1 garage-2
+for i in 0 1 2; do
+  for b in show-a show-b herd-tiered herd-direct mono; do garage_bucket "garage-$i" "$b"; done
+done
+echo "buckets ready"
 
 log "operator"
 k apply -k "$ROOT/config/default" >/dev/null
