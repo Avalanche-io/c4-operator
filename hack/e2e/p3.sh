@@ -135,15 +135,20 @@ done
 log "stores: one Garage instance and one key per project"
 # shellcheck disable=SC2086
 garage_up $(printf 'garage-%s ' $P3_STORES)
+# Every project's key is known to every store, and each bucket grants only
+# its own project's: B's key is refused A's bucket by A's store for want of
+# a grant, not as a key it has never seen.
 for b in $P3_STORES; do
+  for u in $P3_STORES vendor; do
+    read -r id secret <<<"$(p3_key "$u")"
+    garage_key "garage-$b" "$id" "$secret" "$u"
+  done
   read -r id secret <<<"$(p3_key "$b")"
-  garage_key "garage-$b" "$id" "$secret" "$b"
   garage_bucket "garage-$b" "$b" "$id"
   wipe "$b" "garage-$b"
 done
 # The vendor reads iso-a's store with its own key, granted iso-a's bucket.
 read -r id secret <<<"$(p3_key vendor)"
-garage_key garage-iso-a "$id" "$secret" vendor
 garage_bucket garage-iso-a iso-a "$id"
 for u in iso-a iso-b dept-1 dept-2 vendor; do
   read -r id secret <<<"$(p3_key "$u")"

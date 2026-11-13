@@ -22,6 +22,9 @@ record ""
 record "## P4: monorepo CI ($(date -u +%Y-%m-%dT%H:%MZ), build $BUILD)"
 record ""
 
+# P5's pools and the HUD's NodePorts (farm_manager waits on the HUD through
+# them), so P4 also runs on a farm P5 never ran on
+k apply -f "$ROOT/hack/e2e/work.yaml" -f "$ROOT/hack/e2e/hud.yaml" >/dev/null
 farm_manager
 log "import the history into project mono's three Garage shards"
 wipe mono
