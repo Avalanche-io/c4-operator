@@ -6,8 +6,11 @@
 #
 #   hack/e2e/hud-shots.sh PREFIX shot...     shots: queue job:NS/NAME pools map tiers cost graph artist wall widget:NS/NAME
 #
-# Uses chrome-headless-shell (a plain binary, not an .app bundle). The
-# browser exits by itself after each capture; it is never killed.
+# Uses chrome-headless-shell (a plain binary, not an .app bundle): CHROME
+# names it, else the newest under ~/.cache/puppeteer for any platform
+# (`npx @puppeteer/browsers install chrome-headless-shell@stable` puts one
+# there). The browser exits by itself after each capture; it is never
+# killed.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -16,8 +19,7 @@ base="${HUD_URL:-http://127.0.0.1:31080}/"
 mkdir -p "$out"
 chrome="${CHROME:-}"
 if [[ -z "$chrome" ]]; then
-  dir="$(ls -d "$HOME"/.cache/puppeteer/chrome-headless-shell/mac_arm-*/ 2>/dev/null | sort -V | tail -1)"
-  chrome="${dir}chrome-headless-shell-mac-arm64/chrome-headless-shell"
+  chrome="$(find "$HOME/.cache/puppeteer/chrome-headless-shell" -type f -name chrome-headless-shell 2>/dev/null | sort -V | tail -1)"
 fi
 [[ -x "$chrome" ]] || { echo "chrome-headless-shell not found; set CHROME" >&2; exit 1; }
 tmp="$(mktemp -d)"

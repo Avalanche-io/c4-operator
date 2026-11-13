@@ -1,5 +1,5 @@
 # A one-shard store for the quickstart: Garage on the control plane,
-# reached by the cluster at garage.c4-store:3900 and by this machine at
+# reached by the cluster at garage-s3.c4-store:3900 and by this machine at
 # 127.0.0.1:30900, with a bucket named quickstart. The key and secrets are
 # for a local trial only. Garage key IDs are GK and 24 hex digits, and
 # secrets 64 hex digits.

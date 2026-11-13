@@ -64,13 +64,15 @@ record "## P5: the work queue on the e2e farm ($(date -u +%Y-%m-%dT%H:%MZ), poli
 record ""
 
 log "farm"
+# The pools and the HUD's NodePorts first: farm_manager waits on the HUD
+# through them, so on a farm no phase has set them up it never answers.
+k apply -f "$ROOT/hack/e2e/work.yaml" -f "$ROOT/hack/e2e/hud.yaml" >/dev/null
 farm_manager "$POLICY"
 for ns in show-a show-b; do k -n "$ns" delete workjobs --all --wait=true >/dev/null 2>&1 || true; done
 k delete capacityrequests --all >/dev/null 2>&1 || true
 for n in $CLUSTER-worker4 $CLUSTER-worker8; do
   k taint node "$n" c4.avalanche.io/unprovisioned=true:NoSchedule --overwrite >/dev/null
 done
-k apply -f "$ROOT/hack/e2e/work.yaml" -f "$ROOT/hack/e2e/hud.yaml" >/dev/null
 cold_start
 farm_manager "$POLICY"
 for p in show-a show-b; do
