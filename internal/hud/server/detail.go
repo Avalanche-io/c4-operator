@@ -726,7 +726,7 @@ func (s *Server) previews(ctx context.Context, project, viewID string) (map[int]
 	if err != nil {
 		return nil, err
 	}
-	id = c4project.Current(ctx, s.Client, st, project, id)
+	id = s.viewNow(ctx, st, project, id)
 	v, err := c4view.Load(ctx, id, c4view.StoreRecords(st), 16)
 	if err != nil {
 		return nil, err
@@ -849,7 +849,7 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusServiceUnavailable, "project %s has no reachable store", project)
 		return
 	}
-	from, to = c4project.Current(r.Context(), s.Client, st, project, from), c4project.Current(r.Context(), s.Client, st, project, to)
+	from, to = s.viewNow(r.Context(), st, project, from), s.viewNow(r.Context(), st, project, to)
 	start := time.Now()
 	changes, truncated, err := c4view.ChangedFiles(r.Context(), from, to, c4view.StoreRecords(st), limit)
 	if err != nil {
@@ -1092,4 +1092,15 @@ func expansionList(st *c4v1.WorkJobStatus) []map[string]any {
 		out = append(out, e)
 	}
 	return out
+}
+
+// viewNow is the ID a view given from outside has now in project's store
+// (project.Current); a table that cannot be read is logged, and the reader
+// goes on with the ID it was given.
+func (s *Server) viewNow(ctx context.Context, st c4view.Store, project string, id c4.ID) c4.ID {
+	cur, err := c4project.Current(ctx, s.Client, st, project, id)
+	if err != nil {
+		s.Log.Error(err, "a view ID not resolved through the project's renames table", "project", project, "view", id.String())
+	}
+	return cur
 }

@@ -389,7 +389,7 @@ func (q *Queue) declaredNetworks(ctx context.Context, project, view string) ([]s
 	if err != nil {
 		return nil, err
 	}
-	tree, err := c4view.Load(ctx, c4project.Current(ctx, q.Client, st, project, id), c4view.StoreRecords(st), 4)
+	tree, err := c4view.Load(ctx, q.current(ctx, st, project, id), c4view.StoreRecords(st), 4)
 	if err != nil {
 		return nil, err
 	}
@@ -745,4 +745,15 @@ func addSignerToken(pod *corev1.Pod, signer string) {
 		pod.Spec.Containers[k].Env = append(pod.Spec.Containers[k].Env, corev1.EnvVar{Name: "C4_SIGNER", Value: signer},
 			corev1.EnvVar{Name: "C4_SIGNER_TOKEN_FILE", Value: "/etc/c4/signer/token"})
 	}
+}
+
+// current is the ID a view given from outside has now in project's store
+// (project.Current); a table that cannot be read is logged, and the reader
+// goes on with the ID it was given.
+func (q *Queue) current(ctx context.Context, st c4view.Store, project string, id c4.ID) c4.ID {
+	cur, err := c4project.Current(ctx, q.Client, st, project, id)
+	if err != nil {
+		q.Log.Error(err, "a view ID not resolved through the project's renames table", "project", project, "view", id.String())
+	}
+	return cur
 }

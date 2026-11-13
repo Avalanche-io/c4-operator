@@ -39,7 +39,6 @@ import (
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/authoring"
 	"github.com/Avalanche-io/c4-operator/internal/jobspec"
-	c4project "github.com/Avalanche-io/c4-operator/internal/project"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
@@ -451,7 +450,7 @@ func (s *Server) handleViewFiles(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "no such view")
 		return
 	}
-	id = c4project.Current(r.Context(), s.Client, st, project, id)
+	id = s.viewNow(r.Context(), st, project, id)
 	view, err := c4view.Load(r.Context(), id, c4view.StoreRecords(st), 16)
 	if err != nil {
 		fail(w, http.StatusNotFound, "no such view: %v", err)

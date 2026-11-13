@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -183,20 +184,27 @@ func firstKey(data map[string][]byte, keys ...string) string {
 // reader given the ID from outside what it wrote (a request, a spec, a
 // record's subject): an ID a c4 library change renamed resolves through
 // the renames table the Project's status names (view.ResolveOld), and any
-// other ID is itself. When the Project or its table cannot be read it is
-// id too, and the load that follows says what it cannot find.
-func Current(ctx context.Context, c client.Reader, st view.Store, name string, id c4.ID) c4.ID {
+// other ID is itself. A Project with no table, or none at all, renames
+// nothing. When the Project or its table cannot be read, or a line of it
+// is false, it returns id and the error: the reader goes on with the ID it
+// was given, and says why it could not be resolved.
+func Current(ctx context.Context, c client.Reader, st view.Store, name string, id c4.ID) (c4.ID, error) {
+	if c == nil || st == nil {
+		return id, nil
+	}
 	var p c4v1.Project
-	if c == nil || st == nil || c.Get(ctx, types.NamespacedName{Name: name}, &p) != nil || p.Status.Renames == "" {
-		return id
+	if err := c.Get(ctx, types.NamespacedName{Name: name}, &p); err != nil {
+		if apierrors.IsNotFound(err) {
+			return id, nil
+		}
+		return id, fmt.Errorf("project %s, for its renames table: %w", name, err)
+	}
+	if p.Status.Renames == "" {
+		return id, nil
 	}
 	table, err := c4.Parse(p.Status.Renames)
 	if err != nil {
-		return id
+		return id, fmt.Errorf("project %s status.renames: %w", name, err)
 	}
-	cur, err := view.ResolveOld(ctx, st, table, id)
-	if err != nil {
-		return id
-	}
-	return cur
+	return view.ResolveOld(ctx, st, table, id)
 }
