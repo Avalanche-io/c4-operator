@@ -59,7 +59,7 @@ type fixture struct {
 
 // renamedByPin are the fixture's views c4 #107 gives new IDs: a
 // null-sized entry two or more directories down.
-var renamedByPin = []string{"chain1", "chain2", "link-depth2", "mixed-deep", "null-depth2"}
+var renamedByPin = []string{"chain1", "chain2", "link-depth2", "mixed-deep", "null-depth2", "tool", "toolout"}
 
 func loadFixture(t *testing.T) fixture {
 	t.Helper()

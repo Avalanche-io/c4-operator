@@ -60,7 +60,7 @@ func loadOldPin(t *testing.T) oldPin {
 
 // The views whose IDs c4 #107 changes: a null-sized entry (a link, a
 // sequence frame) two or more directories down.
-var renamedByPin = map[string]bool{"link-depth2": true, "null-depth2": true, "mixed-deep": true, "chain1": true, "chain2": true}
+var renamedByPin = map[string]bool{"link-depth2": true, "null-depth2": true, "mixed-deep": true, "chain1": true, "chain2": true, "tool": true, "toolout": true}
 
 // A view stored before the pin moved no longer loads under its ID when its
 // records identify differently; Reidentify gives the ID they have now, its
@@ -69,7 +69,7 @@ func TestAViewStoredBeforeThePinMovedIsReidentified(t *testing.T) {
 	ctx := context.Background()
 	p := loadOldPin(t)
 	src := StoreRecords(p.ram)
-	if len(p.views) != 7 {
+	if len(p.views) != 9 {
 		t.Fatalf("the fixture names %d views", len(p.views))
 	}
 	for name, old := range p.views {
@@ -225,7 +225,7 @@ func TestOnlyAViewIsReidentified(t *testing.T) {
 		}
 		refused++
 	}
-	if refused != 7 {
+	if refused != 9 {
 		t.Fatalf("%d changesets in the fixture", refused)
 	}
 	dated := c4m.NewManifest()

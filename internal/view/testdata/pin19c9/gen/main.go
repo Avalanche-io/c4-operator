@@ -59,6 +59,10 @@ func main() {
 		"link-depth2": {{"a/d/t.txt", "file", "t"}, {"a/d/l", "link", "t.txt"}},
 		"null-depth2": {{"s/r/f.0001.exr", "null", "frame1"}, {"s/r/f.0002.exr", "null", "frame2"}},
 		"mixed-deep":  {{"p/q/r/l", "link", "../../a"}, {"p/q/f.0001.exr", "null", "fr"}, {"p/a", "file", "a"}, {"top", "file", "t"}},
+		// A tool's tree (the HUD tests' notesTool("echo hi > out.txt"), with a
+		// link two directories down) and its test job's output.
+		"tool":    {{"tool.yaml", "file", toolYAML}, {"test/plates/a.exr", "file", "plate"}, {"lib/py/l", "link", "../../tool.yaml"}},
+		"toolout": {{"out.txt", "file", "hi\n"}, {"lib/py/l", "link", "../../out.txt"}},
 	}
 	names := make([]string, 0, len(corpus))
 	for n := range corpus {
@@ -138,3 +142,21 @@ func build(ctx context.Context, st mem, parent c4.ID, items []item) (c4.ID, c4.I
 	}
 	return a.ID, st.put(a.Changeset)
 }
+
+const toolYAML = `c4: tool/1
+name: notes
+title: Notes
+summary: Writes a note about the plates.
+kind: once
+runs:
+  image: busybox@sha256:5e1c0aa1c6dc0f7b8e1cf0b6a6e1b9fbd0b2f2e1a7f43d1a9e6c2b7f0d8a1c3e
+  command: [sh, -c, "echo hi > out.txt"]
+params:
+- name: width
+  type: INT
+  default: 960
+  minValue: 64
+test:
+  tree: test/
+  expect: [out.txt]
+`
