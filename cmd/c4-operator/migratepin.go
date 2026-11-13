@@ -27,7 +27,7 @@ import (
 func runMigratePin(args []string) error {
 	fs := flag.NewFlagSet("migrate-pin", flag.ContinueOnError)
 	name := fs.String("project", "", "the project to migrate (required)")
-	namespace := fs.String("namespace", "c4-system", "the operator's namespace, which holds the projects' store credentials")
+	namespace := fs.String("namespace", "c4-system", "the operator's namespace: the projects' store credentials, and the farm's Tools")
 	write := fs.Bool("write", false, "migrate; without it nothing is written, and the report says what a run would do")
 	var mappings, named multiFlag
 	fs.Var(&mappings, "mapping", "a git-import mapping file of the project's store, on this machine (repeatable)")
@@ -58,7 +58,7 @@ func runMigratePin(args []string) error {
 	}
 	reg := &project.Registry{Cache: c, Secrets: c, Namespace: *namespace}
 	return pinmove.Migrate(ctx, pinmove.Options{
-		Client: c, Project: *name, Mappings: mappings, Named: ids, Write: *write,
+		Client: c, Project: *name, FarmNamespace: *namespace, Mappings: mappings, Named: ids, Write: *write,
 		Store: func(ctx context.Context, p *c4v1.Project) (pinmove.Store, error) { return reg.Store(ctx, p) },
 		Out:   os.Stdout, Log: os.Stderr,
 	})

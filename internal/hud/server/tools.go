@@ -28,6 +28,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/authoring"
 	"github.com/Avalanche-io/c4-operator/internal/egress"
 	"github.com/Avalanche-io/c4-operator/internal/imageref"
+	c4project "github.com/Avalanche-io/c4-operator/internal/project"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
 	"github.com/Avalanche-io/c4-operator/schema"
@@ -341,6 +342,7 @@ func (s *Server) handlePublishTool(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "view %q is not a C4 ID", body.View)
 		return
 	}
+	id = c4project.Current(ctx, s.Client, st, project, id)
 	tree, err := c4view.Load(ctx, id, c4view.StoreRecords(st), 16)
 	if err != nil {
 		fail(w, http.StatusNotFound, "%s is not a tree in %s's store: upload the folder first (c4 farm tool publish does)", id, project)
@@ -1039,6 +1041,7 @@ func (s *Server) readPublished(ctx context.Context, project, view string) (*tool
 	if err != nil {
 		return nil, fmt.Errorf("%q is not a C4 ID", view)
 	}
+	id = c4project.Current(ctx, s.Client, st, project, id)
 	tree, err := c4view.Load(ctx, id, c4view.StoreRecords(st), 16)
 	if err != nil {
 		return nil, fmt.Errorf("%s's store does not hold the tree %s", project, view)
@@ -1367,7 +1370,7 @@ func (s *Server) testOutcome(ctx context.Context, m *model, t c4v1.Tool, ver c4v
 		test.State, test.Reason = c4v1.ToolTestFailed, "the test job's output is not a view"
 		return test, true
 	}
-	out, err := c4view.Load(ctx, oid, c4view.StoreRecords(st), 16)
+	out, err := c4view.Load(ctx, c4project.Current(ctx, s.Client, st, m.nsProject[ns], oid), c4view.StoreRecords(st), 16)
 	if err != nil {
 		return ver.Test, false
 	}

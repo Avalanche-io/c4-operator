@@ -21,6 +21,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	c4project "github.com/Avalanche-io/c4-operator/internal/project"
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
@@ -725,6 +726,7 @@ func (s *Server) previews(ctx context.Context, project, viewID string) (map[int]
 	if err != nil {
 		return nil, err
 	}
+	id = c4project.Current(ctx, s.Client, st, project, id)
 	v, err := c4view.Load(ctx, id, c4view.StoreRecords(st), 16)
 	if err != nil {
 		return nil, err
@@ -847,6 +849,7 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusServiceUnavailable, "project %s has no reachable store", project)
 		return
 	}
+	from, to = c4project.Current(r.Context(), s.Client, st, project, from), c4project.Current(r.Context(), s.Client, st, project, to)
 	start := time.Now()
 	changes, truncated, err := c4view.ChangedFiles(r.Context(), from, to, c4view.StoreRecords(st), limit)
 	if err != nil {

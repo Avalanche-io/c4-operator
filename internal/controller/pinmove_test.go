@@ -119,6 +119,21 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 	w.Close()
 	mappingBefore, _ := os.ReadFile(mapping)
 
+	// A farm tool with a version published from the project, and a tool of
+	// the project's own with an earlier version: their trees as stored.
+	putTool := func(namespace, name string, st c4v1.ToolStatus) {
+		tool := &c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name}}
+		if err := k8s.Create(ctx, tool); err != nil {
+			t.Fatal(err)
+		}
+		tool.Status = st
+		if err := k8s.Status().Update(ctx, tool); err != nil {
+			t.Fatal(err)
+		}
+	}
+	putTool("c4-system", "farm-tool", c4v1.ToolStatus{Versions: []c4v1.ToolVersion{{Version: "v1", View: old("link-depth2"), Project: "pinned", At: metav1.Now(), Test: c4v1.ToolTest{State: c4v1.ToolTestOK}}}})
+	putTool(ns, "own-tool", c4v1.ToolStatus{Earlier: []c4v1.ToolVersionRef{{Version: "v1", View: old("null-depth2")}}})
+
 	// A job that has not finished.
 	j := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "live"}, Spec: c4v1.WorkJobSpec{
 		Class: "render", Pools: []string{"cpu"}, Retries: ptr.To[int32](1),
@@ -132,7 +147,7 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 		var out, log bytes.Buffer
 		// mixed-deep is a view no holder here names, named outside.
 		err := pinmove.Migrate(ctx, pinmove.Options{Client: k8s, Project: "pinned", Store: stores, Mappings: []string{mapping},
-			Named: []c4.ID{views["mixed-deep"]}, Write: write, Out: &out, Log: &log})
+			Named: []c4.ID{views["mixed-deep"]}, FarmNamespace: "c4-system", Write: write, Out: &out, Log: &log})
 		t.Logf("write %v:\n%s%s", write, out.String(), log.String())
 		return out.String(), err
 	}
@@ -143,7 +158,8 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 		t.Fatalf("a dry run with a live job: %v", err)
 	}
 	renamed := []string{"chain1", "chain2", "link-depth2", "mixed-deep", "null-depth2"}
-	for _, want := range []string{"unfinished " + ns + "/live", "rematerialize " + ns + "/frames", "mapping " + mapping + " 3", "table - c4", "grant pinned "} {
+	for _, want := range []string{"unfinished " + ns + "/live", "rematerialize " + ns + "/frames",
+		"tool c4-system/farm-tool " + old("link-depth2"), "tool " + ns + "/own-tool " + old("null-depth2"), "mapping " + mapping + " 3", "table - c4", "grant pinned "} {
 		if !strings.Contains(report, want) {
 			t.Errorf("the dry run's report has no %q", want)
 		}
@@ -238,6 +254,23 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 		}
 	}
 
+	// The tools' versions name the new trees.
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		var farm, own c4v1.Tool
+		if err := k8s.Get(ctx, types.NamespacedName{Namespace: "c4-system", Name: "farm-tool"}, &farm); err != nil {
+			t.Fatal(err)
+		}
+		if err := k8s.Get(ctx, types.NamespacedName{Namespace: ns, Name: "own-tool"}, &own); err != nil {
+			t.Fatal(err)
+		}
+		if farm.Status.Versions[0].View == newID["link-depth2"].String() && own.Status.Earlier[0].View == newID["null-depth2"].String() {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the tools are at %s and %s", farm.Status.Versions[0].View, own.Status.Earlier[0].View)
+		}
+	}
+
 	// The grants match both IDs. (The client here reads through a cache,
 	// so the update is waited for.)
 	for deadline := time.Now().Add(10 * time.Second); len(p.Spec.Grants) != 4; time.Sleep(50 * time.Millisecond) {
@@ -294,7 +327,7 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, word := range []string{"rename ", "table ", "grant ", "rematerialize ", "mapping "} {
+	for _, word := range []string{"rename ", "table ", "grant ", "rematerialize ", "mapping ", "tool "} {
 		if strings.Contains(report, word) {
 			t.Errorf("the second run reports %q", word)
 		}

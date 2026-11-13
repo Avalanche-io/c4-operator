@@ -17,8 +17,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/Avalanche-io/c4"
+
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
+	"github.com/Avalanche-io/c4-operator/internal/view"
 )
 
 // NamespaceIndex is the field index of Projects by namespace.
@@ -174,4 +177,26 @@ func firstKey(data map[string][]byte, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+// Current is the ID the view id has now in project name's store, for a
+// reader given the ID from outside what it wrote (a request, a spec, a
+// record's subject): an ID a c4 library change renamed resolves through
+// the renames table the Project's status names (view.ResolveOld), and any
+// other ID is itself. When the Project or its table cannot be read it is
+// id too, and the load that follows says what it cannot find.
+func Current(ctx context.Context, c client.Reader, st view.Store, name string, id c4.ID) c4.ID {
+	var p c4v1.Project
+	if c == nil || st == nil || c.Get(ctx, types.NamespacedName{Name: name}, &p) != nil || p.Status.Renames == "" {
+		return id
+	}
+	table, err := c4.Parse(p.Status.Renames)
+	if err != nil {
+		return id
+	}
+	cur, err := view.ResolveOld(st, table, id)
+	if err != nil {
+		return id
+	}
+	return cur
 }

@@ -22,6 +22,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/egress"
+	c4project "github.com/Avalanche-io/c4-operator/internal/project"
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
 )
 
@@ -388,7 +389,7 @@ func (q *Queue) declaredNetworks(ctx context.Context, project, view string) ([]s
 	if err != nil {
 		return nil, err
 	}
-	tree, err := c4view.Load(ctx, id, c4view.StoreRecords(st), 4)
+	tree, err := c4view.Load(ctx, c4project.Current(ctx, q.Client, st, project, id), c4view.StoreRecords(st), 4)
 	if err != nil {
 		return nil, err
 	}

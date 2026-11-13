@@ -25,6 +25,9 @@ type Options struct {
 	// Mappings are git-import mapping files of the project's store, on
 	// this machine: each gains a renamed line.
 	Mappings []string
+	// FarmNamespace is the operator's namespace, whose Tools are the
+	// farm's: their versions published from this project are migrated.
+	FarmNamespace string
 	// Named are views named outside the cluster (a tracker's link, an ID
 	// handed to a client after an ingest): no holder here names them, and
 	// the store is not listed, so they are migrated only when named.
@@ -35,8 +38,9 @@ type Options struct {
 	// Out is the report, one line per thing done (or, without Write, to
 	// do): "rename <old> <new> <holder> <path>", "missing <id> <holder>
 	// <path>", "unfinished <ns>/<name> <phase>", "table <prior> <table>",
-	// "rematerialize <ns>/<name>", "grant <project> <tree> <paths>",
-	// "mapping <path> <views>". Log narrates.
+	// "rematerialize <ns>/<name>", "tool <ns>/<name> <old> <new>",
+	// "grant <project> <tree> <paths>", "mapping <path> <views>". Log
+	// narrates.
 	Out, Log io.Writer
 	Workers  int
 }
@@ -45,8 +49,10 @@ type Options struct {
 // the records of each renamed one stored under its new ID, and then the
 // renames table, named in the Project's status; that status write is the
 // commit point. After it, the Materializations whose status names a
-// renamed view are cleared to resolve again, the Project's grants gain the
-// new IDs, and the mappings gain a renamed line. A run that stops part way
+// renamed view are cleared to resolve again, the Tools' versions name the
+// new IDs (a version is the farm's, read in every project it is spread
+// to, so it is translated, not mapped by each reader), the Project's
+// grants gain the new IDs, and the mappings gain a renamed line. A run that stops part way
 // is resumed by running again.
 //
 // It refuses while a WorkJob in the project's namespaces has not finished:
@@ -115,6 +121,20 @@ func Migrate(ctx context.Context, o Options) error {
 			held = append(held, h...)
 		}
 	}
+	tools, err := toolsOf(ctx, o.Client, &p, o.FarmNamespace)
+	if err != nil {
+		return err
+	}
+	for _, t := range tools {
+		h, err := IDsIn("Tool "+t.Namespace+"/"+t.Name, t.Status)
+		if err != nil {
+			return err
+		}
+		for i := range h {
+			h[i].Path = ".status" + h[i].Path
+		}
+		held = append(held, h...)
+	}
 	refusal := func() error {
 		return fmt.Errorf("%d WorkJobs in project %s have not finished: %s. Drain these, then run again", len(unfinished), p.Name, strings.Join(unfinished, ", "))
 	}
@@ -180,6 +200,17 @@ func Migrate(ctx context.Context, o Options) error {
 			report("rematerialize %s/%s", m.Namespace, m.Name)
 		}
 	}
+	var retool []*c4v1.Tool
+	for i := range tools {
+		t := &tools[i]
+		changes := translateTool(t.DeepCopy(), plan.Table)
+		for _, ch := range changes {
+			report("tool %s/%s %s %s", t.Namespace, t.Name, ch[0], ch[1])
+		}
+		if len(changes) > 0 {
+			retool = append(retool, t)
+		}
+	}
 	_, added := ExtendGrants(p.Spec.Grants, plan.Table)
 	for _, g := range added {
 		report("grant %s %s %s", p.Name, g.Tree, orDash(strings.Join(g.Paths, ",")))
@@ -223,6 +254,21 @@ func Migrate(ctx context.Context, o Options) error {
 		m.Status.ObservedGeneration = 0
 		if err := o.Client.Status().Patch(ctx, m, client.MergeFrom(orig)); err != nil {
 			return fmt.Errorf("materialization %s/%s: %w", m.Namespace, m.Name, err)
+		}
+	}
+	for _, t := range retool {
+		err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			var cur c4v1.Tool
+			if err := o.Client.Get(ctx, types.NamespacedName{Namespace: t.Namespace, Name: t.Name}, &cur); err != nil {
+				return err
+			}
+			if len(translateTool(&cur, plan.Table)) == 0 {
+				return nil
+			}
+			return o.Client.Status().Update(ctx, &cur)
+		})
+		if err != nil {
+			return fmt.Errorf("tool %s/%s: %w", t.Namespace, t.Name, err)
 		}
 	}
 	if len(added) > 0 {
@@ -291,4 +337,59 @@ func idOrDash(id c4.ID) string {
 		return "-"
 	}
 	return id.String()
+}
+
+// toolsOf are the Tools whose versions the project's migration translates:
+// those in its namespaces, and the farm's whose versions were published
+// from its store.
+func toolsOf(ctx context.Context, c client.Client, p *c4v1.Project, farm string) ([]c4v1.Tool, error) {
+	var out []c4v1.Tool
+	for _, ns := range p.Spec.Namespaces {
+		var l c4v1.ToolList
+		if err := c.List(ctx, &l, client.InNamespace(ns)); err != nil {
+			return nil, err
+		}
+		out = append(out, l.Items...)
+	}
+	if farm == "" {
+		return out, nil
+	}
+	var l c4v1.ToolList
+	if err := c.List(ctx, &l, client.InNamespace(farm)); err != nil {
+		return nil, err
+	}
+	for _, t := range l.Items {
+		for _, v := range t.Status.Versions {
+			if v.Project == p.Name {
+				out = append(out, t)
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+// translateTool renames, in place, each of t's version trees the table
+// renames, and returns the [old, new] of each. The new ID depends only on
+// the tree's records, so every project's table that holds a tree gives it
+// the same one.
+func translateTool(t *c4v1.Tool, r view.Renames) [][2]string {
+	var out [][2]string
+	rename := func(s *string) {
+		id, err := c4.Parse(*s)
+		if err != nil {
+			return
+		}
+		if cur := r.Current(id); cur != id {
+			out = append(out, [2]string{*s, cur.String()})
+			*s = cur.String()
+		}
+	}
+	for i := range t.Status.Versions {
+		rename(&t.Status.Versions[i].View)
+	}
+	for i := range t.Status.Earlier {
+		rename(&t.Status.Earlier[i].View)
+	}
+	return out
 }
