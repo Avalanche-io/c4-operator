@@ -292,6 +292,26 @@ func ApplyPatchFrom(ctx context.Context, target, base c4.ID, patch *c4m.Manifest
 	return res, nil
 }
 
+// restatesInView is entriesIdentical for a patch over a view, with one
+// difference: two directories with the same name and the same C4 ID are
+// the same directory whatever sizes they record. In a view a directory's
+// size is derived from its children, which its ID fixes, so the sizes can
+// differ only because two libraries derive them differently: c4 #107 keeps
+// null a size the library before it summed. A changeset stored before such
+// a change restates a directory with the size it was written with, and is
+// read over its parent's new ID (a renamed view, internal/pinmove); with
+// size compared, the removal it spells reads as a write of the directory
+// by its own ID, which changes nothing, and the directory stays. Measured
+// on a fixture written at the old pin (testdata/pin19c9-removals).
+func restatesInView(base, patch *c4m.Entry) bool {
+	if base.IsDir() && patch.IsDir() && !base.C4ID.IsNil() && base.C4ID == patch.C4ID {
+		b, p := *base, *patch
+		b.Size, p.Size = 0, 0
+		return entriesIdentical(&b, &p)
+	}
+	return entriesIdentical(base, patch)
+}
+
 // applyPatchFrom walks a patch once. What each entry means is read from
 // tb, the tree the patch was made over; the edit is made in tt. They are
 // one tree when a patch is applied to its own base, and tb is never edited
@@ -331,7 +351,7 @@ func applyPatchFrom(tt, tb *atree, patch *c4m.Manifest, carried bool) error {
 			existing, had = from.orig[name]
 		}
 		path := strings.Join(stack, "")
-		if had && !hasChildren && entriesIdentical(existing, e) {
+		if had && !hasChildren && restatesInView(existing, e) {
 			// An exact restatement: the patch removes the path. In another
 			// tree there may be nothing there to remove.
 			to := from

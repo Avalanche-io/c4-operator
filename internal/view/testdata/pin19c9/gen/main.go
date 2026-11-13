@@ -45,6 +45,10 @@ func (m mem) Record(_ context.Context, id c4.ID) ([]byte, error) {
 
 func main() {
 	out := os.Args[1]
+	if len(os.Args) > 2 && os.Args[2] == "removals" {
+		removals(out)
+		return
+	}
 	objs := filepath.Join(out, "objects")
 	if err := os.MkdirAll(objs, 0o755); err != nil {
 		panic(err)
@@ -95,6 +99,73 @@ func main() {
 	}
 	sort.Strings(lines)
 	head := "# made at c4 " + libVersion() + " by the pin move's generator; the names are views (name, C4 ID) and changesets (name, C4 ID, parent view)\n"
+	if err := os.WriteFile(filepath.Join(out, "index.txt"), []byte(head+strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		panic(err)
+	}
+}
+
+// removals writes the second fixture (go run ./gen <out> removals): one
+// view, V, and changesets over it, each removing, replacing or adding one
+// thing, so a test can apply each over V's new ID and compare with its
+// head's. Removal is exact restatement, so these are the changesets whose
+// meaning depends on the base's entries matching as written. The index
+// names V, and each changeset with its head: "changeset <name> <cs> <head>",
+// V's own (over the empty view) among them.
+func removals(out string) {
+	objs := filepath.Join(out, "objects")
+	if err := os.MkdirAll(objs, 0o755); err != nil {
+		panic(err)
+	}
+	ctx := context.Background()
+	st := mem{}
+	st.put(nil)
+	v, vcs := build(ctx, st, c4view.EmptyID(), []item{
+		{"tl", "link", "a/t.txt"},
+		{"a/t.txt", "file", "t"},
+		{"a/d/l", "link", "../t.txt"},
+		{"a/d/k.txt", "file", "k"},
+		{"b/x.txt", "file", "x"},
+		{"b/c/f.0001.exr", "null", "frame"},
+		{"e/u.txt", "file", "u"},
+		{"e/v/w.txt", "file", "w"},
+		{"p/a/d/l", "link", "../../t.txt"},
+		{"p/b/c/f.0001.exr", "null", "frame"},
+		{"p/t.txt", "file", "t"},
+	})
+	steps := []struct {
+		name  string
+		edits []c4view.Edit
+	}{
+		{"rm-top-link", []c4view.Edit{{Path: "tl"}}},
+		{"rm-deep-link", []c4view.Edit{{Path: "a/d/l"}}},
+		{"rm-dir-of-link", []c4view.Edit{{Path: "a/d/"}}},
+		{"rm-dir-deep-link", []c4view.Edit{{Path: "a/"}}},
+		{"rm-dir-deep-null", []c4view.Edit{{Path: "b/"}}},
+		{"rm-nested-dir-deep-link", []c4view.Edit{{Path: "p/a/"}}},
+		{"rm-nested-dir-deep-null", []c4view.Edit{{Path: "p/b/"}}},
+		{"rm-dir-plain", []c4view.Edit{{Path: "e/"}}},
+		{"rm-file", []c4view.Edit{{Path: "e/u.txt"}}},
+		{"retarget-link", []c4view.Edit{{Path: "a/d/l", Entry: c4view.SymlinkEntry("l", "k.txt")}}},
+		{"add-file-deep", []c4view.Edit{{Path: "a/d/n.txt", Entry: c4view.FileEntry("n.txt", 1, st.put([]byte("n")), false)}}},
+	}
+	lines := []string{"view V " + v.String(), fmt.Sprintf("changeset V %s %s", vcs, v)}
+	for _, s := range steps {
+		a, err := c4view.Apply(ctx, v, s.edits, st)
+		if err != nil {
+			panic(err)
+		}
+		for _, r := range a.Records {
+			st.put(r.Data)
+		}
+		lines = append(lines, fmt.Sprintf("changeset %s %s %s", s.name, st.put(a.Changeset), a.ID))
+	}
+	for id, data := range st {
+		if err := os.WriteFile(filepath.Join(objs, id.String()), data, 0o444); err != nil {
+			panic(err)
+		}
+	}
+	sort.Strings(lines)
+	head := "# made at c4 " + libVersion() + " by the pin move's generator (removals); V is a view (C4 ID); each changeset (name, C4 ID, the view it produces) is over V, but V's own, over the empty view\n"
 	if err := os.WriteFile(filepath.Join(out, "index.txt"), []byte(head+strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
 		panic(err)
 	}

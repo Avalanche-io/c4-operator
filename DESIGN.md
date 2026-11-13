@@ -406,9 +406,21 @@ reader that loads the view has its own test that fails without it; the
 HUD's diff resolves both IDs too, but `ChangedFiles` reads records without
 recomputing an ID, so an old ID diffs empty against its new one with or
 without the table, and no test can tell the two apart. A stored changeset is not renamed: its bytes never
-change, and applied over its parent's new ID it gives the head's new ID
-(measured on a fixture written at the old pin, 7 of 7), so a chain is read
-with each section's base as the view's ID now. A lost changeset over a
+change, and applied over its parent's new ID it gives the head's new ID,
+so a chain is read with each section's base as the view's ID now. Measured
+on two fixtures written at the old pin: 7 of 7 changesets that add, and 11
+of 11 that remove, replace or add one thing each (testdata/pin19c9-removals).
+*Corrected 2026-11-13:* this first read "7 of 7", from a fixture with no
+removal in it. Removal is exact restatement, and a stored changeset
+restates a directory #107 renamed with the size the old library summed,
+where the view now records it null; compared with its size, the removal
+read as a write of the directory by its own ID, so nothing was removed,
+and a git import whose history held such a removal was refused after its
+renamed line. Over a view, two directories with the same name and C4 ID
+are now the same directory whatever sizes they record
+(`view.restatesInView`): a view's directory size is derived from its
+children, which the ID fixes. The resolver, which reads descriptions,
+still compares every field. A lost changeset over a
 renamed view is made again only where the step's patch passes through no
 renamed directory (then it is the same patch, over the parent as written);
 otherwise the error says to cut the mapping back and import again. The run is dry by default;

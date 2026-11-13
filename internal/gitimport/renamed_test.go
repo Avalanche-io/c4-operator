@@ -21,7 +21,15 @@ import (
 // makes them.
 func oldPinImport(t *testing.T) (*store.RAM, []Commit) {
 	t.Helper()
-	dir := filepath.Join("..", "view", "testdata", "pin19c9")
+	return fixtureImport(t, "pin19c9", "link-depth2", "chain1", "chain2")
+}
+
+// fixtureImport reads one of the view package's fixtures written at the
+// old pin as an import of one ref, main, whose commits are the named
+// changesets in order, each over the view the one before produced.
+func fixtureImport(t *testing.T, fixture string, names ...string) (*store.RAM, []Commit) {
+	t.Helper()
+	dir := filepath.Join("..", "view", "testdata", fixture)
 	ram := store.NewRAM()
 	files, err := os.ReadDir(filepath.Join(dir, "objects"))
 	if err != nil {
@@ -50,15 +58,21 @@ func oldPinImport(t *testing.T) (*store.RAM, []Commit) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if f[0] == "view" {
+		switch {
+		case f[0] == "view":
 			views[f[1]] = id
-		} else {
+		case len(f) == 4: // the removals fixture names each changeset's head
+			changesets[f[1]] = id
+			if views[f[1]], err = c4.Parse(f[3]); err != nil {
+				t.Fatal(err)
+			}
+		default:
 			changesets[f[1]] = id
 		}
 	}
 	var m []Commit
 	parent := view.EmptyID()
-	for i, name := range []string{"link-depth2", "chain1", "chain2"} {
+	for i, name := range names {
 		m = append(m, Commit{
 			Commit: strings.Repeat(string(rune('a'+i)), 40), Ref: "main",
 			View: views[name], ParentView: parent, Changeset: changesets[name],
@@ -441,5 +455,66 @@ func TestACommitOverARenamedParentIsMadeAgain(t *testing.T) {
 	}
 	if got, err := view.ReadObject(sink, lines[1].Changeset); err != nil || !bytes.Equal(got, stored) {
 		t.Fatalf("the changeset made again: %v", err)
+	}
+}
+
+// A ref whose history removes a directory c4 #107 renamed (one holding a
+// null-sized frame or a link two directories down) is made again after
+// its renamed line, like any other. Its stored changeset restates the
+// directory with the size the old library summed, and the view as it is
+// now records that directory with a null size: read with size compared,
+// the removal was a write of the directory by its own ID, so the chain
+// made again kept the directory and was refused against the mapping's
+// head, for good (view.restatesInView).
+func TestARefThatRemovedARenamedDirectoryIsMadeAgain(t *testing.T) {
+	for _, removal := range []string{"rm-dir-deep-null", "rm-dir-deep-link", "rm-nested-dir-deep-null", "rm-nested-dir-deep-link"} {
+		t.Run(removal, func(t *testing.T) {
+			ctx := context.Background()
+			ram, m := fixtureImport(t, "pin19c9-removals", "V", removal)
+			src := view.StoreRecords(ram)
+			table := view.Renames{}
+			for _, c := range m {
+				v, err := view.Reidentify(ctx, c.View, src, 4)
+				if err != nil {
+					t.Fatal(err)
+				}
+				recs, err := v.Records()
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, r := range recs {
+					if !ram.Has(r.ID) {
+						ram.Put(bytes.NewReader(r.Data))
+					}
+				}
+				if v.ID != c.View {
+					table[c.View] = v.ID
+				}
+			}
+			if len(table) != 2 {
+				t.Fatalf("%d of the mapping's views renamed, want 2", len(table))
+			}
+			p := filepath.Join(t.TempDir(), "mapping.jsonl")
+			w, err := AppendMapping(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, c := range m {
+				w.Write(c)
+			}
+			w.Write(Renamed(m, table))
+			w.Close()
+			now, err := ReadMapping(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ch, _, err := OpenRecordedChain(ctx, filepath.Join(filepath.Dir(p), "main.c4m"), src, now, "main")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ch.Head != table[m[1].View] || ch.Sections != 2 {
+				t.Fatalf("the chain: %+v, want head %s", ch, table[m[1].View])
+			}
+		})
 	}
 }
