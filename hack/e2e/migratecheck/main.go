@@ -116,8 +116,8 @@ func main() {
 			bad("%s: %s resolves to %s (%v), the dry run said %s", *name, old, got, err, cur)
 			continue
 		}
-		if got := project.Current(ctx, c, st, *name, old); got != cur {
-			bad("%s: project.Current of %s is %s", *name, old, got)
+		if got, err := project.Current(ctx, c, st, *name, old); err != nil || got != cur {
+			bad("%s: project.Current of %s is %s (%v)", *name, old, got, err)
 		}
 		if _, err := view.Load(ctx, cur, view.StoreRecords(st), 16); err != nil {
 			bad("%s: %s, renamed from %s, does not load: %v", *name, cur, old, err)

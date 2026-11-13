@@ -4,9 +4,10 @@
 # runs dry over every project (reports kept); jobs are drained; the
 # operator is stopped and the new CRDs applied (the old Project CRD would
 # drop status.renames, the run's commit point); `migrate-pin --write`; the
-# new operator; hack/e2e/migratecheck per project; the phases at the new
-# pin on the same farm; a second `migrate-pin --write`, which must do
-# nothing. The cluster is deleted on every exit.
+# new operator; hack/e2e/migratecheck per project; a second `migrate-pin
+# --write`, which must do nothing (run on the state the migration left: the
+# new pin's phases wipe stores, P4 mono's); the phases at the new pin on
+# the same farm. The cluster is deleted on every exit.
 #
 #   hack/e2e/migrate.sh OLD NEW OUT
 #
@@ -143,6 +144,8 @@ k get materializations -A -o json >"$R/mats-before.json"
 k get projects -o json >"$R/projects-before.json"
 k get tools -A -o json >"$R/tools-before.json"
 k get workjobs -A -o json >"$R/jobs-before.json"
+# The dry run is before the new CRDs, so each one reports what it would do
+# and ends with the refusal to write under the old Project CRD.
 note "dry run"
 migrate dry
 drain drained
@@ -161,7 +164,6 @@ for p in $(projects); do
     fail "check $p"
   grep -E '^(ok|FAIL)' "$R/check-$p.out"
 done
-phases "$NEW" new
 drain drained2
 quiesce
 note "a second migrate"
@@ -174,4 +176,7 @@ for f in "$R"/again-*.out; do
     fail "the second migrate is not a no-op: $(basename "$f")"
   fi
 done
+k -n c4-system scale deploy/c4-manager --replicas=1 >/dev/null
+k -n c4-system rollout status deploy/c4-manager --timeout=180s >/dev/null || fail "the manager after the second migrate"
+phases "$NEW" new
 echo "end $(stamp)"
