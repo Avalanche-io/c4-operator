@@ -4,8 +4,8 @@
 # the phases at the new pin on the same farm, and a second migrate that must
 # change nothing. It takes hours, so it runs only when asked: Actions,
 # e2e-migrate, Run workflow (once this file is on the default branch), or a
-# pull request labelled e2e-migrate, which runs its base as the old pin and
-# its head as the new. Every log and report is kept as an artifact.
+# pull request labelled e2e-migrate (and each push to it after), which runs
+# its base as the old pin and its head as the new. Every log and report is kept as an artifact.
 name: e2e-migrate
 on:
   workflow_dispatch:
@@ -19,7 +19,7 @@ on:
         required: false
         type: string
   pull_request:
-    types: [labeled]
+    types: [labeled, synchronize]
 
 permissions:
   contents: read
@@ -30,7 +30,12 @@ concurrency:
 
 jobs:
   migrate:
-    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'e2e-migrate'
+    # On request; when a pull request is labelled e2e-migrate; and on every
+    # push to a pull request that carries the label.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'e2e-migrate') ||
+      (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'e2e-migrate'))
     name: the pin move on a kind farm
     runs-on: ubuntu-24.04
     timeout-minutes: 360
