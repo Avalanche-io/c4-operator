@@ -68,9 +68,19 @@ envtest:
 # Every skip is reported, and one hack/skips/allowed.txt does not name
 # fails the run: a test that runs nowhere is noticed. The JSON stays in
 # bin/test.json for a closer look.
+# The suite's timeout, and a package's budget: half of it, in whole
+# seconds, set by hand like RACE_BUDGET (overriding TEST_TIMEOUT does not
+# move it). One past its budget is named in a warning, read from each
+# package's last event in bin/test.json. go test's default (10m) once
+# ended the queue's package under a loaded machine (2026-11-12, a land
+# check's full suite: "test timed out after 10m0s", TestReplayLibraryPort
+# at 3m54s inside it).
+TEST_TIMEOUT ?= 20m
+TEST_BUDGET ?= 600
 test:
 	@mkdir -p bin
-	KUBEBUILDER_ASSETS="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(CURDIR)/bin/k8s -p path)" go test -json ./... -count=1 > bin/test.json; s=$$?; \
+	KUBEBUILDER_ASSETS="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(CURDIR)/bin/k8s -p path)" go test -json ./... -count=1 -timeout $(TEST_TIMEOUT) > bin/test.json; s=$$?; \
+	  awk '!/"Test":/ && /"Action":"(pass|fail)"/ { p = $$0; sub(/.*"Package":"/, "", p); sub(/".*/, "", p); t = $$0; sub(/.*"Elapsed":/, "", t); sub(/[^0-9.].*/, "", t); if (t + 0 > $(TEST_BUDGET)) printf "::warning::%s took %ss, past its %ss budget\n", p, t, $(TEST_BUDGET) }' bin/test.json; \
 	  go run ./hack/skips -allow hack/skips/allowed.txt < bin/test.json || exit 1; exit $$s
 
 # The packages with the most concurrency under the race detector: cache
