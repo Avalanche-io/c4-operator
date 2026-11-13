@@ -19,9 +19,10 @@
 // copies the object into the project store without rehashing it. That is a
 // trust boundary: c4git computed the ID when it stored the content at `git
 // add`, and the importer accepts the c4git store's binding of ID to bytes.
-// A c4git store that holds wrong bytes under an ID passes them on.
-// Whoever can write the c4git store is therefore trusted like an ingest
-// point. Bytes that do not come from such a store are always hashed.
+// The project store checks the bytes it is given, so a c4git store that
+// holds wrong bytes under an ID passes nothing on: the copy is refused and
+// the import fails, naming the object. What the c4git store is trusted for
+// is the ID and the size. Bytes that do not come from it are always hashed.
 package gitimport
 
 import (
@@ -122,6 +123,17 @@ type Commit struct {
 	// Record is the ID of the import record the importer signed for this
 	// commit (DESIGN.md section 9.2), when it signs.
 	Record c4.ID `json:"record,omitempty"`
+	// A line that records a c4 library change has Renamed and nothing
+	// else: the views the lines before it name that the change gave new
+	// IDs, each "<old> <new>" (view.Renames). The lines stay as they were
+	// written; they are read with their views renamed (DecodeMapping).
+	Renamed []string `json:"renamed,omitempty"`
+	// parentWritten and viewWritten are ParentView and View as the line
+	// was written, kept when a renamed line after it renames them: the
+	// changeset's first line still names the parent, and a changeset
+	// stored before 2026-11-09 ends with the view.
+	parentWritten, viewWritten c4.ID
+	renamed                    bool // a renamed line has renamed it
 
 	// Git-level counts of files and symlinks (submodules excluded).
 	Added    int `json:"added"`

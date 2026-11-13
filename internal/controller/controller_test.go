@@ -35,6 +35,11 @@ import (
 
 var (
 	k8s client.Client
+	// direct reads and writes the API server with no cache, as the
+	// operator's commands do (migrate-pin's client.New): a read through
+	// k8s, the manager's cached client, can miss a write made just before
+	// it.
+	direct client.Client
 	// farmCA signs the test farm's certificates; the controller signs its
 	// resolution records with one it issued.
 	farmCA *provenance.CA
@@ -64,6 +69,9 @@ func TestMain(m *testing.M) {
 	scheme := runtime.NewScheme()
 	clientgoscheme.AddToScheme(scheme)
 	c4v1.AddToScheme(scheme)
+	if direct, err = client.New(cfg, client.Options{Scheme: scheme}); err != nil {
+		panic(err)
+	}
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:  scheme,
 		Metrics: metricsserver.Options{BindAddress: "0"},

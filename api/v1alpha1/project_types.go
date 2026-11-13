@@ -369,6 +369,15 @@ type ProjectStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	// Renames is the C4 ID of the project store's renames table: one line
+	// per view a c4 library change gave a new ID, "<old> <new>" (DESIGN
+	// section 2.1). A reader given a view's ID from outside what it wrote
+	// resolves it through the table (view.ResolveOld). Written by
+	// `c4-operator migrate-pin`, after every record the table names is
+	// stored.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^c4[1-9A-HJ-NP-Za-km-z]{88}$`
+	Renames string `json:"renames,omitempty"`
 }
 
 // Project is a unit of data isolation: its namespaces, its store and

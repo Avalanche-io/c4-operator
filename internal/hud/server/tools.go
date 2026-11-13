@@ -341,6 +341,7 @@ func (s *Server) handlePublishTool(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "view %q is not a C4 ID", body.View)
 		return
 	}
+	id = s.viewNow(ctx, st, project, id)
 	tree, err := c4view.Load(ctx, id, c4view.StoreRecords(st), 16)
 	if err != nil {
 		fail(w, http.StatusNotFound, "%s is not a tree in %s's store: upload the folder first (c4 farm tool publish does)", id, project)
@@ -1039,6 +1040,7 @@ func (s *Server) readPublished(ctx context.Context, project, view string) (*tool
 	if err != nil {
 		return nil, fmt.Errorf("%q is not a C4 ID", view)
 	}
+	id = s.viewNow(ctx, st, project, id)
 	tree, err := c4view.Load(ctx, id, c4view.StoreRecords(st), 16)
 	if err != nil {
 		return nil, fmt.Errorf("%s's store does not hold the tree %s", project, view)
@@ -1367,7 +1369,7 @@ func (s *Server) testOutcome(ctx context.Context, m *model, t c4v1.Tool, ver c4v
 		test.State, test.Reason = c4v1.ToolTestFailed, "the test job's output is not a view"
 		return test, true
 	}
-	out, err := c4view.Load(ctx, oid, c4view.StoreRecords(st), 16)
+	out, err := c4view.Load(ctx, s.viewNow(ctx, st, m.nsProject[ns], oid), c4view.StoreRecords(st), 16)
 	if err != nil {
 		return ver.Test, false
 	}

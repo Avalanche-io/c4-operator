@@ -737,12 +737,11 @@ func TestACommitTheLibraryCannotReadBackIsRefused(t *testing.T) {
 	mappingWas, _ := os.ReadFile(o.svc.out)
 	_, servedWas := o.head("refs/heads/main")
 
-	idText := c4.Identify(strings.NewReader("some content")).String()
-	if err := os.Symlink(idText, filepath.Join(o.work, "link")); err != nil {
+	if err := os.Symlink("host:path", filepath.Join(o.work, "link")); err != nil {
 		t.Fatal(err)
 	}
 	o.git(o.work, "add", "-A")
-	o.git(o.work, "commit", "-q", "-m", "a link whose target is a C4 ID")
+	o.git(o.work, "commit", "-q", "-m", "a link whose target the c4m library does not read back")
 	for i := range 2 {
 		code, body := o.push("main")
 		if code == http.StatusOK || !strings.Contains(body, `entry "link"`) || !strings.Contains(body, "so it is not stored") {
@@ -771,7 +770,7 @@ func TestAnIngestThatDoesNotReadBackStoresNothing(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(tree, "f"), []byte("f\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink("c4studio", filepath.Join(tree, "latest")); err != nil {
+	if err := os.Symlink("host:path", filepath.Join(tree, "latest")); err != nil {
 		t.Fatal(err)
 	}
 	count := func() int {

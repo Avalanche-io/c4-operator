@@ -228,6 +228,12 @@ type RecordedChain struct {
 	// Views are the views the changesets produce, as their lines record;
 	// the last is Head.
 	Views []c4.ID
+	// parents are the views the changesets apply to, as their lines
+	// record them, and written the same as the changesets name them on
+	// their first lines; viewsWritten are Views as the changesets stored
+	// before 2026-11-09 end with them. Each differs only where a renamed
+	// line renamed the view (Commit.Renamed).
+	parents, written, viewsWritten []c4.ID
 	// MissingBefore is the last mapping line of the chain before which
 	// lines are missing from the mapping (the commits they recorded are no
 	// longer published): the line the chain starts at when it starts there
@@ -330,6 +336,10 @@ func chainsRecorded(m []Commit, only string) map[string]*RecordedChain {
 		cur.Lines = append(cur.Lines, i+1)
 		cur.Commits = append(cur.Commits, c.Commit)
 		cur.Views = append(cur.Views, c.View)
+		parent, view := c.asWritten()
+		cur.parents = append(cur.parents, c.ParentView)
+		cur.written = append(cur.written, parent)
+		cur.viewsWritten = append(cur.viewsWritten, view)
 		cur.Head = c.View
 	}
 	return out
@@ -355,11 +365,15 @@ func (rc RecordedChain) holds(ch *ChainFile) bool {
 // applied, and by hashing alone: the store is not read.
 func (rc RecordedChain) differs(c *view.Chain) (int, error) {
 	for i, sec := range c.Sections {
-		text, err := view.EncodeChangeset(sec.Base, sec.Patch)
+		base := sec.Base
+		if i < len(rc.parents) && base == rc.parents[i] {
+			base = rc.written[i] // as the changeset names it
+		}
+		text, err := view.EncodeChangeset(base, sec.Patch)
 		if err != nil {
 			return 0, err
 		}
-		if c4.Identify(bytes.NewReader(text)) != rc.Changesets[i] && !oldForm(text, rc.Views[i], rc.Changesets[i]) {
+		if c4.Identify(bytes.NewReader(text)) != rc.Changesets[i] && !oldForm(text, rc.viewsWritten[i], rc.Changesets[i]) {
 			return i + 1, nil
 		}
 	}
@@ -438,7 +452,12 @@ func (rc RecordedChain) bytes(ctx context.Context, src view.RecordSource) ([]byt
 		if len(one.Sections) != 1 {
 			return nil, fmt.Errorf("the stored object %s (mapping line %d) is not one changeset: it reads as %d", id, rc.Lines[i], len(one.Sections))
 		}
-		c.Sections = append(c.Sections, view.Section{Base: one.Base, Patch: one.Sections[0].Patch})
+		if one.Base != rc.written[i] {
+			return nil, fmt.Errorf("the stored changeset %s (mapping line %d) is over %s, and the mapping records it over %s", id, rc.Lines[i], one.Base, rc.written[i])
+		}
+		// Over the parent as the mapping records it now: the view the
+		// changeset's first line names, or the ID a library change gave it.
+		c.Sections = append(c.Sections, view.Section{Base: rc.parents[i], Patch: one.Sections[0].Patch})
 		seals[i] = one.Seal
 	}
 	if len(c.Sections) > 0 {
@@ -447,8 +466,11 @@ func (rc RecordedChain) bytes(ctx context.Context, src view.RecordSource) ([]byt
 			return nil, err
 		}
 		for i, seal := range seals {
-			if !seal.IsNil() && seal != views[i] {
-				return nil, fmt.Errorf("the stored changeset %s (mapping line %d) ends with %s and produces %s", rc.Changesets[i], rc.Lines[i], seal, views[i])
+			// The seal is the view as the changeset was stored, so it is
+			// compared with the view as the line was written; Verify has
+			// checked the view it produces now against the line.
+			if !seal.IsNil() && seal != rc.viewsWritten[i] {
+				return nil, fmt.Errorf("the stored changeset %s (mapping line %d) ends with %s, and its line records it producing %s", rc.Changesets[i], rc.Lines[i], seal, rc.viewsWritten[i])
 			}
 		}
 		if views[len(views)-1] != rc.Head {

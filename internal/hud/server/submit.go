@@ -450,6 +450,7 @@ func (s *Server) handleViewFiles(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "no such view")
 		return
 	}
+	id = s.viewNow(r.Context(), st, project, id)
 	view, err := c4view.Load(r.Context(), id, c4view.StoreRecords(st), 16)
 	if err != nil {
 		fail(w, http.StatusNotFound, "no such view: %v", err)

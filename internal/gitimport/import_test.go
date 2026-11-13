@@ -2,14 +2,13 @@ package gitimport
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/Avalanche-io/c4"
 	"github.com/Avalanche-io/c4/store"
 
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
@@ -178,17 +177,18 @@ func TestChangesetsResolveToCommitViews(t *testing.T) {
 	}
 }
 
-// TestC4GitObjectsAreTrustedNotRehashed puts an object in the c4git store
-// under a label that is not its hash. The importer must use the label as
-// the file's ID, take the size from the store, and copy the bytes as they
-// are: c4git is an ingest point that verified the ID at `git add`, so the
-// importer does not verify it again. This is the trust boundary the
-// package comment describes. Every read checks, though: the bytes copied
-// are not that label's, and a reader finds them not present.
+// TestC4GitObjectsAreTrustedNotRehashed: the importer takes a c4git
+// pointer's ID as the file's ID and the size from the c4git store, and
+// copies the object by ID without hashing it: c4git is an ingest point that
+// computed the ID at `git add`. This is the trust boundary the package
+// comment describes. The project store checks what it is given, though, so
+// a c4git store that holds other bytes under a label passes nothing on: the
+// import is refused, naming the object and the path, and the project store
+// holds nothing under that label.
 func TestC4GitObjectsAreTrustedNotRehashed(t *testing.T) {
 	r := newRepo(t)
-	label := idOf("the bytes c4git hashed")
-	stored := "different bytes under that label"
+	content := "the bytes c4git hashed"
+	label := idOf(content)
 	ts, err := store.NewTreeStore(r.c4git)
 	if err != nil {
 		t.Fatal(err)
@@ -197,8 +197,10 @@ func TestC4GitObjectsAreTrustedNotRehashed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	io.WriteString(w, stored)
-	w.Close()
+	io.WriteString(w, content)
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	r.write(".gitattributes", "*.exr filter=c4\n")
 	r.write("shot.exr", label.String()) // the pointer, cleaned as is
@@ -218,8 +220,8 @@ func TestC4GitObjectsAreTrustedNotRehashed(t *testing.T) {
 			got = &v.Files[i]
 		}
 	}
-	if got == nil || got.ID != label || got.Size != int64(len(stored)) {
-		t.Fatalf("shot.exr = %+v, want ID %s size %d", got, label, len(stored))
+	if got == nil || got.ID != label || got.Size != int64(len(content)) {
+		t.Fatalf("shot.exr = %+v, want ID %s size %d", got, label, len(content))
 	}
 	if cs.copies[label] != 1 || cs.puts[label] != 0 {
 		t.Fatalf("label: %d copies, %d puts; want one copy and no put", cs.copies[label], cs.puts[label])
@@ -227,24 +229,35 @@ func TestC4GitObjectsAreTrustedNotRehashed(t *testing.T) {
 	if cs.puts[idOf("plain\n")] != 1 {
 		t.Fatal("plain.txt was not put under its hash")
 	}
-	rc, err := cs.Sink.(*TreeSink).Open(label)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, _ := io.ReadAll(rc)
-	rc.Close()
-	if string(raw) != stored {
-		t.Fatalf("project store holds %q, want the bytes as c4git holds them", raw)
-	}
-	var told c4.ID
-	was := view.OnMismatch
-	t.Cleanup(func() { view.OnMismatch = was })
-	view.OnMismatch = func(_ string, asked, _ c4.ID, _ error) { told = asked }
-	if data, err := view.ReadObject(cs.Sink.(*TreeSink), label); !errors.Is(err, view.ErrNotItsID) || data != nil || told != label {
-		t.Fatalf("a read of bytes that are not the label's: %q, %v, told %s", data, err, told)
+	if data, err := view.ReadObject(cs.Sink.(*TreeSink), label); err != nil || string(data) != content {
+		t.Fatalf("the copied object: %q, %v", data, err)
 	}
 	if c.C4GitObjects != 1 {
 		t.Fatalf("c4git objects used: %d", c.C4GitObjects)
+	}
+
+	// Other bytes under a label. A store checks the bytes it is given, so
+	// they are written where the c4git store files that label.
+	r = newRepo(t)
+	wrong := idOf("the bytes c4git hashed, again")
+	if _, err := store.NewTreeStore(r.c4git); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(r.c4git, wrong.String()), []byte("different bytes under that label"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	r.write(".gitattributes", "*.exr filter=c4\n")
+	r.write("shot.exr", wrong.String())
+	r.commit("pointer")
+	sink := newTreeSink(t)
+	_, err = r.tryImport(t, sink, Options{})
+	for _, want := range []string{"copy c4git object", wrong.String(), "shot.exr"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("an import of other bytes under a label: %v\nwant %q in it", err, want)
+		}
+	}
+	if sink.TS.Has(wrong) {
+		t.Fatal("the project store holds the other bytes under the label")
 	}
 }
 

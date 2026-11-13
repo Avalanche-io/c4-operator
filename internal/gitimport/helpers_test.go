@@ -225,6 +225,16 @@ func (r *repo) history() []string {
 // and the store.
 func (r *repo) importInto(t *testing.T, sink Sink, opts Options) *Summary {
 	t.Helper()
+	sum, err := r.tryImport(t, sink, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sum
+}
+
+// tryImport is importInto for an import that may fail.
+func (r *repo) tryImport(t *testing.T, sink Sink, opts Options) (*Summary, error) {
+	t.Helper()
 	opts.Repo = r.dir
 	if opts.Sink == nil {
 		opts.Sink = sink
@@ -240,11 +250,7 @@ func (r *repo) importInto(t *testing.T, sink Sink, opts Options) *Summary {
 	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	t.Setenv("C4_STORE", r.c4git)
-	sum, err := Run(context.Background(), opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return sum
+	return Run(context.Background(), opts)
 }
 
 func newTreeSink(t *testing.T) *TreeSink {

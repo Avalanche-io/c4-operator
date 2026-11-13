@@ -1,0 +1,90 @@
+# The c4 pin move's migration on a real farm (hack/e2e/migrate.sh): the e2e
+# phases at the old pin on an eight-worker kind cluster, `migrate-pin` dry,
+# drained, the new CRDs, `--write`, the new operator, a check per project,
+# the phases at the new pin on the same farm, and a second migrate that must
+# change nothing. It takes hours, so it runs only when asked: Actions,
+# e2e-migrate, Run workflow (once this file is on the default branch), or a
+# pull request labelled e2e-migrate (and each push to it after), which runs
+# its base as the old pin and its head as the new. Every log and report is kept as an artifact.
+name: e2e-migrate
+on:
+  workflow_dispatch:
+    inputs:
+      old:
+        description: the old pin's commit or ref (the farm the migration starts from)
+        required: true
+        type: string
+      new:
+        description: the new pin's commit or ref, with migrate-pin (empty is the ref run)
+        required: false
+        type: string
+  pull_request:
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-migrate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    # On request; when a pull request is labelled e2e-migrate; and on every
+    # push to a pull request that carries the label.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'e2e-migrate') ||
+      (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'e2e-migrate'))
+    name: the pin move on a kind farm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      OLD_REF: ${{ inputs.old || github.event.pull_request.base.sha }}
+      NEW_REF: ${{ inputs.new || github.event.pull_request.head.sha || github.sha }}
+    steps:
+    # Nine kind nodes, the images loaded into each, and P2's herds want the
+    # disk the runner's preinstalled toolchains hold.
+    - name: disk
+      run: |
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+        df -h /
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{ env.NEW_REF }}
+        path: new
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{ env.OLD_REF }}
+        path: old
+    - uses: actions/setup-go@v7
+      with:
+        go-version-file: new/go.mod
+    - run: make -C new tools && echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+    # P5's HUD screenshots (hack/e2e/hud-shots.sh) use chrome-headless-shell,
+    # named by CHROME. Ubuntu 24.04 keeps unprivileged user namespaces from
+    # processes AppArmor does not name, so Chrome's sandbox cannot start and
+    # the browser dies with SIGTRAP ("Trace/breakpoint trap", P5 exit 133);
+    # the runner allows them, and the sandbox stays on.
+    - name: chrome-headless-shell
+      run: |
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        npx -y @puppeteer/browsers install chrome-headless-shell@stable --path "$RUNNER_TEMP/chs" >/dev/null
+        echo "CHROME=$(find "$RUNNER_TEMP/chs" -type f -name chrome-headless-shell | head -1)" >> "$GITHUB_ENV"
+    # minio/minio and minio/mc are gone from Docker Hub; until the e2e farm
+    # moves to Garage, Chainguard's builds (with a shell, for mc_run) stand
+    # in under the names the scripts use, which pull only what is missing.
+    - name: MinIO images
+      run: |
+        echo 'FROM cgr.dev/chainguard/minio:latest-dev' | docker build -q -t minio/minio:latest -
+        echo 'FROM cgr.dev/chainguard/minio-client:latest-dev' | docker build -q -t minio/mc:latest -
+    - name: migrate
+      run: new/hack/e2e/migrate.sh old new "$RUNNER_TEMP/e2e-migrate"
+    - if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: e2e-migrate
+        path: |
+          ${{ runner.temp }}/e2e-migrate
+          !${{ runner.temp }}/e2e-migrate/bin
+        if-no-files-found: warn

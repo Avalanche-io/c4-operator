@@ -372,10 +372,78 @@ deleting a user's file is not a get's to do. Measuring costs a made and removed 
 names in one directory, 4 to 5 s), and a probe folder per directory with two
 names or more, about 0.7 ms each (8,000 such directories, 5.4 s), first run
 and re-run alike; whether a place folds could be kept per volume where case
-rules are per volume (APFS), which is not built. Until the
-operator's c4m pin carries c4 PR #98, a name or link target that ends in a
-backslash is refused at import by the round-trip guard (section 2.3), since
-the pinned library reads it back with one more.
+rules are per volume (APFS), which is not built. Until the operator's c4
+pin moved to b52e201 (2026-11-12), which carries c4 PR #98, a name or link
+target that ends in a backslash was refused at import by the round-trip
+guard (section 2.3), since the library before it read one back with one
+more; it reads back now, and imports.
+
+**Re-identifying views after a library change.** A view's ID is derived,
+so a c4 library that derives a record differently gives a stored view a new
+ID: c4 #107 keeps a directory's null size null where the library before it
+wrote 0, which renames every view with a null-sized entry (a link, a
+sequence frame) two or more directories down. Nothing stored is rewritten.
+`c4-operator migrate-pin` reads each view a holder names (a Project's spec,
+its Materializations, its finished WorkJobs and Tools, a git-import mapping,
+or an ID named on the command line) as its records are stored, identifies
+it with the library now (`view.Reidentify`, which refuses a description or
+a changeset), stores the new records beside the old, and then a renames
+table, one `<old> <new>` line per renamed view, a content-addressed object
+the Project's status names (`status.renames`); that status write is the
+commit point. The table is an index, not an authority: `Reidentify` of the
+old ID gives the new one, so every line is checked in one call. After it,
+each Materialization whose status names an old view is cleared to resolve
+again, each Tool version published from the project has its tree renamed
+(every tree of the project's Tools and the farm's is surveyed, so each
+store's table holds a line for the copies spread into it; an earlier
+version names no project, and stays as it is), each grant on a renamed
+tree gains an entry for the new ID with the same paths, and each mapping
+gains one renamed line, which reading applies to the lines before it. A
+reader given an ID from outside what it wrote (a request, a spec, a
+record's subject) resolves it through the table (`project.Current`, over
+`view.ResolveOld`, which checks each line the first time it is used). Each
+reader that loads the view has its own test that fails without it; the
+HUD's diff resolves both IDs too, but `ChangedFiles` reads records without
+recomputing an ID, so an old ID diffs empty against its new one with or
+without the table, and no test can tell the two apart. A stored changeset's bytes never change, and a
+changeset over a renamed parent is carried: each of its entries is read
+against the base it was written over, whose records stay, and done to the
+parent's new ID (`gitimport.Carry`, over `view.ApplyPatchFrom`), which
+gives a new changeset over the new ID. It must come to the line's renamed
+view; the pair `<old changeset> <new changeset>` goes in the mapping's
+renamed line beside the views (the Project's table stays views only), and
+chains are made of the new changesets, so every chain the import makes or
+serves is text any reader resolves by the spec (a whole chain stored
+earlier under a ChainRef line keeps its text, which reads right over the
+views it names as stored, and nothing serves it). Lines are chosen by what
+each changeset was written over against what the line names once the
+table applies, so a mapping renamed by a build before carrying is carried
+too. A carry that fails (a changeset the
+store lacks, one that does not come to the renamed view, one
+`ApplyPatchFrom` refuses) stops the project's run before anything is
+written, naming the ref and the line. *Corrected twice on 2026-11-13.*
+This first said an old changeset needs no renaming, since applied over its
+parent's new ID it gives the head's new ID: measured 7 of 7, on changesets
+that only add. Removal is exact restatement, and a changeset that removes
+a directory #107 renamed restates it with the size the old library summed,
+where the view now records it null; over the new ID that text reads as a
+write of the directory, and nothing is removed (4 of 11 on a fixture of
+removals written at the old pin, testdata/pin19c9-removals). A rule that
+two directories with one C4 ID compare without size fixed the operator's
+own readers, and was then withdrawn: the chain the import serves would
+still have held the old text over the new ID, which the c4m library, as
+any outside reader, compares field by field as the spec says, and read
+wrong, silently (measured). Carried, all 11 come to their heads, and the
+served chain read by the c4m library alone holds the head's tree. A lost changeset over a
+renamed view is made again only where the step's patch passes through no
+renamed directory (then it is the same patch, over the parent as written);
+otherwise the error says to cut the mapping back and import again. The run is dry by default;
+it refuses while a WorkJob has not finished (a live output's blocks rest on
+views as stored, and its next fold would build on an old base), and is
+resumed by running again. Calibration keys are left: an old key misses, a
+cost, and never a wrong result, since reuse takes only units whose inputs
+are the job's input views, which the key hashes. The new CRDs are applied
+before it writes: the old Project CRD prunes `status.renames` silently.
 
 ### 2.2 Records
 
@@ -2284,8 +2352,8 @@ reads at most 64 blocks: 9.6 ms at 10,000 folds, where the chain
 as one object took 99 s, and about 307 bytes stored per fold. Until
 2026-11-12 every fold stored the whole chain again: 6.2 MB of chain at 200
 folds, 62 KB now. A block holds one section: c4 before 80b7dda (#136)
-resolves a block of more than one wrongly, and the operator's pin is
-before it. The job's input view, which a refold of nothing starts from and
+resolves a block of more than one wrongly. The pin carries #136 since
+2026-11-12, and a block still holds one section. The job's input view, which a refold of nothing starts from and
 the newest block no longer reaches, is kept in the provenance index. A chain
 stored as one object before blocks still loads, and the next block rests on
 its view.

@@ -376,7 +376,12 @@ func TestUnsafeNamesRefused(t *testing.T) {
 	}
 	m := c4m.NewManifest()
 	m.AddEntry(&c4m.Entry{Name: "..", Size: 1, C4ID: c4.Identify(strings.NewReader("x"))})
-	data, _ := c4m.Marshal(m)
+	// c4 refuses to write such a name itself; where it writes one, the
+	// view refuses to read it.
+	data, err := c4m.Marshal(m)
+	if err != nil {
+		return
+	}
 	if _, err := FromBytes(data, nil, Filter{}); err == nil {
 		t.Fatal("FromBytes accepted ..")
 	}

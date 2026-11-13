@@ -3,7 +3,7 @@ module github.com/Avalanche-io/c4-operator
 go 1.26.7
 
 require (
-	github.com/Avalanche-io/c4 v1.0.17-0.20261103163501-19c974853521
+	github.com/Avalanche-io/c4 v1.0.17-0.20261112233759-b52e201dec97
 	github.com/container-storage-interface/spec v1.13.0
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/go-jose/go-jose/v4 v4.1.4
@@ -94,7 +94,7 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
-	k8s.io/apiextensions-apiserver v0.37.0 // indirect
+	k8s.io/apiextensions-apiserver v0.37.0
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
