@@ -14,6 +14,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -24,6 +25,7 @@ import (
 	"time"
 
 	"github.com/Avalanche-io/c4"
+	"github.com/Avalanche-io/c4/c4m"
 	"github.com/Avalanche-io/c4/store"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -218,12 +220,59 @@ func main() {
 				ch, _, err := gitimport.OpenRecordedChain(ctx, filepath.Join(tmp, gitimport.ChainFileName(ref)), view.StoreRecords(st), m, ref)
 				if err != nil || ch.Head != rc.Head {
 					bad("mapping %s: ref %s's chain: %v (%v)", *mapping, ref, ch, err)
+					continue
+				}
+				// The chain as the import service serves it, read by the c4m
+				// library alone, as any outside reader reads it: the head's tree.
+				if err := servedIsHead(ctx, st, filepath.Join(tmp, gitimport.ChainFileName(ref)), m, ref, rc.Head); err != nil {
+					bad("mapping %s: ref %s's served chain: %v", *mapping, ref, err)
 				}
 			}
-			ok("mapping %s: %d lines, %d refs, no old IDs, chains made again", *mapping, len(m), len(refs))
+			ok("mapping %s: %d lines, %d refs, no old IDs, chains made again and served as their heads", *mapping, len(m), len(refs))
 		}
 	}
 	if failed {
 		os.Exit(1)
 	}
+}
+
+// servedIsHead reads ref's chain as the import service serves it
+// (RecordedChainBytes, then ExportChain) with the c4m library alone, and
+// compares the tree it resolves to, path by path, with the head's.
+func servedIsHead(ctx context.Context, st view.Store, p string, m []gitimport.Commit, ref string, head c4.ID) error {
+	src := view.StoreRecords(st)
+	served, err := gitimport.RecordedChainBytes(ctx, p, src, m, ref)
+	if err != nil {
+		return err
+	}
+	full, err := view.ExportChain(ctx, served, src)
+	if err != nil {
+		return err
+	}
+	got, err := c4m.NewDecoder(bytes.NewReader(full)).Decode()
+	if err != nil {
+		return fmt.Errorf("the c4m library does not read it: %w", err)
+	}
+	want, err := view.Load(ctx, head, src, 16)
+	if err != nil {
+		return err
+	}
+	paths := func(m *c4m.Manifest) []string {
+		var out, stack []string
+		for _, e := range m.Entries {
+			stack = stack[:e.Depth]
+			out = append(out, strings.Join(stack, "")+e.Name)
+			if e.IsDir() {
+				stack = append(stack, e.Name)
+			}
+		}
+		return out
+	}
+	g, w := paths(got), paths(want.Manifest())
+	for i := 0; i < len(g) || i < len(w); i++ {
+		if i >= len(g) || i >= len(w) || g[i] != w[i] {
+			return fmt.Errorf("the c4m library resolves it to %d paths and the head %s holds %d; they part at path %d", len(g), head, len(w), i+1)
+		}
+	}
+	return nil
 }

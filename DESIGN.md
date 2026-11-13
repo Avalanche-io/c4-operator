@@ -405,22 +405,31 @@ record's subject) resolves it through the table (`project.Current`, over
 reader that loads the view has its own test that fails without it; the
 HUD's diff resolves both IDs too, but `ChangedFiles` reads records without
 recomputing an ID, so an old ID diffs empty against its new one with or
-without the table, and no test can tell the two apart. A stored changeset is not renamed: its bytes never
-change, and applied over its parent's new ID it gives the head's new ID,
-so a chain is read with each section's base as the view's ID now. Measured
-on two fixtures written at the old pin: 7 of 7 changesets that add, and 11
-of 11 that remove, replace or add one thing each (testdata/pin19c9-removals).
-*Corrected 2026-11-13:* this first read "7 of 7", from a fixture with no
-removal in it. Removal is exact restatement, and a stored changeset
-restates a directory #107 renamed with the size the old library summed,
-where the view now records it null; compared with its size, the removal
-read as a write of the directory by its own ID, so nothing was removed,
-and a git import whose history held such a removal was refused after its
-renamed line. Over a view, two directories with the same name and C4 ID
-are now the same directory whatever sizes they record
-(`view.restatesInView`): a view's directory size is derived from its
-children, which the ID fixes. The resolver, which reads descriptions,
-still compares every field. A lost changeset over a
+without the table, and no test can tell the two apart. A stored changeset's bytes never change, and a
+changeset over a renamed parent is carried: each of its entries is read
+against the base it was written over, whose records stay, and done to the
+parent's new ID (`gitimport.Carry`, over `view.ApplyPatchFrom`), which
+gives a new changeset over the new ID. It must come to the line's renamed
+view; the pair `<old changeset> <new changeset>` goes in the mapping's
+renamed line beside the views (the Project's table stays views only), and
+chains are made of the new changesets, so every chain stored or served is
+text any reader resolves by the spec. A carry that fails (a changeset the
+store lacks, one that does not come to the renamed view, one
+`ApplyPatchFrom` refuses) stops the project's run before anything is
+written, naming the ref and the line. *Corrected twice on 2026-11-13.*
+This first said an old changeset needs no renaming, since applied over its
+parent's new ID it gives the head's new ID: measured 7 of 7, on changesets
+that only add. Removal is exact restatement, and a changeset that removes
+a directory #107 renamed restates it with the size the old library summed,
+where the view now records it null; over the new ID that text reads as a
+write of the directory, and nothing is removed (4 of 11 on a fixture of
+removals written at the old pin, testdata/pin19c9-removals). A rule that
+two directories with one C4 ID compare without size fixed the operator's
+own readers, and was then withdrawn: the chain the import serves would
+still have held the old text over the new ID, which the c4m library, as
+any outside reader, compares field by field as the spec says, and read
+wrong, silently (measured). Carried, all 11 come to their heads, and the
+served chain read by the c4m library alone holds the head's tree. A lost changeset over a
 renamed view is made again only where the step's patch passes through no
 renamed directory (then it is the same patch, over the parent as written);
 otherwise the error says to cut the mapping back and import again. The run is dry by default;

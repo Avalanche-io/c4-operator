@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/gitimport"
 	"github.com/Avalanche-io/c4-operator/internal/view"
 )
 
@@ -61,9 +62,14 @@ type fixture struct {
 // null-sized entry two or more directories down.
 var renamedByPin = []string{"chain1", "chain2", "link-depth2", "mixed-deep", "null-depth2", "tool", "toolout"}
 
-func loadFixture(t *testing.T) fixture {
+func loadFixture(t *testing.T) fixture { return loadFixtureDir(t, "pin19c9") }
+
+// loadFixtureDir loads one of the view package's fixtures written at the
+// old pin. In pin19c9-removals each changeset line names its head too,
+// kept in views under the changeset's name.
+func loadFixtureDir(t *testing.T, name string) fixture {
 	t.Helper()
-	dir := filepath.Join("..", "view", "testdata", "pin19c9")
+	dir := filepath.Join("..", "view", "testdata", name)
 	f := fixture{st: &ram{RAM: store.NewRAM()}, views: map[string]c4.ID{}, changesets: map[string]c4.ID{}}
 	files, err := os.ReadDir(filepath.Join(dir, "objects"))
 	if err != nil {
@@ -95,6 +101,11 @@ func loadFixture(t *testing.T) fixture {
 			f.views[w[1]] = id
 		} else {
 			f.changesets[w[1]] = id
+			if len(w) == 4 {
+				if f.views[w[1]], err = c4.Parse(w[3]); err != nil {
+					t.Fatal(err)
+				}
+			}
 		}
 	}
 	return f
@@ -379,5 +390,73 @@ func TestAnOldProjectCRDDropsTheTableAndARunRefuses(t *testing.T) {
 	}
 	if f.st.puts != 0 {
 		t.Fatalf("the refused run stored %d objects", f.st.puts)
+	}
+}
+
+// A git import whose changeset over a renamed parent cannot be carried to
+// the new ID stops its project's run before anything is written: the error
+// names the ref and the line, nothing is stored, and the status names no
+// table. With the changeset the line records made right, the run carries
+// it, and the mapping's renamed line names the pair.
+func TestACarryThatFailsWritesNothingForTheProject(t *testing.T) {
+	ctx := context.Background()
+	data, err := os.ReadFile(filepath.Join("..", "..", "config", "crd", "c4.avalanche.io_projects.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	crd := &unstructured.Unstructured{}
+	if err := yaml.Unmarshal(data, &crd.Object); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []bool{true, false} {
+		f := loadFixtureDir(t, "pin19c9-removals")
+		scheme := runtime.NewScheme()
+		clientgoscheme.AddToScheme(scheme)
+		c4v1.AddToScheme(scheme)
+		p := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: "carry"}}
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(crd, p).WithStatusSubresource(p).Build()
+		second := f.changesets["rm-dir-deep-null"]
+		if bad {
+			second = f.changesets["rm-dir-plain"] // comes to another view than the line's
+		}
+		mapping := filepath.Join(t.TempDir(), "mapping.jsonl")
+		w, err := gitimport.AppendMapping(mapping)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.Write(gitimport.Commit{Commit: strings.Repeat("a", 40), Ref: "main", View: f.views["V"], ParentView: view.EmptyID(), Changeset: f.changesets["V"], ChainBase: view.EmptyID(), ChainSeq: 1})
+		w.Write(gitimport.Commit{Commit: strings.Repeat("b", 40), Parent: strings.Repeat("a", 40), Ref: "main", View: f.views["rm-dir-deep-null"], ParentView: f.views["V"], Changeset: second, ChainBase: view.EmptyID(), ChainSeq: 2})
+		w.Close()
+		before, _ := os.ReadFile(mapping)
+		var out, log bytes.Buffer
+		err = Migrate(ctx, Options{Client: c, Project: "carry", Write: true, Out: &out, Log: &log, Mappings: []string{mapping},
+			Store: func(context.Context, *c4v1.Project) (Store, error) { return f.st, nil }})
+		var back c4v1.Project
+		if gerr := c.Get(ctx, types.NamespacedName{Name: "carry"}, &back); gerr != nil {
+			t.Fatal(gerr)
+		}
+		after, _ := os.ReadFile(mapping)
+		if bad {
+			if err == nil || !strings.Contains(err.Error(), "ref main, mapping line 2 (commit "+strings.Repeat("b", 40)+")") || !strings.Contains(err.Error(), "Nothing is written") {
+				t.Fatalf("a carry that fails: %v", err)
+			}
+			if f.st.puts != 0 || back.Status.Renames != "" || !bytes.Equal(before, after) {
+				t.Fatalf("the refused run stored %d objects, named the table %q, and the mapping changed: %v", f.st.puts, back.Status.Renames, !bytes.Equal(before, after))
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("the run: %v\n%s", err, out.String())
+		}
+		m, err := gitimport.ReadMapping(mapping)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(m) != 3 || len(m[2].Renamed) != 4 || m[1].Changeset == second || m[0].Changeset == f.changesets["V"] {
+			t.Fatalf("the mapping after the run: %d lines, the renamed line names %d pairs (want 2 views and 2 changesets)", len(m), len(m[len(m)-1].Renamed))
+		}
+		if back.Status.Renames == "" || !strings.Contains(out.String(), "mapping "+mapping+" 4 2") {
+			t.Fatalf("status.renames %q; report:\n%s", back.Status.Renames, out.String())
+		}
 	}
 }

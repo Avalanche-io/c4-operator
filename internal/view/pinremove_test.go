@@ -12,17 +12,19 @@ import (
 	"github.com/Avalanche-io/c4/store"
 )
 
-// A changeset stored before the pin moved is not renamed: applied over its
-// parent's new ID, it gives its head's new ID. The fixture
+// A changeset stored before the pin moved, carried to its parent's new ID
+// (ApplyPatchFrom: each entry read against the base it was written over,
+// done to the new ID), gives its head's new ID. The fixture
 // testdata/pin19c9-removals (gen/main.go's removals, run at 19c97485) is a
-// view V and changesets over it that remove, replace or add one thing each.
-// Removal is spelled by restating the base's entry exactly, so these are
-// the changesets whose meaning rests on V's entries as the new library
-// records them. Removing a directory #107 renamed (a null-sized frame or a
-// link two directories down) was the case that went wrong: the directory's
-// size differs between the libraries, so the removal read as a write of
-// the directory by its own ID and nothing was removed (restatesInView).
-func TestAnOldChangesetGivesItsHeadsNewID(t *testing.T) {
+// view V and changesets over it that remove, replace or add one thing
+// each. Removal is spelled by restating the base's entry exactly, so these
+// are the changesets whose meaning rests on the base's entries. The test
+// also keeps why they are carried, not reused: the old text applied over
+// V's new ID is wrong for exactly the removals of a directory #107 renamed
+// (a null-sized frame or a link two directories down), whose size the
+// new library records null where the old one summed it, so the removal
+// reads as a write of the directory and nothing is removed.
+func TestAnOldChangesetCarriedGivesItsHeadsNewID(t *testing.T) {
 	ctx := context.Background()
 	dir := filepath.Join("testdata", "pin19c9-removals")
 	ram := store.NewRAM()
@@ -103,18 +105,29 @@ func TestAnOldChangesetGivesItsHeadsNewID(t *testing.T) {
 			t.Fatalf("%s: %v", s.name, err)
 		}
 		headNew := newID(s.head)
-		got, err := ApplyPatch(ctx, vNew, ch.Sections[0].Patch, src)
+		got, err := ApplyPatchFrom(ctx, vNew, v, ch.Sections[0].Patch, src)
 		switch {
 		case err != nil:
-			t.Errorf("%s over V's new ID: %v", s.name, err)
+			t.Errorf("%s carried to V's new ID: %v", s.name, err)
 		case got.ID != headNew:
-			t.Errorf("%s over V's new ID gives %s, and its head's new ID is %s", s.name, got.ID, headNew)
+			t.Errorf("%s carried to V's new ID gives %s, and its head's new ID is %s", s.name, got.ID, headNew)
+		}
+		as, err := ApplyPatch(ctx, vNew, ch.Sections[0].Patch, src)
+		if err != nil {
+			t.Fatalf("%s as text over V's new ID: %v", s.name, err)
+		}
+		if wrong := as.ID != headNew; wrong != renamedDirRemoval[s.name] {
+			t.Errorf("%s as text over V's new ID: wrong %v, measured %v", s.name, wrong, renamedDirRemoval[s.name])
 		}
 	}
 	for name := range want {
 		t.Errorf("the fixture has no %s", name)
 	}
 }
+
+// renamedDirRemoval are the fixture's changesets whose text over V's new
+// ID means something else: each removes a directory #107 renamed.
+var renamedDirRemoval = map[string]bool{"rm-dir-deep-link": true, "rm-dir-deep-null": true, "rm-nested-dir-deep-link": true, "rm-nested-dir-deep-null": true}
 
 func mustParse(t *testing.T, s string) c4.ID {
 	t.Helper()

@@ -187,7 +187,10 @@ func (w *MappingWriter) Write(c Commit) error { return w.enc.Encode(c) }
 func (w *MappingWriter) Close() error { return w.f.Close() }
 
 // renameLines reads lines with their views as a library change renamed
-// them: a renamed line applies to every line before it.
+// them: a renamed line applies to every line before it. A line whose
+// changeset the line carried (Carry) reads with the new changeset, which
+// is written over the renamed parent: as written, that line is now the
+// renamed parent and view.
 func renameLines(m []Commit, r view.Renames) {
 	for i := range m {
 		c := &m[i]
@@ -195,6 +198,9 @@ func renameLines(m []Commit, r view.Renames) {
 			c.renamed, c.parentWritten, c.viewWritten = true, c.ParentView, c.View
 		}
 		c.View, c.ParentView = r.Current(c.View), r.Current(c.ParentView)
+		if cs := r.Current(c.Changeset); cs != c.Changeset {
+			c.Changeset, c.parentWritten, c.viewWritten = cs, c.ParentView, c.View
+		}
 		if !c.ChainBase.IsNil() {
 			c.ChainBase = r.Current(c.ChainBase)
 		}
@@ -203,15 +209,20 @@ func renameLines(m []Commit, r view.Renames) {
 
 // Renamed is the renamed line a mapping needs for a library change whose
 // renames are r: the pairs, sorted, for every view m's lines name (View,
-// ParentView, ChainBase) that r gives a new ID. None when m names no view
-// r renames, as after the line is appended: appending it is done once.
-func Renamed(m []Commit, r view.Renames) Commit {
+// ParentView, ChainBase) that r gives a new ID, and for every changeset
+// carried over a renamed parent (carried, from Carry: old changeset, new).
+// None when m names no view r renames, as after the line is appended:
+// appending it is done once.
+func Renamed(m []Commit, r, carried view.Renames) Commit {
 	named := view.Renames{}
 	for _, c := range m {
 		for _, id := range []c4.ID{c.View, c.ParentView, c.ChainBase} {
 			if cur := r.Current(id); cur != id {
 				named[id] = cur
 			}
+		}
+		if cur := carried.Current(c.Changeset); cur != c.Changeset {
+			named[c.Changeset] = cur
 		}
 	}
 	text := strings.TrimSuffix(string(named.Bytes()), "\n")

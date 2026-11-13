@@ -208,6 +208,32 @@ func (p *Plan) WriteTable(ctx context.Context, st Store, prior c4.ID) (c4.ID, er
 	return st.PutBytes(ctx, p.Table.Bytes())
 }
 
+// Source reads records as they will be once the run has written them:
+// the new records of each view this run renames, then the store. A step
+// planned before anything is written (Carry) reads the new views through
+// it.
+func (p *Plan) Source(st Store) view.RecordSource {
+	mem := map[c4.ID][]byte{}
+	for _, f := range p.Findings {
+		for _, r := range f.records {
+			mem[r.ID] = r.Data
+		}
+	}
+	return &overlay{mem: mem, under: &source{st: st}}
+}
+
+type overlay struct {
+	mem   map[c4.ID][]byte
+	under view.RecordSource
+}
+
+func (o *overlay) Record(ctx context.Context, id c4.ID) ([]byte, error) {
+	if d, ok := o.mem[id]; ok {
+		return d, nil
+	}
+	return o.under.Record(ctx, id)
+}
+
 // ExtendGrants is grants with an entry beside each one whose tree the
 // table renames: the new ID, the same paths. An entry already there is not
 // added again. It returns the entries added.

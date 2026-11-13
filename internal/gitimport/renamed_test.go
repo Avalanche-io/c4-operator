@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Avalanche-io/c4"
+	"github.com/Avalanche-io/c4/c4m"
 	"github.com/Avalanche-io/c4/store"
 
 	"github.com/Avalanche-io/c4-operator/internal/view"
@@ -141,9 +142,15 @@ func TestARenamedLineReadsAMappingWithItsViewsAsTheyAreNow(t *testing.T) {
 	if len(table) != 3 {
 		t.Fatalf("%d of the mapping's views renamed, want 3", len(table))
 	}
-	line := Renamed(read, table)
-	if len(line.Renamed) != 3 {
-		t.Fatalf("the renamed line names %d views", len(line.Renamed))
+	// Every line's view is renamed, so each changeset is carried: the
+	// line names the 3 views and the 3 changesets.
+	line := migrated(t, read, table, ram)
+	if len(line.Renamed) != 6 {
+		t.Fatalf("the renamed line names %d pairs, want 3 views and 3 changesets", len(line.Renamed))
+	}
+	pairs, err := view.ParseRenames([]byte(strings.Join(line.Renamed, "\n")))
+	if err != nil {
+		t.Fatal(err)
 	}
 	w, err = AppendMapping(p)
 	if err != nil {
@@ -160,7 +167,7 @@ func TestARenamedLineReadsAMappingWithItsViewsAsTheyAreNow(t *testing.T) {
 		t.Fatalf("%d lines", len(now))
 	}
 	for i, c := range m {
-		if now[i].View != table[c.View] || now[i].ParentView != table.Current(c.ParentView) || now[i].Changeset != c.Changeset {
+		if now[i].View != table[c.View] || now[i].ParentView != table.Current(c.ParentView) || now[i].Changeset == c.Changeset || now[i].Changeset != pairs[c.Changeset] {
 			t.Fatalf("line %d reads as %+v", i+1, now[i])
 		}
 	}
@@ -183,7 +190,7 @@ func TestARenamedLineReadsAMappingWithItsViewsAsTheyAreNow(t *testing.T) {
 	if ch, repaired, err := OpenRecordedChain(ctx, chain, src, now, "main"); err != nil || repaired != "" || ch.Head != table[m[2].View] {
 		t.Fatalf("the chain opened again: %+v (%q, %v)", ch, repaired, err)
 	}
-	if again := Renamed(now, table); len(again.Renamed) != 0 {
+	if again := Renamed(now, table, nil); len(again.Renamed) != 0 {
 		t.Fatalf("a second run appends %v", again.Renamed)
 	}
 	after, _ := os.ReadFile(p)
@@ -275,7 +282,7 @@ func TestAChangesetEndingWithItsViewIsMadeAgainAfterARenamedLine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.Write(Renamed(read, table))
+	w.Write(migrated(t, read, table, ram))
 	w.Close()
 	now, err := ReadMapping(p)
 	if err != nil {
@@ -330,7 +337,7 @@ func TestARenamedCommitIsNotMadeAgainAndSaysWhy(t *testing.T) {
 	for _, c := range lines {
 		w.Write(c)
 	}
-	w.Write(Renamed(lines, table))
+	w.Write(Renamed(lines, table, nil)) // synthetic old IDs, with no records to carry from
 	w.Close()
 	m, err := ReadMapping(p)
 	if err != nil {
@@ -394,7 +401,7 @@ func TestARenamedCommitWhosePatchIsTheSameIsMadeAgain(t *testing.T) {
 	for _, c := range lines {
 		w.Write(c)
 	}
-	w.Write(Renamed(lines, table))
+	w.Write(Renamed(lines, table, nil)) // synthetic old IDs, with no records to carry from
 	w.Close()
 	m, err := ReadMapping(p)
 	if err != nil {
@@ -441,7 +448,7 @@ func TestACommitOverARenamedParentIsMadeAgain(t *testing.T) {
 	for _, c := range lines {
 		w.Write(c)
 	}
-	w.Write(Renamed(lines, table))
+	w.Write(Renamed(lines, table, nil)) // synthetic old IDs, with no records to carry from
 	w.Close()
 	m, err := ReadMapping(p)
 	if err != nil {
@@ -459,14 +466,17 @@ func TestACommitOverARenamedParentIsMadeAgain(t *testing.T) {
 }
 
 // A ref whose history removes a directory c4 #107 renamed (one holding a
-// null-sized frame or a link two directories down) is made again after
-// its renamed line, like any other. Its stored changeset restates the
+// null-sized frame or a link two directories down), migrated, is served
+// as a chain any reader resolves to the ref's head: the chain the import
+// service serves (RecordedChainBytes, then ExportChain), read by the c4m
+// library alone, holds the head's tree. Its stored changeset restates the
 // directory with the size the old library summed, and the view as it is
-// now records that directory with a null size: read with size compared,
-// the removal was a write of the directory by its own ID, so the chain
-// made again kept the directory and was refused against the mapping's
-// head, for good (view.restatesInView).
-func TestARefThatRemovedARenamedDirectoryIsMadeAgain(t *testing.T) {
+// now records that size null: as text over the parent's new ID it reads,
+// to any reader that compares every field as the spec says, as a write of
+// the directory, and nothing is removed. So the migration carries it
+// (Carry): each entry read against the stored base, a new changeset over
+// the new parent, named in the renamed line.
+func TestARefThatRemovedARenamedDirectoryIsServedAsItsReadersReadIt(t *testing.T) {
 	for _, removal := range []string{"rm-dir-deep-null", "rm-dir-deep-link", "rm-nested-dir-deep-null", "rm-nested-dir-deep-link"} {
 		t.Run(removal, func(t *testing.T) {
 			ctx := context.Background()
@@ -502,19 +512,70 @@ func TestARefThatRemovedARenamedDirectoryIsMadeAgain(t *testing.T) {
 			for _, c := range m {
 				w.Write(c)
 			}
-			w.Write(Renamed(m, table))
+			w.Write(migrated(t, m, table, ram))
 			w.Close()
 			now, err := ReadMapping(p)
 			if err != nil {
 				t.Fatal(err)
 			}
-			ch, _, err := OpenRecordedChain(ctx, filepath.Join(filepath.Dir(p), "main.c4m"), src, now, "main")
+			head := table[m[1].View]
+			chain := filepath.Join(filepath.Dir(p), "main.c4m")
+			served, err := RecordedChainBytes(ctx, chain, src, now, "main")
 			if err != nil {
 				t.Fatal(err)
 			}
-			if ch.Head != table[m[1].View] || ch.Sections != 2 {
-				t.Fatalf("the chain: %+v, want head %s", ch, table[m[1].View])
+			full, err := view.ExportChain(ctx, served, src)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := c4m.NewDecoder(bytes.NewReader(full)).Decode()
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := view.Load(ctx, head, src, 4)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if g, w := manifestPaths(got), manifestPaths(want.Manifest()); g != w {
+				t.Fatalf("the served chain, read by the c4m library, holds\n  %s\nand the head holds\n  %s", g, w)
+			}
+			ch, _, err := OpenRecordedChain(ctx, chain, src, now, "main")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ch.Head != head || ch.Sections != 2 {
+				t.Fatalf("the chain: %+v, want head %s", ch, head)
 			}
 		})
 	}
+}
+
+// manifestPaths is every path a c4m manifest holds, in its order.
+func manifestPaths(m *c4m.Manifest) string {
+	var out, stack []string
+	for _, e := range m.Entries {
+		stack = stack[:e.Depth]
+		out = append(out, strings.Join(stack, "")+e.Name)
+		if e.IsDir() {
+			stack = append(stack, e.Name)
+		}
+	}
+	return strings.Join(out, " ")
+}
+
+// migrated is the renamed line the migration appends to a mapping m for
+// the renames table: each changeset over a renamed parent carried to its
+// new ID, stored in ram, and the pairs for the views and the changesets.
+func migrated(t *testing.T, m []Commit, table view.Renames, ram *store.RAM) Commit {
+	t.Helper()
+	cr, err := Carry(context.Background(), m, table, view.StoreRecords(ram))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, data := range cr.Objects {
+		if _, err := ram.Put(bytes.NewReader(data)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return Renamed(m, table, cr.Changesets)
 }

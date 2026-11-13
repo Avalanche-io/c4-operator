@@ -44,7 +44,9 @@ type Options struct {
 	// <path> [record <id>]", "notaview <id> <holder> <path> <why>",
 	// "unfinished <ns>/<name> <phase>", "table <prior> <table>",
 	// "rematerialize <ns>/<name>", "tool <ns>/<name> <old> <new>",
-	// "grant <project> <tree> <paths>", "mapping <path> <views>". Log
+	// "grant <project> <tree> <paths>", "mapping <path> <pairs> <carried>"
+	// (the renamed line's pairs, and how many of them are changesets
+	// carried over a renamed parent). Log
 	// narrates.
 	Out, Log io.Writer
 	Workers  int
@@ -240,14 +242,24 @@ func Migrate(ctx context.Context, o Options) error {
 	for _, g := range added {
 		report("grant %s %s %s", p.Name, g.Tree, orDash(strings.Join(g.Paths, ",")))
 	}
+	// Each mapping's changesets over a renamed parent are carried to its
+	// new ID (gitimport.Carry) before anything is written: one that cannot
+	// be stops the project here, naming the ref and the line, and nothing
+	// is written for it.
 	var lines []string
+	carried := map[string]*gitimport.Carried{}
 	for _, path := range o.Mappings {
 		m, err := gitimport.ReadMapping(path)
 		if err != nil {
 			return err
 		}
-		if line := gitimport.Renamed(m, plan.Table); len(line.Renamed) > 0 {
-			report("mapping %s %d", path, len(line.Renamed))
+		cr, err := gitimport.Carry(ctx, m, plan.Table, plan.Source(st))
+		if err != nil {
+			return fmt.Errorf("project %s, mapping %s: %w. Nothing is written for the project", p.Name, path, err)
+		}
+		carried[path] = cr
+		if line := gitimport.Renamed(m, plan.Table, cr.Changesets); len(line.Renamed) > 0 {
+			report("mapping %s %d %d", path, len(line.Renamed), len(cr.Changesets))
 			lines = append(lines, path)
 		}
 	}
@@ -259,7 +271,15 @@ func Migrate(ctx context.Context, o Options) error {
 		return errors.Join(append(errs, schemaErr)...)
 	}
 
-	// The records, then the table, then the status that names it.
+	// The carried changesets and their records, the records, then the
+	// table, then the status that names it.
+	for _, path := range lines {
+		for _, data := range carried[path].Objects {
+			if _, err := st.PutBytes(ctx, data); err != nil {
+				return fmt.Errorf("mapping %s: a carried changeset: %w", path, err)
+			}
+		}
+	}
 	written, err := plan.WriteTable(ctx, st, prior)
 	if err != nil {
 		return err
@@ -318,7 +338,7 @@ func Migrate(ctx context.Context, o Options) error {
 		}
 	}
 	for _, path := range lines {
-		if err := appendRenamed(path, plan.Table); err != nil {
+		if err := appendRenamed(path, plan.Table, carried[path].Changesets); err != nil {
 			return fmt.Errorf("mapping %s: %w", path, err)
 		}
 	}
@@ -328,14 +348,14 @@ func Migrate(ctx context.Context, o Options) error {
 // appendRenamed appends the renamed line the mapping needs, under the
 // mapping's lock, read again under it: a line another run (or an import)
 // appended meanwhile is seen.
-func appendRenamed(path string, r view.Renames) error {
+func appendRenamed(path string, r, changesets view.Renames) error {
 	w, err := gitimport.AppendMapping(path)
 	if err != nil {
 		return err
 	}
 	m, err := gitimport.ReadMapping(path)
 	if err == nil {
-		if line := gitimport.Renamed(m, r); len(line.Renamed) > 0 {
+		if line := gitimport.Renamed(m, r, changesets); len(line.Renamed) > 0 {
 			err = w.Write(line)
 		}
 	}
