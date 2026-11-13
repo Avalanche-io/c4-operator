@@ -68,7 +68,11 @@ GEN=$("$TOOL" gen-show --out "$SHOW" --frame-kib "$FRAME_KIB")
 t0=$(now)
 SHOW_VIEW=$(ingest show-a "$SHOW")
 INGEST_S=$(since "$t0")
-SHARDS=$(for i in 0 1 2; do printf "s%d=%s " "$i" "$(count_keys "garage-$i" show-a)"; done)
+SHARDS=""
+for i in 0 1 2; do
+  n=$(count_keys "garage-$i" show-a) || fail "counting show-a's objects on garage-$i"
+  SHARDS+="s$i=$n "
+done
 record "Show: $GEN. Ingested in ${INGEST_S} s as view \`$SHOW_VIEW\`. Objects per shard (files and records): $SHARDS"
 record ""
 

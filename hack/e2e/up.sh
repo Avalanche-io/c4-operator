@@ -41,6 +41,9 @@ for img in c4-operator:dev c4-e2e:dev "$GARAGE_IMAGE" registry.k8s.io/sig-storag
 done
 
 log "store: three Garage shards"
+if k -n c4-store get deploy minio-0 >/dev/null 2>&1; then
+  fail "this cluster's store is the MinIO harness's, and its kind config lacks Garage's ports: recreate it, FRESH=1 hack/e2e/up.sh"
+fi
 garage_up garage-0 garage-1 garage-2
 for i in 0 1 2; do
   for b in show-a show-b herd-tiered herd-direct mono; do garage_bucket "garage-$i" "$b"; done

@@ -12,7 +12,9 @@
 #   hack/e2e/migrate.sh OLD NEW OUT
 #
 # OLD and NEW are checkouts of the two pins (NEW is the one with
-# migrate-pin); OUT gets every log and report. It exits 1 if anything
+# migrate-pin); OUT gets every log and report. When their harnesses make
+# different stores (MinIO before the e2e moved to Garage), the farm keeps
+# OLD's, only NEW's operator is deployed, and NEW's phases are not run. It exits 1 if anything
 # failed: a phase, the CRDs, a migrate, a check, or a second migrate that
 # would change something.
 set -u
@@ -86,6 +88,25 @@ up() {
   (cd "$1" && hack/e2e/up.sh) >"$R/$2-up.log" 2>&1 || { fail "$2 up"; tail -20 "$R/$2-up.log"; exit 1; }
   k apply -f "$1/hack/e2e/work.yaml" -f "$1/hack/e2e/hud.yaml" >/dev/null || { fail "$2: the HUD and pools"; exit 1; }
   health "after $2 up"
+}
+
+# era CHECKOUT: the store its e2e harness makes: garage, or minio before.
+era() { if grep -q '^garage_up()' "$1/hack/e2e/lib.sh"; then echo garage; else echo minio; fi; }
+
+# switch CHECKOUT: the checkout's operator on the farm as it is, its stores
+# and Projects untouched, as up.sh's operator step does: for a farm another
+# harness made, whose stores the checkout's up.sh would replace.
+switch() {
+  note "new: the operator only, on the farm's $(era "$OLD") store"
+  (cd "$1" && make image >/dev/null) || { fail "new: the operator image"; exit 1; }
+  kind load docker-image c4-operator:dev --name "$CLUSTER" >/dev/null || { fail "new: loading the operator image"; exit 1; }
+  k apply -k "$1/config/default" >/dev/null || { fail "new: config/default"; exit 1; }
+  k -n c4-system rollout restart deploy/c4-manager deploy/c4-regional ds/c4-node >/dev/null
+  k -n c4-system rollout status deploy/c4-manager --timeout=180s >/dev/null &&
+    k -n c4-system rollout status deploy/c4-regional --timeout=180s >/dev/null &&
+    k -n c4-system rollout status ds/c4-node --timeout=300s >/dev/null || { fail "new: the operator's rollout"; exit 1; }
+  k apply -f "$1/hack/e2e/work.yaml" -f "$1/hack/e2e/hud.yaml" >/dev/null || { fail "new: the HUD and pools"; exit 1; }
+  health "after the new operator"
 }
 
 # host_shards PROJECT: --shard flags for the project's store, reached from
@@ -173,7 +194,12 @@ for f in "$NEW"/config/crd/c4.avalanche.io_*.yaml; do
 done
 note "migrate --write"
 migrate write --write
-up "$NEW" new
+# Across the harness's move from MinIO to Garage the new checkout's up.sh
+# would replace the farm's stores (and its kind config lacks the ports), so
+# only its operator goes on, and its phases, which need its own store, are
+# not run: the migration, its checks and the second migrate still are.
+SAME=yes
+if [ "$(era "$OLD")" = "$(era "$NEW")" ]; then up "$NEW" new; else SAME=no; switch "$NEW"; fi
 note "checks"
 for p in $(projects); do
   # shellcheck disable=SC2046
@@ -195,5 +221,9 @@ for f in "$R"/again-*.out; do
 done
 k -n c4-system scale deploy/c4-manager --replicas=1 >/dev/null
 k -n c4-system rollout status deploy/c4-manager --timeout=180s >/dev/null || fail "the manager after the second migrate"
-phases "$NEW" new
+if [ $SAME = yes ]; then
+  phases "$NEW" new
+else
+  echo "NOT RUN: the new pin's phases. Its harness's store is $(era "$NEW") and the farm's is $(era "$OLD"); run e2e on the new pin for them."
+fi
 echo "end $(stamp)"

@@ -115,7 +115,7 @@ func (c s3client) list(ctx context.Context, prefix string) ([]string, error) {
 func (c s3client) delete(ctx context.Context, key string) error {
 	var esc []string
 	for _, seg := range strings.Split(key, "/") {
-		esc = append(esc, url.PathEscape(seg))
+		esc = append(esc, uriEscape(seg))
 	}
 	resp, err := c.do(ctx, http.MethodDelete, "/"+strings.Join(esc, "/"), nil)
 	if err != nil {
@@ -127,4 +127,19 @@ func (c s3client) delete(ctx context.Context, key string) error {
 		return fmt.Errorf("delete %s: %s: %s", key, resp.Status, strings.TrimSpace(string(b)))
 	}
 	return nil
+}
+
+// uriEscape escapes a path segment as SigV4's canonical URI does: every byte
+// but the unreserved ones, so the path sent is the path signed.
+func uriEscape(seg string) string {
+	var b strings.Builder
+	for i := 0; i < len(seg); i++ {
+		c := seg[i]
+		if 'A' <= c && c <= 'Z' || 'a' <= c && c <= 'z' || '0' <= c && c <= '9' || c == '-' || c == '_' || c == '.' || c == '~' {
+			b.WriteByte(c)
+			continue
+		}
+		fmt.Fprintf(&b, "%%%02X", c)
+	}
+	return b.String()
 }

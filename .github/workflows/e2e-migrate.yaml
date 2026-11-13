@@ -24,12 +24,12 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: e2e-migrate-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   migrate:
+    # Per job, so a label event that skips it never queues behind a run.
+    concurrency:
+      group: e2e-migrate-${{ github.ref }}
+      cancel-in-progress: false
     # On request; when a pull request is labelled e2e-migrate; and on every
     # push to a pull request that carries the label.
     if: >-

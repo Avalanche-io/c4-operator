@@ -10,15 +10,13 @@ CTX=kind-$CLUSTER
 # the HUD on 31080, the signer on 31081 and the shards' S3 APIs on
 # 31900-31902 (their admin APIs on 31910-31912, P3's instances on
 # 31920-31923 and 31930-31933), outside the ports a person's `c4 farm up`
-# takes (30080 and 30900), so the two never collide; 0 keeps 30080, 30081
-# and 30900-30902.
+# takes (30080, and 30900 and up), so the two never collide. The farm takes
+# ports from 30900 to 30933 past the offset, so two farms' offsets must be
+# at least 40 apart.
 PO=${E2E_PORT_OFFSET:-1000}
 if [ $((PO % 10)) -ne 0 ]; then echo "E2E_PORT_OFFSET must be a multiple of 10" >&2; exit 2; fi
 HUD_PORT=$((30080 + PO))
 SIGNER_PORT=$((30081 + PO))
-s3port() { echo $((30900 + $1 + PO)); }
-# an endpoint pattern for tools that add the shard index (0, 1, 2)
-S3_ENDPOINT_FMT="http://127.0.0.1:$(((30900 + PO) / 10))%s"
 OUT=$ROOT/hack/e2e/out
 # The commit the binaries and images were built from, for the results.
 BUILD=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)
@@ -140,15 +138,27 @@ garage_up() {
   for n in "$@"; do garage_yaml "$n" | k apply -f - >/dev/null; done
   for n in "$@"; do
     k -n c4-store rollout status "deploy/$n" --timeout=180s >/dev/null || fail "$n did not start"
-    until garage_admin "$n" GetClusterStatus >/dev/null; do sleep 1; done
+    garage_wait "$n" "its admin API on 127.0.0.1:$(garage_port "$n" admin)" garage_admin "$n" GetClusterStatus
     if [ "$(garage_admin "$n" GetClusterLayout | jq '.roles | length')" = 0 ]; then
       node=$(garage_admin "$n" GetClusterStatus | jq -r '.nodes[0].id')
       garage_admin "$n" UpdateClusterLayout "{\"roles\":[{\"id\":\"$node\",\"zone\":\"e2e\",\"capacity\":100000000000,\"tags\":[]}]}" >/dev/null
       ver=$(garage_admin "$n" GetClusterLayout | jq '.version + 1')
       garage_admin "$n" ApplyClusterLayout "{\"version\":$ver}" >/dev/null || fail "$n: the layout"
     fi
-    until curl -sf -m 5 -o /dev/null "http://127.0.0.1:$(garage_port "$n" admin)/health"; do sleep 1; done
+    garage_wait "$n" "healthy after its layout" curl -sf -m 5 -o /dev/null "http://127.0.0.1:$(garage_port "$n" admin)/health"
     garage_key "$n" "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY" root
+  done
+}
+
+# garage_wait NAME WHAT CMD...: CMD succeeds within two minutes, or fail
+# saying so. A cluster made before its NodePorts were mapped (a kind config
+# from an older harness, another E2E_PORT_OFFSET) never answers.
+garage_wait() {
+  local n=$1 what=$2 end=$((SECONDS + 120))
+  shift 2
+  until "$@" >/dev/null 2>&1; do
+    [ $SECONDS -lt $end ] || fail "$n: no answer from $what in 120 s; a cluster made by an older harness, or with another E2E_PORT_OFFSET, lacks the ports: FRESH=1 hack/e2e/up.sh"
+    sleep 1
   done
 }
 
@@ -241,7 +251,10 @@ ingest() {
 # instance_requests NAME: "GETS HEADS" the instance's S3 API has served,
 # refused ones included (Garage counts every request it answers).
 instance_requests() {
-  curl -sf -m 30 "http://127.0.0.1:$(garage_port "$1" admin)/metrics" | awk '
+  local m
+  # A fresh instance has no counter lines yet, so only the fetch is checked.
+  m=$(curl -sf -m 30 "http://127.0.0.1:$(garage_port "$1" admin)/metrics") || { echo "$1: /metrics cannot be read" >&2; return 1; }
+  printf '%s\n' "$m" | awk '
     /^api_s3_request_counter\{/ && /api_endpoint="GetObject"/ { g += $NF }
     /^api_s3_request_counter\{/ && /api_endpoint="HeadObject"/ { h += $NF }
     END { printf "%d %d", g, h }'
@@ -251,7 +264,7 @@ instance_requests() {
 store_gets() {
   local total=0 i line
   for i in 0 1 2; do
-    line=$(instance_requests "garage-$i")
+    line=$(instance_requests "garage-$i") || return 1
     total=$((total + ${line% *}))
   done
   echo "$total"
@@ -375,10 +388,10 @@ cold_start() {
 settled() {
   local a b
   sleep 3
-  a=$("$@")
+  a=$("$@") || return 1
   while :; do
     sleep 3
-    b=$("$@")
+    b=$("$@") || return 1
     [ "$a" = "$b" ] && break
     a=$b
   done

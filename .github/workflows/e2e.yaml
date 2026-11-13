@@ -17,12 +17,12 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: e2e-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   e2e:
+    # Per job, so a label event that skips it never queues behind a run.
+    concurrency:
+      group: e2e-${{ github.ref }}
+      cancel-in-progress: false
     if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'e2e'
     name: the e2e phases on a kind farm
     runs-on: ubuntu-24.04
