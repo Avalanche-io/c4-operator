@@ -1,7 +1,8 @@
 # The end-to-end suite (`make e2e`, hack/e2e/run.sh) on an eight-worker kind
 # cluster: the farm, its Garage store, and every phase. It takes hours, so
 # it runs only when asked: Actions, e2e, Run workflow (once this file is on
-# the default branch), or a pull request labelled e2e. What the phases
+# the default branch), or a pull request labelled e2e (and each push to it
+# after). What the phases
 # recorded (hack/e2e/out) is kept as an artifact.
 name: e2e
 on:
@@ -12,7 +13,7 @@ on:
         required: false
         type: string
   pull_request:
-    types: [labeled]
+    types: [labeled, synchronize]
 
 permissions:
   contents: read
@@ -23,7 +24,12 @@ jobs:
     concurrency:
       group: e2e-${{ github.ref }}
       cancel-in-progress: false
-    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'e2e'
+    # On request; when a pull request is labelled e2e; and on every push to
+    # a pull request that carries the label.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'e2e') ||
+      (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'e2e'))
     name: the e2e phases on a kind farm
     runs-on: ubuntu-24.04
     timeout-minutes: 300
