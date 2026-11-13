@@ -2305,9 +2305,12 @@ operator with the pin move: resolving over a base listed one level deep
 gave nested entries wrong while the root ID was right (c4 #140 fetches each
 deepened directory's listing, d255356), and core's GC walk took an indented
 object for a leaf, so a block with nested paths was not walked (c4 #141,
-b52e201, walks patch objects in full). Whether core's walk gives an ID
-list's members a kind, so that the spine protects the blocks it names, is
-open with the c4 lead: as written it does only for a fold's entries. A
+b52e201, walks patch objects in full; vector V-39). An ID list reached as
+a journaled root, or as a member of one, makes each member a walk-class
+edge, classified by its own bytes, so the spine protects the blocks it
+names (c4 #142, 3e4089d, vector V-40): once the operator journals its
+claims (GC-MAPPING), the spine, or the job record, is journaled under a
+claim that gives it walk kind, a `.c4m`-named claim as the grammar stands. A
 history that cannot be read when the job ends is left out of its record,
 said in the log, rather than holding the record.
 
