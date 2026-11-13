@@ -98,7 +98,7 @@ func TestTheHistoryHoldsOnEveryPath(t *testing.T) {
 		o = m.out
 		stored[o.id] = true
 	}
-	fold(65)          // the 65th rests periodically
+	fold(65)                    // the 65th rests periodically
 	o = restartOutput(t, st, o) // a restart right after a rest
 	fold(1)
 	o = restartOutput(t, st, o)
