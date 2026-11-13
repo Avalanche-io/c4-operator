@@ -128,9 +128,14 @@ func ReadRenames(st Store, table c4.ID) (Renames, error) {
 	return r, nil
 }
 
-// checked caches the table lines ResolveOld has checked, by table and old
-// ID: a line is checked once, and objects never change.
-var checked sync.Map // [2]c4.ID -> c4.ID
+// checked caches what ResolveOld found of a table line, by table and old
+// ID: a line is checked once, true or false, and objects never change.
+var checked sync.Map // [2]c4.ID -> checkedLine
+
+type checkedLine struct {
+	cur c4.ID
+	err error
+}
 
 // ResolveOld is the one place an ID an earlier library gave a view is
 // turned into the ID it has now: every reader that takes a view's ID from
@@ -140,7 +145,7 @@ var checked sync.Map // [2]c4.ID -> c4.ID
 // not taken on trust: the first time one is used, the old ID's records
 // are identified again and must give the new ID, or the line is an error
 // and id is returned as it is.
-func ResolveOld(st Store, table, id c4.ID) (c4.ID, error) {
+func ResolveOld(ctx context.Context, st Store, table, id c4.ID) (c4.ID, error) {
 	r, err := ReadRenames(st, table)
 	if err != nil {
 		return id, err
@@ -151,15 +156,23 @@ func ResolveOld(st Store, table, id c4.ID) (c4.ID, error) {
 	}
 	key := [2]c4.ID{table, id}
 	if v, ok := checked.Load(key); ok {
-		return v.(c4.ID), nil
+		l := v.(checkedLine)
+		if l.err != nil {
+			return id, l.err
+		}
+		return l.cur, nil
 	}
-	v, err := Reidentify(context.Background(), id, StoreRecords(st), 16)
+	v, err := Reidentify(ctx, id, StoreRecords(st), 16)
 	if err != nil {
+		// Not cached: a store that could not be read, or a cancelled
+		// reader, says nothing about the line.
 		return id, fmt.Errorf("renames %s: %s: %w", table, id, err)
 	}
 	if v.ID != cur {
-		return id, fmt.Errorf("renames %s says %s is now %s, and its records identify as %s", table, id, cur, v.ID)
+		err := fmt.Errorf("renames %s says %s is now %s, and its records identify as %s", table, id, cur, v.ID)
+		checked.Store(key, checkedLine{err: err})
+		return id, err
 	}
-	checked.Store(key, cur)
+	checked.Store(key, checkedLine{cur: cur})
 	return cur, nil
 }

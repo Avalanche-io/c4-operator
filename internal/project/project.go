@@ -194,7 +194,7 @@ func Current(ctx context.Context, c client.Reader, st view.Store, name string, i
 	if err != nil {
 		return id
 	}
-	cur, err := view.ResolveOld(st, table, id)
+	cur, err := view.ResolveOld(ctx, st, table, id)
 	if err != nil {
 		return id
 	}

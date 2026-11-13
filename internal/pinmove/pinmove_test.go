@@ -184,7 +184,7 @@ func TestASurveyRenamesTheViewsAndOnlyTheViews(t *testing.T) {
 		if _, err := view.Load(ctx, cur, view.StoreRecords(f.st), 4); err != nil {
 			t.Errorf("%s renamed to %s, which does not load: %v", old, cur, err)
 		}
-		if got, err := view.ResolveOld(f.st, table, old); err != nil || got != cur {
+		if got, err := view.ResolveOld(context.Background(), f.st, table, old); err != nil || got != cur {
 			t.Errorf("%s resolves to %s (%v)", old, got, err)
 		}
 	}
@@ -365,6 +365,13 @@ func TestAnOldProjectCRDDropsTheTableAndARunRefuses(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, log bytes.Buffer
+	// A dry run reports what it would do, and ends with the same refusal.
+	err = Migrate(ctx, Options{Client: c, Project: "old-crd", Out: &out, Log: &log,
+		Store: func(context.Context, *c4v1.Project) (Store, error) { return f.st, nil }})
+	if err == nil || !strings.Contains(err.Error(), "no status.renames") || !strings.Contains(out.String(), "rename "+f.views["null-depth2"].String()) {
+		t.Fatalf("a dry run against the old CRD: %v\n%s", err, out.String())
+	}
+	out.Reset()
 	err = Migrate(ctx, Options{Client: c, Project: "old-crd", Write: true, Out: &out, Log: &log,
 		Store: func(context.Context, *c4v1.Project) (Store, error) { return f.st, nil }})
 	if err == nil || !strings.Contains(err.Error(), "no status.renames") {

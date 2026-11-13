@@ -153,9 +153,10 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 	stores := func(ctx context.Context, _ *c4v1.Project) (pinmove.Store, error) { return st.store, nil }
 	run := func(write bool) (string, error) {
 		var out, log bytes.Buffer
-		// mixed-deep is a view no holder here names, named outside.
+		// tool and toolout are views no holder here names, named outside;
+		// mixed-deep is held only by the farm tool's earlier version.
 		err := pinmove.Migrate(ctx, pinmove.Options{Client: k8s, Project: "pinned", Store: stores, Mappings: []string{mapping},
-			Named: []c4.ID{views["mixed-deep"]}, FarmNamespace: "c4-system", Write: write, Out: &out, Log: &log})
+			Named: []c4.ID{views["tool"], views["toolout"]}, FarmNamespace: "c4-system", Write: write, Out: &out, Log: &log})
 		t.Logf("write %v:\n%s%s", write, out.String(), log.String())
 		return out.String(), err
 	}
@@ -165,7 +166,7 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), ns+"/live") || !strings.Contains(err.Error(), "Drain these, then run again") {
 		t.Fatalf("a dry run with a live job: %v", err)
 	}
-	renamed := []string{"chain1", "chain2", "link-depth2", "mixed-deep", "null-depth2"}
+	renamed := []string{"chain1", "chain2", "link-depth2", "mixed-deep", "null-depth2", "tool", "toolout"}
 	for _, want := range []string{"unfinished " + ns + "/live", "rematerialize " + ns + "/frames",
 		"tool c4-system/farm-tool " + old("link-depth2"), "tool " + ns + "/own-tool " + old("null-depth2"), "mapping " + mapping + " 3", "table - c4", "grant pinned "} {
 		if !strings.Contains(report, want) {
@@ -251,7 +252,7 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 		if cur := r.Current(id); cur != v.ID {
 			t.Errorf("%s: the table says %s, its records identify as %s", name, cur, v.ID)
 		}
-		resolved, err := view.ResolveOld(st.store, table, id)
+		resolved, err := view.ResolveOld(context.Background(), st.store, table, id)
 		if err != nil {
 			t.Fatal(err)
 		}

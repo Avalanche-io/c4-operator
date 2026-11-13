@@ -393,16 +393,25 @@ the Project's status names (`status.renames`); that status write is the
 commit point. The table is an index, not an authority: `Reidentify` of the
 old ID gives the new one, so every line is checked in one call. After it,
 each Materialization whose status names an old view is cleared to resolve
-again, each Tool version's tree is renamed (a version is the farm's, read
-in every project it is spread to), each grant on a renamed tree gains an
-entry for the new ID with the same paths, and each mapping gains one
-renamed line, which reading applies to the lines before it. A reader given
-an ID from outside what it wrote (a request, a spec, a record's subject)
-resolves it through the table (`project.Current`, over
-`view.ResolveOld`). A stored changeset is not renamed: its bytes never
+again, each Tool version published from the project has its tree renamed
+(every tree of the project's Tools and the farm's is surveyed, so each
+store's table holds a line for the copies spread into it; an earlier
+version names no project, and stays as it is), each grant on a renamed
+tree gains an entry for the new ID with the same paths, and each mapping
+gains one renamed line, which reading applies to the lines before it. A
+reader given an ID from outside what it wrote (a request, a spec, a
+record's subject) resolves it through the table (`project.Current`, over
+`view.ResolveOld`, which checks each line the first time it is used). Each
+reader that loads the view has its own test that fails without it; the
+HUD's diff resolves both IDs too, but `ChangedFiles` reads records without
+recomputing an ID, so an old ID diffs empty against its new one with or
+without the table, and no test can tell the two apart. A stored changeset is not renamed: its bytes never
 change, and applied over its parent's new ID it gives the head's new ID
 (measured on a fixture written at the old pin, 7 of 7), so a chain is read
-with each section's base as the view's ID now. The run is dry by default;
+with each section's base as the view's ID now. A lost changeset over a
+renamed view is made again only where the step's patch passes through no
+renamed directory (then it is the same patch, over the parent as written);
+otherwise the error says to cut the mapping back and import again. The run is dry by default;
 it refuses while a WorkJob has not finished (a live output's blocks rest on
 views as stored, and its next fold would build on an old base), and is
 resumed by running again. Calibration keys are left: an old key misses, a

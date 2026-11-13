@@ -156,7 +156,7 @@ func TestAnOldIDResolvesThroughTheTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, old := range p.views {
-		got, err := ResolveOld(p.ram, tid, old)
+		got, err := ResolveOld(context.Background(), p.ram, tid, old)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -164,7 +164,7 @@ func TestAnOldIDResolvesThroughTheTable(t *testing.T) {
 			t.Errorf("%s: resolves to %s, want %s", name, got, want)
 		}
 	}
-	if got, err := ResolveOld(p.ram, c4.ID{}, p.views["null-depth2"]); err != nil || got != p.views["null-depth2"] {
+	if got, err := ResolveOld(context.Background(), p.ram, c4.ID{}, p.views["null-depth2"]); err != nil || got != p.views["null-depth2"] {
 		t.Fatalf("no table: %s, %v", got, err)
 	}
 	// The table's text is its identity: parsed and written again, the
@@ -252,7 +252,7 @@ func TestAFalseTableLineIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := ResolveOld(p.ram, table, old)
+	got, err := ResolveOld(context.Background(), p.ram, table, old)
 	if err == nil || got != old || !strings.Contains(err.Error(), "identify as") {
 		t.Fatalf("a false line: %s, %v", got, err)
 	}

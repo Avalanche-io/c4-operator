@@ -2,6 +2,7 @@ package pinmove
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -132,18 +133,31 @@ func Migrate(ctx context.Context, o Options) error {
 	if err != nil {
 		return err
 	}
+	// Every tree of every listed tool is surveyed, so this project's table
+	// holds a line for each one its store holds (a farm version spread
+	// into it, an earlier one); only its own are translated (toolTrees).
 	for _, t := range tools {
-		for _, at := range toolTrees(&t, p.Name, o.FarmNamespace) {
-			if id, err := c4.Parse(*at.view); err == nil {
-				held = append(held, Held{ID: id, Holder: "Tool " + t.Namespace + "/" + t.Name, Path: at.path})
-			}
+		h, err := IDsIn("Tool "+t.Namespace+"/"+t.Name, t.Status)
+		if err != nil {
+			return err
 		}
+		for i := range h {
+			h[i].Path = ".status" + h[i].Path
+		}
+		held = append(held, h...)
 	}
 	refusal := func() error {
 		return fmt.Errorf("%d WorkJobs in project %s have not finished: %s. Drain these, then run again", len(unfinished), p.Name, strings.Join(unfinished, ", "))
 	}
 	if len(unfinished) > 0 && o.Write {
 		return refusal()
+	}
+	// Nothing is written unless the API server keeps what the commit
+	// point writes: a Project CRD from before status.renames prunes it. A
+	// dry run says so too, at its end.
+	schemaErr := CheckSchema(ctx, o.Client)
+	if schemaErr != nil && o.Write {
+		return schemaErr
 	}
 	for i, id := range o.Named {
 		held = append(held, Held{ID: id, Holder: "named", Path: fmt.Sprintf("[%d]", i)})
@@ -180,7 +194,7 @@ func Migrate(ctx context.Context, o Options) error {
 		case f.NotAView != "":
 			notViews++
 			for _, h := range f.Held {
-				report("notaview %s %s %s %s", f.ID, h.Holder, h.Path, f.NotAView)
+				report("notaview %s %s %s %s", f.ID, h.Holder, h.Path, strings.Join(strings.Fields(f.NotAView), " "))
 			}
 		case f.New != f.ID && priorTable.Current(f.ID) == f.ID:
 			// Renamed by this run; one an earlier run renamed is in the
@@ -238,17 +252,13 @@ func Migrate(ctx context.Context, o Options) error {
 		}
 	}
 	if !o.Write {
+		var errs []error
 		if len(unfinished) > 0 {
-			return refusal()
+			errs = append(errs, refusal())
 		}
-		return nil
+		return errors.Join(append(errs, schemaErr)...)
 	}
 
-	// Nothing is written unless the API server keeps what the commit
-	// point writes: a Project CRD from before status.renames prunes it.
-	if err := CheckSchema(ctx, o.Client); err != nil {
-		return err
-	}
 	// The records, then the table, then the status that names it.
 	written, err := plan.WriteTable(ctx, st, prior)
 	if err != nil {
@@ -358,9 +368,8 @@ func idOrDash(id c4.ID) string {
 	return id.String()
 }
 
-// toolsOf are the Tools whose versions the project's migration translates:
-// those in its namespaces, and the farm's whose versions were published
-// from its store.
+// toolsOf are the Tools whose trees the project's migration surveys: those
+// in its namespaces, and the farm's (spread into every project's store).
 func toolsOf(ctx context.Context, c client.Client, p *c4v1.Project, farm string) ([]c4v1.Tool, error) {
 	var out []c4v1.Tool
 	for _, ns := range p.Spec.Namespaces {
@@ -377,15 +386,7 @@ func toolsOf(ctx context.Context, c client.Client, p *c4v1.Project, farm string)
 	if err := c.List(ctx, &l, client.InNamespace(farm)); err != nil {
 		return nil, err
 	}
-	for _, t := range l.Items {
-		for _, v := range t.Status.Versions {
-			if v.Project == p.Name {
-				out = append(out, t)
-				break
-			}
-		}
-	}
-	return out, nil
+	return append(out, l.Items...), nil
 }
 
 // toolTree is one version tree of a Tool's status, and its path there.
