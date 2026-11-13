@@ -49,6 +49,11 @@ func TestIssuerRoutesAreLimited(t *testing.T) {
 	host, people := 0, 0
 	s.HostIssuer = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { host++ })
 	s.People = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { people++ })
+	// The clock stands still: nothing refills during the test, however
+	// long a loaded machine takes over its thousands of calls.
+	stopped := time.Now()
+	s.hostIssuerLimits.now = func() time.Time { return stopped }
+	s.peopleLimits.now = func() time.Time { return stopped }
 	h := s.Handler()
 	send := func(path string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()

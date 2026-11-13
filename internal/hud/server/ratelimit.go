@@ -54,6 +54,10 @@ type routeLimits struct {
 	mu      sync.Mutex
 	all     *rate.Limiter
 	clients map[string]*clientLimit
+	// now is the clock a request is measured by; nil is the wall clock. A
+	// test sets it, so what refills between calls is what it says, not
+	// what a loaded machine's scheduler leaves.
+	now func() time.Time
 }
 
 type clientLimit struct {
@@ -101,7 +105,11 @@ func (q *routeLimits) allow(b budget, addr string, now time.Time) (bool, time.Du
 // limited serves h within q's limits under b.
 func limited(q *routeLimits, b budget, h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if ok, wait := q.allow(b, clientAddr(r), time.Now()); !ok {
+		now := time.Now
+		if q.now != nil {
+			now = q.now
+		}
+		if ok, wait := q.allow(b, clientAddr(r), now()); !ok {
 			secs := int(wait/time.Second) + 1
 			w.Header().Set("Retry-After", strconv.Itoa(secs))
 			fail(w, http.StatusTooManyRequests, "too many requests to the farm's issuer from here: ask again in %d s", secs)
