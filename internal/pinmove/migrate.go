@@ -355,7 +355,12 @@ func appendRenamed(path string, r, changesets view.Renames) error {
 	}
 	m, err := gitimport.ReadMapping(path)
 	if err == nil {
-		if line := gitimport.Renamed(m, r, changesets); len(line.Renamed) > 0 {
+		if lines := gitimport.Uncarried(m, r, changesets); len(lines) > 0 {
+			// Appended since the run read the mapping (an import, with the
+			// operator meant to be stopped): renamed with no changeset
+			// carried, its chain would read wrong. Run again.
+			err = fmt.Errorf("lines %v were appended during the run and need their changesets carried: run again", lines)
+		} else if line := gitimport.Renamed(m, r, changesets); len(line.Renamed) > 0 {
 			err = w.Write(line)
 		}
 	}

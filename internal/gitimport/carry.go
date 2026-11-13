@@ -18,8 +18,11 @@ type Carried struct {
 }
 
 // Carry makes, for a library change whose renames are r, a changeset for
-// every line of m whose parent or view r renames: its stored changeset
-// carried to the parent's new ID. A stored changeset says what it means
+// every line of m whose changeset is over another parent, or comes to
+// another view, than the line names once r is applied (needsCarry): its
+// parent or view renamed by r, or by a renamed line written before
+// changesets were carried. Each is the stored changeset carried to the
+// parent's new ID. A stored changeset says what it means
 // only against the base it was written over (a removal is the base's
 // entry restated exactly), and a renamed base records some entries
 // differently (c4 #107: a directory's size), so its text over the new ID
@@ -29,7 +32,10 @@ type Carried struct {
 // stay, and done to the new parent (view.ApplyPatchFrom), which gives the
 // changeset over the new parent that says it. It must come to the line's
 // renamed view. Chains are then made of the new changesets (renameLines):
-// every chain stored or served is text any reader resolves by the spec.
+// every chain the import makes or serves is text any reader resolves by
+// the spec. A whole chain stored earlier (a ChainRef line's Chain) keeps
+// its text, which reads right over the views it names as stored; nothing
+// serves it.
 //
 // Nothing is written. An error names the ref, the line and the commit, and
 // no line is carried when any one cannot be: a changeset that does not
@@ -40,13 +46,10 @@ func Carry(ctx context.Context, m []Commit, r view.Renames, src view.RecordSourc
 	out := &Carried{Changesets: view.Renames{}}
 	for i := range m {
 		c := &m[i]
-		if c.Commit == "" || c.RefOnly || c.Changeset.IsNil() {
+		if !needsCarry(c, r) {
 			continue
 		}
 		parent, produced := r.Current(c.ParentView), r.Current(c.View)
-		if parent == c.ParentView && produced == c.View {
-			continue
-		}
 		fail := func(format string, args ...any) error {
 			return fmt.Errorf("ref %s, mapping line %d (commit %s): its changeset %s, carried to the renamed parent %s: %s", c.Ref, i+1, c.Commit, c.Changeset, parent, fmt.Sprintf(format, args...))
 		}
@@ -66,6 +69,9 @@ func Carry(ctx context.Context, m []Commit, r view.Renames, src view.RecordSourc
 			return nil, fail("%v", err)
 		}
 		if res.ID != produced {
+			if _, err := src.Record(ctx, produced); err != nil {
+				return nil, fail("it comes to %s, and the line's view %s cannot be read (%v), so it was not re-identified: its records are missing from the store", res.ID, produced, err)
+			}
 			return nil, fail("it comes to %s, and the line's view is now %s", res.ID, produced)
 		}
 		if len(res.Changeset) == 0 {
@@ -82,4 +88,29 @@ func Carry(ctx context.Context, m []Commit, r view.Renames, src view.RecordSourc
 		}
 	}
 	return out, nil
+}
+
+// needsCarry reports whether line c's changeset, as the line records it,
+// is over another parent, or comes to another view, than the line names
+// once r is applied: its parent or view renamed by r, or by a renamed line
+// before r that carried no changesets (one written before carrying).
+func needsCarry(c *Commit, r view.Renames) bool {
+	if c.Commit == "" || c.RefOnly || c.Changeset.IsNil() {
+		return false
+	}
+	parent, produced := c.asWritten()
+	return r.Current(c.ParentView) != parent || r.Current(c.View) != produced
+}
+
+// Uncarried are the lines of m (counted from 1) that need a changeset
+// carried for r and have none in carried: lines another writer appended
+// after Carry read the mapping.
+func Uncarried(m []Commit, r, carried view.Renames) []int {
+	var out []int
+	for i := range m {
+		if c := &m[i]; needsCarry(c, r) && carried.Current(c.Changeset) == c.Changeset {
+			out = append(out, i+1)
+		}
+	}
+	return out
 }

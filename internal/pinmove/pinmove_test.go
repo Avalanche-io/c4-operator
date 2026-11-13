@@ -458,5 +458,11 @@ func TestACarryThatFailsWritesNothingForTheProject(t *testing.T) {
 		if back.Status.Renames == "" || !strings.Contains(out.String(), "mapping "+mapping+" 4 2") {
 			t.Fatalf("status.renames %q; report:\n%s", back.Status.Renames, out.String())
 		}
+		// The line names changesets the store holds: stored before it.
+		for _, c := range m[:2] {
+			if !f.st.Has(c.Changeset) {
+				t.Fatalf("the carried changeset %s of line %s is not in the store", c.Changeset, c.Commit)
+			}
+		}
 	}
 }

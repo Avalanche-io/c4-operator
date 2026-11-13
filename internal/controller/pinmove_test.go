@@ -167,8 +167,9 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 		t.Fatalf("a dry run with a live job: %v", err)
 	}
 	renamed := []string{"chain1", "chain2", "link-depth2", "mixed-deep", "null-depth2", "tool", "toolout"}
+	// The mapping's renamed line: its 3 views, and the 3 changesets carried over them.
 	for _, want := range []string{"unfinished " + ns + "/live", "rematerialize " + ns + "/frames",
-		"tool c4-system/farm-tool " + old("link-depth2"), "tool " + ns + "/own-tool " + old("null-depth2"), "mapping " + mapping + " 3", "table - c4", "grant pinned "} {
+		"tool c4-system/farm-tool " + old("link-depth2"), "tool " + ns + "/own-tool " + old("null-depth2"), "mapping " + mapping + " 6 3", "table - c4", "grant pinned "} {
 		if !strings.Contains(report, want) {
 			t.Errorf("the dry run's report has no %q", want)
 		}
@@ -323,7 +324,7 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 	}
 
 	// The mapping reads with its views renamed, and its chain is made again
-	// from the same changesets to the new head.
+	// from the changesets carried to the new parents, to the new head.
 	lines, err := gitimport.ReadMapping(mapping)
 	if err != nil {
 		t.Fatal(err)

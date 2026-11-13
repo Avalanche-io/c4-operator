@@ -3,6 +3,7 @@ package gitimport
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -477,7 +478,8 @@ func TestACommitOverARenamedParentIsMadeAgain(t *testing.T) {
 // (Carry): each entry read against the stored base, a new changeset over
 // the new parent, named in the renamed line.
 func TestARefThatRemovedARenamedDirectoryIsServedAsItsReadersReadIt(t *testing.T) {
-	for _, removal := range []string{"rm-dir-deep-null", "rm-dir-deep-link", "rm-nested-dir-deep-null", "rm-nested-dir-deep-link"} {
+	for _, removal := range []string{"rm-dir-deep-null", "rm-dir-deep-link", "rm-nested-dir-deep-null", "rm-nested-dir-deep-link",
+		"rm-top-link", "rm-deep-link", "rm-dir-of-link", "rm-dir-plain", "rm-file", "retarget-link", "add-file-deep"} {
 		t.Run(removal, func(t *testing.T) {
 			ctx := context.Background()
 			ram, m := fixtureImport(t, "pin19c9-removals", "V", removal)
@@ -536,7 +538,7 @@ func TestARefThatRemovedARenamedDirectoryIsServedAsItsReadersReadIt(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			if g, w := manifestPaths(got), manifestPaths(want.Manifest()); g != w {
+			if g, w := manifestEntries(got), manifestEntries(want.Manifest()); g != w {
 				t.Fatalf("the served chain, read by the c4m library, holds\n  %s\nand the head holds\n  %s", g, w)
 			}
 			ch, _, err := OpenRecordedChain(ctx, chain, src, now, "main")
@@ -550,17 +552,103 @@ func TestARefThatRemovedARenamedDirectoryIsServedAsItsReadersReadIt(t *testing.T
 	}
 }
 
-// manifestPaths is every path a c4m manifest holds, in its order.
-func manifestPaths(m *c4m.Manifest) string {
+// manifestEntries is every entry a c4m manifest holds, in its order: its
+// path, size, C4 ID, mode and link target.
+func manifestEntries(m *c4m.Manifest) string {
 	var out, stack []string
 	for _, e := range m.Entries {
 		stack = stack[:e.Depth]
-		out = append(out, strings.Join(stack, "")+e.Name)
+		out = append(out, fmt.Sprintf("%s %d %s %v %q", strings.Join(stack, "")+e.Name, e.Size, e.C4ID, e.Mode, e.Target))
 		if e.IsDir() {
 			stack = append(stack, e.Name)
 		}
 	}
-	return strings.Join(out, " ")
+	return strings.Join(out, "\n  ")
+}
+
+// A mapping renamed by a build that carried no changesets (its renamed
+// line names views only) is carried by the next run: its lines read with
+// their views renamed and their changesets over the old parents, which
+// Carry finds by what each changeset was written over, and once the line
+// it makes is appended, the served chain reads as the head.
+func TestAMappingRenamedBeforeCarryingIsCarried(t *testing.T) {
+	ctx := context.Background()
+	ram, m := fixtureImport(t, "pin19c9-removals", "V", "rm-dir-deep-null")
+	src := view.StoreRecords(ram)
+	table := view.Renames{}
+	for _, c := range m {
+		v, err := view.Reidentify(ctx, c.View, src, 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		recs, _ := v.Records()
+		for _, r := range recs {
+			ram.Put(bytes.NewReader(r.Data))
+		}
+		table[c.View] = v.ID
+	}
+	p := filepath.Join(t.TempDir(), "mapping.jsonl")
+	w, err := AppendMapping(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range m {
+		w.Write(c)
+	}
+	w.Write(Renamed(m, table, nil)) // as a build before carrying wrote it
+	w.Close()
+	now, err := ReadMapping(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := Uncarried(now, table, nil); len(got) != 2 {
+		t.Fatalf("lines needing a carry: %v, want both commits", got)
+	}
+	cr, err := Carry(ctx, now, table, src)
+	if err != nil || cr.Lines != 2 || len(cr.Changesets) != 2 {
+		t.Fatalf("carried %+v, %v", cr, err)
+	}
+	if got := Uncarried(now, table, cr.Changesets); len(got) != 0 {
+		t.Fatalf("lines left uncarried: %v", got)
+	}
+	for _, data := range cr.Objects {
+		ram.Put(bytes.NewReader(data))
+	}
+	line := Renamed(now, table, cr.Changesets)
+	if len(line.Renamed) != 2 {
+		t.Fatalf("the line names %d pairs, want the 2 changesets", len(line.Renamed))
+	}
+	w, err = AppendMapping(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Write(line)
+	w.Close()
+	if now, err = ReadMapping(p); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := Carry(ctx, now, table, src); again.Lines != 0 {
+		t.Fatalf("a run after it carries %d lines again", again.Lines)
+	}
+	served, err := RecordedChainBytes(ctx, filepath.Join(filepath.Dir(p), "main.c4m"), src, now, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	full, err := view.ExportChain(ctx, served, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := c4m.NewDecoder(bytes.NewReader(full)).Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := view.Load(ctx, table[m[1].View], src, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g, w := manifestEntries(got), manifestEntries(want.Manifest()); g != w {
+		t.Fatalf("the served chain holds\n  %s\nand the head\n  %s", g, w)
+	}
 }
 
 // migrated is the renamed line the migration appends to a mapping m for

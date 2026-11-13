@@ -412,8 +412,13 @@ parent's new ID (`gitimport.Carry`, over `view.ApplyPatchFrom`), which
 gives a new changeset over the new ID. It must come to the line's renamed
 view; the pair `<old changeset> <new changeset>` goes in the mapping's
 renamed line beside the views (the Project's table stays views only), and
-chains are made of the new changesets, so every chain stored or served is
-text any reader resolves by the spec. A carry that fails (a changeset the
+chains are made of the new changesets, so every chain the import makes or
+serves is text any reader resolves by the spec (a whole chain stored
+earlier under a ChainRef line keeps its text, which reads right over the
+views it names as stored, and nothing serves it). Lines are chosen by what
+each changeset was written over against what the line names once the
+table applies, so a mapping renamed by a build before carrying is carried
+too. A carry that fails (a changeset the
 store lacks, one that does not come to the renamed view, one
 `ApplyPatchFrom` refuses) stops the project's run before anything is
 written, naming the ref and the line. *Corrected twice on 2026-11-13.*
