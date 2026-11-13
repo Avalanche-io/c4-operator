@@ -19,9 +19,10 @@
 // copies the object into the project store without rehashing it. That is a
 // trust boundary: c4git computed the ID when it stored the content at `git
 // add`, and the importer accepts the c4git store's binding of ID to bytes.
-// A c4git store that holds wrong bytes under an ID passes them on.
-// Whoever can write the c4git store is therefore trusted like an ingest
-// point. Bytes that do not come from such a store are always hashed.
+// The project store checks the bytes it is given, so a c4git store that
+// holds wrong bytes under an ID passes nothing on: the copy is refused and
+// the import fails, naming the object. What the c4git store is trusted for
+// is the ID and the size. Bytes that do not come from it are always hashed.
 package gitimport
 
 import (

@@ -17,18 +17,19 @@ import (
 // A record or changeset the c4m library writes and does not read back as
 // written is never returned to be stored: Apply refuses the edits with an
 // error that names the entry. The library this package is built with
-// writes a symlink whose target starts with "c4" (and whose mode, as in
-// every view, is null) in a form it reads as a hard link: the target
-// taken for an ID. Any other disagreement between the encoder and the
-// decoder is caught the same way.
+// wrote a symlink whose target starts with "c4" in a form it read as a hard
+// link (fixed in c4 #92, which the pin now carries: those targets round
+// trip); it still writes a target with a colon in a form it does not read
+// back as written, and that is the case refused here. Any other
+// disagreement between the encoder and the decoder is caught the same way.
 func TestApplyRefusesWhatDoesNotReadBack(t *testing.T) {
 	ctx := context.Background()
 	ram := store.NewRAM()
 	src := StoreRecords(ram)
 	putBytes(t, ram, EmptyID(), nil)
 	idText := c4.Identify(strings.NewReader("some content")).String()
-	ok := []string{"a.txt", "../objects/" + idText, "studio/c4"}
-	refused := []string{idText, idText + ".exr", "c4studio"}
+	ok := []string{"a.txt", "../objects/" + idText, "studio/c4", idText, idText + ".exr", "c4studio"}
+	refused := []string{"host:path"}
 
 	for _, target := range ok {
 		if _, err := Apply(ctx, EmptyID(), []Edit{{Path: "d/link", Entry: SymlinkEntry("", target)}}, src); err != nil {
@@ -40,9 +41,9 @@ func TestApplyRefusesWhatDoesNotReadBack(t *testing.T) {
 		res, err := Apply(ctx, EmptyID(), []Edit{fileEdit("keep.txt", "keep"), fileEdit("d/a.txt", "a"), {Path: "d/link", Entry: SymlinkEntry("", target)}, fileEdit("d/z.txt", "z")}, src)
 		var nr *NotReadBack
 		if !errors.As(err, &nr) {
-			// Until the operator is on a c4m library with the decoder fixed
-			// (c4 PR #92), this library does not read these back. On one
-			// that does, nothing is refused, and this case is to go.
+			// If c4's library comes to read this target back, nothing is
+			// refused, and another case the library does not read back is
+			// to take its place.
 			t.Fatalf("a link to %q was not refused: %v", target, err)
 		}
 		if res != nil || nr.Entry != "d/link" || nr.What != "record" {
@@ -138,7 +139,7 @@ func TestRecordsOfAScannedTreeAreChecked(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "tools", "a.txt"), []byte("a"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink("c4studio", filepath.Join(dir, "tools", "latest")); err != nil {
+	if err := os.Symlink("host:path", filepath.Join(dir, "tools", "latest")); err != nil {
 		t.Fatal(err)
 	}
 	v, err := ScanDir(dir)
@@ -148,7 +149,7 @@ func TestRecordsOfAScannedTreeAreChecked(t *testing.T) {
 	recs, err := v.Records()
 	var nr *NotReadBack
 	if !errors.As(err, &nr) || nr.Entry != "tools/latest" || recs != nil {
-		t.Fatalf("the records of a scanned tree with a link to c4studio: %d, %v", len(recs), err)
+		t.Fatalf("the records of a scanned tree with a link to host:path: %d, %v", len(recs), err)
 	}
 	// Without the link, every record is handed out.
 	os.Remove(filepath.Join(dir, "tools", "latest"))
@@ -199,7 +200,7 @@ func TestRecordsNameTheSameEntryEveryTime(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(dir, d), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Symlink("c4studio", filepath.Join(dir, d, "l")); err != nil {
+		if err := os.Symlink("host:path", filepath.Join(dir, d, "l")); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -216,19 +217,18 @@ func TestRecordsNameTheSameEntryEveryTime(t *testing.T) {
 	}
 }
 
-// A name or a link target ending in a backslash is a legal c4m name, and
-// the c4m library this operator pins writes it in a form it reads back
-// with one more backslash. So it is refused, naming the entry, until the
-// pin carries c4 PR #98; a backslash anywhere else reads back as written.
-// When the pin moves, this test fails, and the refusal is to go.
-func TestATrailingBackslashIsRefusedUntilThePinMoves(t *testing.T) {
+// A name or a link target ending in a backslash is a legal c4m name. The
+// library pinned before c4 #98 wrote it in a form it read back with one
+// more backslash, and the read-back check refused it; the pin now carries
+// #98, so it reads back as written and is taken, like a backslash anywhere
+// else.
+func TestATrailingBackslashReadsBack(t *testing.T) {
 	ctx := context.Background()
 	ram := store.NewRAM()
 	src := StoreRecords(ram)
 	putBytes(t, ram, EmptyID(), nil)
-	var nr *NotReadBack
 	for _, e := range []Edit{fileEdit(`ends\`, "x"), {Path: "l", Entry: SymlinkEntry("", `t\`)}} {
-		if _, err := Apply(ctx, EmptyID(), []Edit{e}, src); !errors.As(err, &nr) {
+		if _, err := Apply(ctx, EmptyID(), []Edit{e}, src); err != nil {
 			t.Errorf("%s: %v", e.Path, err)
 		}
 	}

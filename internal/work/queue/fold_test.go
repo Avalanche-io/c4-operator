@@ -1708,13 +1708,11 @@ func TestTheChainIsBlocksThatResolveAsTheWholeChain(t *testing.T) {
 }
 
 // A block holding more than one section resolves each against the state
-// the ones before it made. The pinned c4 library (19c97485) applies a
+// the ones before it made. c4 before 80b7dda (19c97485, pinned until 2026-11-12) applied a
 // block's later sections against its first section alone; c4 80b7dda
-// (#136) fixed that. The operator writes one section per block, so the
-// old behaviour never meets its chains; this test runs once the pin moves
-// past 80b7dda (MIGRATION-C4-PIN.md).
+// (#136) fixed that, and the pin now carries it. The operator writes one
+// section per block all the same.
 func TestABlockOfTwoSectionsResolves(t *testing.T) {
-	t.Skip("needs c4 80b7dda (#136): the pinned 19c97485 folds a block's later sections against its first alone; un-skip with the pin move")
 	ctx := context.Background()
 	st, _ := foldStore(t)
 	q := &Queue{}

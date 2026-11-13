@@ -474,7 +474,9 @@ func TestCaptureRefusesWhatDoesNotReadBack(t *testing.T) {
 	f.sink.mu.Lock()
 	before := len(f.sink.objs)
 	f.sink.mu.Unlock()
-	target := c4.Identify(bytes.NewReader([]byte("x"))).String()
+	// A link target c4's library does not read back as written (a C4 ID
+	// did until c4 #92; a colon still does not).
+	target := "host:path"
 	if err := os.Symlink(target, filepath.Join(upper, "bin", "latest")); err != nil {
 		t.Fatal(err)
 	}

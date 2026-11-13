@@ -5,12 +5,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/Avalanche-io/c4"
+
+	"github.com/Avalanche-io/c4-operator/internal/view"
 )
 
 // recorded is the mapping a service writes for the first n commits of h on
@@ -316,15 +319,11 @@ func TestAChainThatCannotBeMadeAgain(t *testing.T) {
 			t.Errorf("%s: opened as %+v (%v)", name, ch, err)
 		}
 	}
-	// A wrong object under a changeset's ID.
+	// A wrong object under a changeset's ID. A store checks the bytes it
+	// is given, so the wrong object is one the store serves, as a disk
+	// whose bytes changed under it would.
 	id := m[2].Changeset
-	h.ram.Remove(id)
-	w, err := h.ram.Create(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.Write([]byte("not the changeset"))
-	w.Close()
+	h.src = view.StoreRecords(servesWrong{h.ram, id, []byte("not the changeset")})
 	os.WriteFile(p, torn, 0o644)
 	// The error says which, where the mapping records it, and that the
 	// object has to go before the changeset can be made again: a store
@@ -736,4 +735,18 @@ func TestEverySectionIsTheChangesetRecorded(t *testing.T) {
 	if !check("the second section another changeset", swapped) {
 		t.Fatal("the file with another changeset in it does not pass for the chain; the test tells nothing")
 	}
+}
+
+// servesWrong is a store that serves other bytes under one C4 ID.
+type servesWrong struct {
+	view.Store
+	id   c4.ID
+	data []byte
+}
+
+func (s servesWrong) Open(id c4.ID) (io.ReadCloser, error) {
+	if id == s.id {
+		return io.NopCloser(bytes.NewReader(s.data)), nil
+	}
+	return s.Store.Open(id)
 }
