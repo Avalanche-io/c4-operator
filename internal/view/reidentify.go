@@ -1,0 +1,137 @@
+package view
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"fmt"
+	"sort"
+	"strings"
+	"sync"
+
+	"github.com/Avalanche-io/c4"
+)
+
+// Reidentify reads the records of the view id as they are stored, without
+// the check Load makes, and identifies the tree they describe with this
+// library. The view it returns has the ID this library gives that tree:
+// id itself, unless a library change derives a record differently (c4
+// #107 keeps a directory's null size null where the library before it
+// wrote 0). Each record is read through src, so its bytes are checked
+// against its own ID; what is not checked is that the root recomputes to
+// id, since that is the question asked. Records() gives the new records.
+func Reidentify(ctx context.Context, id c4.ID, src RecordSource, workers int) (*View, error) {
+	root := NewNode("")
+	if err := loadInto(ctx, root, id, src, workers); err != nil {
+		return nil, err
+	}
+	return FromNode(root), nil
+}
+
+// Renames is the table a library change leaves: each view ID an earlier
+// library gave, and the ID this one gives the same records. It is an
+// index, not an authority: Reidentify of the old ID gives the new one, so
+// every line is checked in one call, and a lost table is rebuilt from the
+// records. Only views whose IDs changed are in it.
+//
+// Its text is one line per view, "<old> <new>", sorted by the old ID: a
+// plain-text object, stored by content like any other.
+type Renames map[c4.ID]c4.ID
+
+// ParseRenames reads a table. A line that is not two C4 IDs, a view named
+// twice, or a view renamed to itself is an error naming the line.
+func ParseRenames(data []byte) (Renames, error) {
+	r := Renames{}
+	sc := bufio.NewScanner(bytes.NewReader(data))
+	sc.Buffer(nil, 1<<20)
+	for n := 1; sc.Scan(); n++ {
+		f := strings.Fields(sc.Text())
+		if len(f) != 2 {
+			return nil, fmt.Errorf("renames line %d: not two C4 IDs", n)
+		}
+		old, err := c4.Parse(f[0])
+		if err != nil {
+			return nil, fmt.Errorf("renames line %d: %w", n, err)
+		}
+		cur, err := c4.Parse(f[1])
+		if err != nil {
+			return nil, fmt.Errorf("renames line %d: %w", n, err)
+		}
+		if old == cur {
+			return nil, fmt.Errorf("renames line %d: %s renamed to itself", n, old)
+		}
+		if _, dup := r[old]; dup {
+			return nil, fmt.Errorf("renames line %d: %s is named twice", n, old)
+		}
+		r[old] = cur
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+// Bytes is the table's text: sorted, so the same table has one C4 ID.
+func (r Renames) Bytes() []byte {
+	olds := make([]c4.ID, 0, len(r))
+	for old := range r {
+		olds = append(olds, old)
+	}
+	sort.Slice(olds, func(i, j int) bool { return olds[i].String() < olds[j].String() })
+	var b bytes.Buffer
+	for _, old := range olds {
+		fmt.Fprintf(&b, "%s %s\n", old, r[old])
+	}
+	return b.Bytes()
+}
+
+// Current is the ID id has now: the table's new ID for it, followed
+// through any later change that renamed that one too, or id itself.
+func (r Renames) Current(id c4.ID) c4.ID {
+	for range len(r) {
+		next, ok := r[id]
+		if !ok {
+			break
+		}
+		id = next
+	}
+	return id
+}
+
+// renames caches tables by their C4 ID: an object's bytes never change,
+// so a table read once is the table under that ID for good.
+var renames sync.Map // c4.ID -> Renames
+
+// ReadRenames reads the table stored under table, checked, and caches it.
+// A nil table is the empty table: nothing has been renamed.
+func ReadRenames(st Store, table c4.ID) (Renames, error) {
+	if table.IsNil() {
+		return nil, nil
+	}
+	if r, ok := renames.Load(table); ok {
+		return r.(Renames), nil
+	}
+	data, err := ReadObject(st, table)
+	if err != nil {
+		return nil, fmt.Errorf("renames %s: %w", table, err)
+	}
+	r, err := ParseRenames(data)
+	if err != nil {
+		return nil, fmt.Errorf("renames %s: %w", table, err)
+	}
+	renames.Store(table, r)
+	return r, nil
+}
+
+// ResolveOld is the one place an ID an earlier library gave a view is
+// turned into the ID it has now: every reader that takes a view's ID from
+// outside what it wrote itself (a spec, a signed record's subject, a
+// tracker's link) asks it before it loads the view. table is the renames
+// object the project's status names; a nil one renames nothing.
+func ResolveOld(st Store, table, id c4.ID) (c4.ID, error) {
+	r, err := ReadRenames(st, table)
+	if err != nil {
+		return id, err
+	}
+	return r.Current(id), nil
+}
