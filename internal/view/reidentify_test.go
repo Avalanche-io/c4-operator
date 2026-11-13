@@ -242,3 +242,18 @@ func TestOnlyAViewIsReidentified(t *testing.T) {
 		t.Fatalf("a description with dates: %v, %v", v, err)
 	}
 }
+
+// A table line is checked, not trusted: one that names another view as the
+// old one's new ID is an error, and the ID comes back as it was.
+func TestAFalseTableLineIsRefused(t *testing.T) {
+	p := loadOldPin(t)
+	old, other := p.views["null-depth2"], p.views["plain"]
+	table, err := p.ram.Put(bytes.NewReader(Renames{old: other}.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ResolveOld(p.ram, table, old)
+	if err == nil || got != old || !strings.Contains(err.Error(), "identify as") {
+		t.Fatalf("a false line: %s, %v", got, err)
+	}
+}

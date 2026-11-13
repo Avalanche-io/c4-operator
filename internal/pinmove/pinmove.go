@@ -106,8 +106,11 @@ type Finding struct {
 	// rest is left as it is.
 	NotAView string
 	Missing  bool
-	Held     []Held
-	records  []view.Record
+	// MissingRecord is the record the store does not hold: the view's own,
+	// or one under it.
+	MissingRecord c4.ID
+	Held          []Held
+	records       []view.Record
 }
 
 // Renamed reports whether the view's ID changed.
@@ -165,6 +168,10 @@ func Survey(ctx context.Context, st Store, prior view.Renames, held []Held, work
 			return nil, fmt.Errorf("reading %s: %w", f.ID, src.failed())
 		case errors.Is(err, errMissing):
 			f.Missing = true
+			var me *missingError
+			if errors.As(err, &me) {
+				f.MissingRecord = me.id
+			}
 			continue
 		default:
 			f.NotAView = err.Error()
@@ -264,7 +271,7 @@ type source struct {
 func (s *source) Record(_ context.Context, id c4.ID) ([]byte, error) {
 	rc, err := s.st.Open(id)
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, storeurl.ErrNotFound) {
-		return nil, fmt.Errorf("%s: %w", id, errMissing)
+		return nil, &missingError{id}
 	}
 	if err != nil {
 		return nil, s.fail(err)
@@ -297,3 +304,9 @@ func (s *source) failed() error {
 	defer s.mu.Unlock()
 	return s.hard
 }
+
+// missingError is a record the store does not hold.
+type missingError struct{ id c4.ID }
+
+func (e *missingError) Error() string        { return fmt.Sprintf("%s: %v", e.id, errMissing) }
+func (e *missingError) Is(target error) bool { return target == errMissing }

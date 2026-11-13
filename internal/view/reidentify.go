@@ -128,15 +128,38 @@ func ReadRenames(st Store, table c4.ID) (Renames, error) {
 	return r, nil
 }
 
+// checked caches the table lines ResolveOld has checked, by table and old
+// ID: a line is checked once, and objects never change.
+var checked sync.Map // [2]c4.ID -> c4.ID
+
 // ResolveOld is the one place an ID an earlier library gave a view is
 // turned into the ID it has now: every reader that takes a view's ID from
 // outside what it wrote itself (a spec, a signed record's subject, a
 // tracker's link) asks it before it loads the view. table is the renames
-// object the project's status names; a nil one renames nothing.
+// object the project's status names; a nil one renames nothing. A line is
+// not taken on trust: the first time one is used, the old ID's records
+// are identified again and must give the new ID, or the line is an error
+// and id is returned as it is.
 func ResolveOld(st Store, table, id c4.ID) (c4.ID, error) {
 	r, err := ReadRenames(st, table)
 	if err != nil {
 		return id, err
 	}
-	return r.Current(id), nil
+	cur := r.Current(id)
+	if cur == id {
+		return id, nil
+	}
+	key := [2]c4.ID{table, id}
+	if v, ok := checked.Load(key); ok {
+		return v.(c4.ID), nil
+	}
+	v, err := Reidentify(context.Background(), id, StoreRecords(st), 16)
+	if err != nil {
+		return id, fmt.Errorf("renames %s: %s: %w", table, id, err)
+	}
+	if v.ID != cur {
+		return id, fmt.Errorf("renames %s says %s is now %s, and its records identify as %s", table, id, cur, v.ID)
+	}
+	checked.Store(key, cur)
+	return cur, nil
 }

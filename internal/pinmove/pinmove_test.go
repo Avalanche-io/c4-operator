@@ -12,6 +12,16 @@ import (
 
 	"github.com/Avalanche-io/c4"
 	"github.com/Avalanche-io/c4/store"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/envtest"
+	"sigs.k8s.io/yaml"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/view"
@@ -149,7 +159,7 @@ func TestASurveyRenamesTheViewsAndOnlyTheViews(t *testing.T) {
 				t.Errorf("%s (%s) taken for a view", fd.ID, fd.Held[0].Path)
 			}
 		case absent:
-			if !fd.Missing {
+			if !fd.Missing || fd.MissingRecord != absent {
 				t.Errorf("the absent ID: %+v", fd)
 			}
 		case f.views["null-depth2"]:
@@ -215,5 +225,152 @@ func TestAGrantGainsTheNewIDOnce(t *testing.T) {
 	}
 	if again, added := ExtendGrants(out, r); len(added) != 0 || len(again) != 3 {
 		t.Fatalf("again: %+v, added %+v", again, added)
+	}
+}
+
+// A run writes only to an API server whose Project CRD keeps
+// status.renames: the CRD this release installs passes, the same CRD
+// without the field (the one before it) is refused, and so is none.
+func TestARunRefusesAProjectCRDThatWouldDropTheTable(t *testing.T) {
+	ctx := context.Background()
+	data, err := os.ReadFile(filepath.Join("..", "..", "config", "crd", "c4.avalanche.io_projects.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	crd := func(drop bool) *unstructured.Unstructured {
+		u := &unstructured.Unstructured{}
+		if err := yaml.Unmarshal(data, &u.Object); err != nil {
+			t.Fatal(err)
+		}
+		if drop {
+			versions, _, _ := unstructured.NestedSlice(u.Object, "spec", "versions")
+			for _, v := range versions {
+				unstructured.RemoveNestedField(v.(map[string]any), "schema", "openAPIV3Schema", "properties", "status", "properties", "renames")
+			}
+			unstructured.SetNestedSlice(u.Object, versions, "spec", "versions")
+		}
+		return u
+	}
+	if err := CheckSchema(ctx, fake.NewClientBuilder().WithObjects(crd(false)).Build()); err != nil {
+		t.Fatalf("this release's CRD: %v", err)
+	}
+	if err := CheckSchema(ctx, fake.NewClientBuilder().WithObjects(crd(true)).Build()); err == nil || !strings.Contains(err.Error(), "no status.renames") {
+		t.Fatalf("a CRD without status.renames: %v", err)
+	}
+	if err := CheckSchema(ctx, fake.NewClientBuilder().Build()); err == nil {
+		t.Fatal("no CRD at all passed")
+	}
+}
+
+// A view whose record under the root is missing is missing, and the
+// finding names the record the store lacks, not the view's own.
+func TestAMissingRecordUnderAViewIsNamed(t *testing.T) {
+	ctx := context.Background()
+	f := loadFixture(t)
+	root := f.views["null-depth2"]
+	entries, err := view.ParseRecord(mustRead(t, f.st, root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sub c4.ID
+	for _, e := range entries {
+		if e.IsDir() {
+			sub = e.C4ID
+		}
+	}
+	if sub.IsNil() {
+		t.Fatal("null-depth2's root holds no directory")
+	}
+	if err := f.st.Remove(sub); err != nil {
+		t.Fatal(err)
+	}
+	p, err := Survey(ctx, f.st, nil, []Held{{ID: root, Holder: "Project p"}}, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fd := p.Findings[0]; !fd.Missing || fd.MissingRecord != sub {
+		t.Fatalf("finding %+v, want the record %s missing", fd, sub)
+	}
+}
+
+func mustRead(t *testing.T, st Store, id c4.ID) []byte {
+	t.Helper()
+	data, err := view.ReadObject(st, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+// On a real API server with the Project CRD from before status.renames,
+// measured: the field written is dropped, with no error. So a run refuses
+// there, before it stores anything.
+func TestAnOldProjectCRDDropsTheTableAndARunRefuses(t *testing.T) {
+	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
+		matches, _ := filepath.Glob("../../bin/k8s/k8s/*")
+		if len(matches) == 0 {
+			t.Skip("envtest binaries not found; run `make envtest`")
+		}
+		abs, _ := filepath.Abs(matches[len(matches)-1])
+		t.Setenv("KUBEBUILDER_ASSETS", abs)
+	}
+	ctx := context.Background()
+	data, err := os.ReadFile(filepath.Join("..", "..", "config", "crd", "c4.avalanche.io_projects.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var old apiextensionsv1.CustomResourceDefinition
+	if err := yaml.Unmarshal(data, &old); err != nil {
+		t.Fatal(err)
+	}
+	for i := range old.Spec.Versions {
+		delete(old.Spec.Versions[i].Schema.OpenAPIV3Schema.Properties["status"].Properties, "renames")
+	}
+	env := &envtest.Environment{CRDs: []*apiextensionsv1.CustomResourceDefinition{&old}}
+	for _, f := range []string{"c4.avalanche.io_materializations.yaml", "c4.avalanche.io_workjobs.yaml", "c4.avalanche.io_tools.yaml"} {
+		env.CRDInstallOptions.Paths = append(env.CRDInstallOptions.Paths, filepath.Join("..", "..", "config", "crd", f))
+	}
+	cfg, err := env.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { env.Stop() })
+	scheme := runtime.NewScheme()
+	clientgoscheme.AddToScheme(scheme)
+	c4v1.AddToScheme(scheme)
+	c, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: "old-crd"}, Spec: c4v1.ProjectSpec{
+		Namespaces: []string{"old-crd"}, Store: c4v1.ProjectStore{Shards: []c4v1.StoreShard{{Name: "s0", URL: t.TempDir()}}}}}
+	if err := c.Create(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	f := loadFixture(t)
+	orig := p.DeepCopy()
+	p.Status.Renames = f.views["plain"].String()
+	if err := c.Status().Patch(ctx, p, client.MergeFrom(orig)); err != nil {
+		t.Fatalf("the status write was refused, not dropped: %v", err)
+	}
+	var back c4v1.Project
+	if err := c.Get(ctx, types.NamespacedName{Name: "old-crd"}, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.Status.Renames != "" {
+		t.Fatalf("the old CRD kept status.renames (%q), so this test shows nothing", back.Status.Renames)
+	}
+	back.Spec.Grants = []c4v1.Grant{{Tree: f.views["null-depth2"].String()}}
+	if err := c.Update(ctx, &back); err != nil {
+		t.Fatal(err)
+	}
+	var out, log bytes.Buffer
+	err = Migrate(ctx, Options{Client: c, Project: "old-crd", Write: true, Out: &out, Log: &log,
+		Store: func(context.Context, *c4v1.Project) (Store, error) { return f.st, nil }})
+	if err == nil || !strings.Contains(err.Error(), "no status.renames") {
+		t.Fatalf("a run against the old CRD: %v\n%s", err, out.String())
+	}
+	if f.st.puts != 0 {
+		t.Fatalf("the refused run stored %d objects", f.st.puts)
 	}
 }

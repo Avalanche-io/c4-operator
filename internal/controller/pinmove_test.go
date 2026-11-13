@@ -131,7 +131,15 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	putTool("c4-system", "farm-tool", c4v1.ToolStatus{Versions: []c4v1.ToolVersion{{Version: "v1", View: old("link-depth2"), Project: "pinned", At: metav1.Now(), Test: c4v1.ToolTest{State: c4v1.ToolTestOK}}}})
+	// The farm tool's second version is another project's, and its earlier
+	// one names no project: neither is this project's to translate.
+	putTool("c4-system", "farm-tool", c4v1.ToolStatus{
+		Versions: []c4v1.ToolVersion{
+			{Version: "v1", View: old("link-depth2"), Project: "pinned", At: metav1.Now(), Test: c4v1.ToolTest{State: c4v1.ToolTestOK}},
+			{Version: "v2", View: old("null-depth2"), Project: "elsewhere", At: metav1.Now(), Test: c4v1.ToolTest{State: c4v1.ToolTestOK}},
+		},
+		Earlier: []c4v1.ToolVersionRef{{Version: "v0", View: old("mixed-deep")}},
+	})
 	putTool(ns, "own-tool", c4v1.ToolStatus{Earlier: []c4v1.ToolVersionRef{{Version: "v1", View: old("null-depth2")}}})
 
 	// A job that has not finished.
@@ -163,6 +171,9 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 		if !strings.Contains(report, want) {
 			t.Errorf("the dry run's report has no %q", want)
 		}
+	}
+	if strings.Contains(report, "tool c4-system/farm-tool "+old("null-depth2")) || strings.Contains(report, "tool c4-system/farm-tool "+old("mixed-deep")) {
+		t.Error("the dry run would translate another project's farm version, or an earlier one")
 	}
 	for _, name := range []string{"link-depth2", "null-depth2"} {
 		if !strings.Contains(report, "rename "+old(name)+" ") {
@@ -264,6 +275,9 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 			t.Fatal(err)
 		}
 		if farm.Status.Versions[0].View == newID["link-depth2"].String() && own.Status.Earlier[0].View == newID["null-depth2"].String() {
+			if farm.Status.Versions[1].View != old("null-depth2") || farm.Status.Earlier[0].View != old("mixed-deep") {
+				t.Fatalf("another project's farm version or an earlier one was translated: %s, %s", farm.Status.Versions[1].View, farm.Status.Earlier[0].View)
+			}
 			break
 		}
 		if time.Now().After(deadline) {

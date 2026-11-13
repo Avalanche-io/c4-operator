@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/Avalanche-io/c4"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -37,7 +40,8 @@ type Options struct {
 	Write bool
 	// Out is the report, one line per thing done (or, without Write, to
 	// do): "rename <old> <new> <holder> <path>", "missing <id> <holder>
-	// <path>", "unfinished <ns>/<name> <phase>", "table <prior> <table>",
+	// <path> [record <id>]", "notaview <id> <holder> <path> <why>",
+	// "unfinished <ns>/<name> <phase>", "table <prior> <table>",
 	// "rematerialize <ns>/<name>", "tool <ns>/<name> <old> <new>",
 	// "grant <project> <tree> <paths>", "mapping <path> <views>". Log
 	// narrates.
@@ -54,6 +58,9 @@ type Options struct {
 // to, so it is translated, not mapped by each reader), the Project's
 // grants gain the new IDs, and the mappings gain a renamed line. A run that stops part way
 // is resumed by running again.
+//
+// Run it once per project at a time, with the operator stopped: two runs
+// at once write the status last-writer-wins (a run after them repairs it).
 //
 // It refuses while a WorkJob in the project's namespaces has not finished:
 // a live output's chain rests on views as they are stored, and its next
@@ -126,14 +133,11 @@ func Migrate(ctx context.Context, o Options) error {
 		return err
 	}
 	for _, t := range tools {
-		h, err := IDsIn("Tool "+t.Namespace+"/"+t.Name, t.Status)
-		if err != nil {
-			return err
+		for _, at := range toolTrees(&t, p.Name, o.FarmNamespace) {
+			if id, err := c4.Parse(*at.view); err == nil {
+				held = append(held, Held{ID: id, Holder: "Tool " + t.Namespace + "/" + t.Name, Path: at.path})
+			}
 		}
-		for i := range h {
-			h[i].Path = ".status" + h[i].Path
-		}
-		held = append(held, h...)
 	}
 	refusal := func() error {
 		return fmt.Errorf("%d WorkJobs in project %s have not finished: %s. Drain these, then run again", len(unfinished), p.Name, strings.Join(unfinished, ", "))
@@ -166,11 +170,18 @@ func Migrate(ctx context.Context, o Options) error {
 	for _, f := range plan.Findings {
 		switch {
 		case f.Missing:
+			under := ""
+			if !f.MissingRecord.IsNil() && f.MissingRecord != f.ID {
+				under = " record " + f.MissingRecord.String()
+			}
 			for _, h := range f.Held {
-				report("missing %s %s %s", f.ID, h.Holder, h.Path)
+				report("missing %s %s %s%s", f.ID, h.Holder, h.Path, under)
 			}
 		case f.NotAView != "":
 			notViews++
+			for _, h := range f.Held {
+				report("notaview %s %s %s %s", f.ID, h.Holder, h.Path, f.NotAView)
+			}
 		case f.New != f.ID && priorTable.Current(f.ID) == f.ID:
 			// Renamed by this run; one an earlier run renamed is in the
 			// count below, its holders left naming the ID as stored.
@@ -203,7 +214,7 @@ func Migrate(ctx context.Context, o Options) error {
 	var retool []*c4v1.Tool
 	for i := range tools {
 		t := &tools[i]
-		changes := translateTool(t.DeepCopy(), plan.Table)
+		changes := translateTool(t.DeepCopy(), plan.Table, p.Name, o.FarmNamespace)
 		for _, ch := range changes {
 			report("tool %s/%s %s %s", t.Namespace, t.Name, ch[0], ch[1])
 		}
@@ -233,6 +244,11 @@ func Migrate(ctx context.Context, o Options) error {
 		return nil
 	}
 
+	// Nothing is written unless the API server keeps what the commit
+	// point writes: a Project CRD from before status.renames prunes it.
+	if err := CheckSchema(ctx, o.Client); err != nil {
+		return err
+	}
 	// The records, then the table, then the status that names it.
 	written, err := plan.WriteTable(ctx, st, prior)
 	if err != nil {
@@ -246,6 +262,9 @@ func Migrate(ctx context.Context, o Options) error {
 		p.Status.Renames = table.String()
 		if err := o.Client.Status().Patch(ctx, &p, client.MergeFrom(orig)); err != nil {
 			return fmt.Errorf("project %s status: %w", p.Name, err)
+		}
+		if err := readBack(ctx, o.Client, p.Name, table); err != nil {
+			return err
 		}
 		say("project %s names the renames table %s", p.Name, table)
 	}
@@ -262,7 +281,7 @@ func Migrate(ctx context.Context, o Options) error {
 			if err := o.Client.Get(ctx, types.NamespacedName{Namespace: t.Namespace, Name: t.Name}, &cur); err != nil {
 				return err
 			}
-			if len(translateTool(&cur, plan.Table)) == 0 {
+			if len(translateTool(&cur, plan.Table, p.Name, o.FarmNamespace)) == 0 {
 				return nil
 			}
 			return o.Client.Status().Update(ctx, &cur)
@@ -369,27 +388,92 @@ func toolsOf(ctx context.Context, c client.Client, p *c4v1.Project, farm string)
 	return out, nil
 }
 
-// translateTool renames, in place, each of t's version trees the table
-// renames, and returns the [old, new] of each. The new ID depends only on
-// the tree's records, so every project's table that holds a tree gives it
-// the same one.
-func translateTool(t *c4v1.Tool, r view.Renames) [][2]string {
-	var out [][2]string
-	rename := func(s *string) {
-		id, err := c4.Parse(*s)
-		if err != nil {
-			return
-		}
-		if cur := r.Current(id); cur != id {
-			out = append(out, [2]string{*s, cur.String()})
-			*s = cur.String()
-		}
-	}
+// toolTree is one version tree of a Tool's status, and its path there.
+type toolTree struct {
+	view *string
+	path string
+}
+
+// toolTrees are the version trees of t the project's migration holds and
+// translates. A tool of the project's own: every version and earlier one.
+// A farm tool: only the versions published from the project's store. The
+// others are other projects', translated by their own runs, whose stores
+// hold the new records; and an earlier version names no project, so it is
+// left as it is (a reader maps it through the table of the project that
+// reads it).
+func toolTrees(t *c4v1.Tool, project, farm string) []toolTree {
+	var out []toolTree
 	for i := range t.Status.Versions {
-		rename(&t.Status.Versions[i].View)
+		if t.Namespace != farm || t.Status.Versions[i].Project == project {
+			out = append(out, toolTree{&t.Status.Versions[i].View, fmt.Sprintf(".status.versions[%d].view", i)})
+		}
 	}
-	for i := range t.Status.Earlier {
-		rename(&t.Status.Earlier[i].View)
+	if t.Namespace != farm {
+		for i := range t.Status.Earlier {
+			out = append(out, toolTree{&t.Status.Earlier[i].View, fmt.Sprintf(".status.earlier[%d].view", i)})
+		}
 	}
 	return out
+}
+
+// translateTool renames, in place, each of t's version trees the project
+// holds (toolTrees) that the table renames, and returns the [old, new] of
+// each.
+func translateTool(t *c4v1.Tool, r view.Renames, project, farm string) [][2]string {
+	var out [][2]string
+	for _, at := range toolTrees(t, project, farm) {
+		id, err := c4.Parse(*at.view)
+		if err != nil {
+			continue
+		}
+		if cur := r.Current(id); cur != id {
+			out = append(out, [2]string{*at.view, cur.String()})
+			*at.view = cur.String()
+		}
+	}
+	return out
+}
+
+// ProjectCRD is the name of the Project CustomResourceDefinition.
+const ProjectCRD = "projects.c4.avalanche.io"
+
+// CheckSchema refuses unless the API server's Project CRD has
+// status.renames in the version this binary writes: one without it prunes
+// the field, the run's commit point, silently. Read from the CRD itself,
+// before anything is written.
+func CheckSchema(ctx context.Context, c client.Reader) error {
+	crd := &unstructured.Unstructured{}
+	crd.SetGroupVersionKind(schema.GroupVersionKind{Group: "apiextensions.k8s.io", Version: "v1", Kind: "CustomResourceDefinition"})
+	if err := c.Get(ctx, types.NamespacedName{Name: ProjectCRD}, crd); err != nil {
+		return fmt.Errorf("reading the Project CRD %s: %w", ProjectCRD, err)
+	}
+	versions, _, _ := unstructured.NestedSlice(crd.Object, "spec", "versions")
+	for _, v := range versions {
+		m, ok := v.(map[string]any)
+		if !ok || m["name"] != c4v1.GroupVersion.Version {
+			continue
+		}
+		if _, found, _ := unstructured.NestedMap(m, "schema", "openAPIV3Schema", "properties", "status", "properties", "renames"); found {
+			return nil
+		}
+		return fmt.Errorf("the installed Project CRD %s (%s) has no status.renames, so the API server would drop the table's name: apply this release's CRDs (config/crd) first, then run again", ProjectCRD, c4v1.GroupVersion.Version)
+	}
+	return fmt.Errorf("the installed Project CRD %s has no version %s", ProjectCRD, c4v1.GroupVersion.Version)
+}
+
+// readBack checks the Project's status names the table, as the API server
+// keeps it (through a cache, it is waited for).
+func readBack(ctx context.Context, c client.Reader, name string, table c4.ID) error {
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var p c4v1.Project
+		err := c.Get(ctx, types.NamespacedName{Name: name}, &p)
+		if err == nil && p.Status.Renames == table.String() {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("project %s: status.renames reads %q after it was written as %s (%v): the API server did not keep it", name, p.Status.Renames, table, err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
