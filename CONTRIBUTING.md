@@ -20,10 +20,11 @@ synthetic farm with no cluster: the mock that serves it lives in
 
 ## The end-to-end suite
 
-The end-to-end phases run on an eight-worker kind cluster:
+The end-to-end phases run on an eight-worker kind cluster. `make e2e`
+(hack/e2e/run.sh) runs them all in this order, or one at a time:
 
 ```sh
-hack/e2e/up.sh      # kind (8 workers, 2 zones), MinIO, the operator, projects
+hack/e2e/up.sh      # kind (8 workers, 2 zones), Garage, the operator, projects
 hack/e2e/p1.sh      # views, capture, CSI
 hack/e2e/p2.sh      # tiers and herds
 hack/e2e/p3.sh      # isolation
@@ -35,6 +36,14 @@ hack/e2e/p6.sh      # the MCP evaluation
 
 What they measured is in [docs/results.md](docs/results.md), and how the
 parts fit in [docs/architecture.md](docs/architecture.md).
+
+The farm's store is Garage (`dxflrs/garage`, as `c4 farm up` runs), three
+instances as the shards and one per P3 project. P5's HUD screenshots need
+chrome-headless-shell: `CHROME` names it, else the newest under
+`~/.cache/puppeteer`. On GitHub, the `e2e` workflow runs the suite on Linux
+kind when asked (Actions, Run workflow, or the `e2e` label on a pull
+request), and `e2e-migrate` runs a c4 pin move's migration on a farm (the
+`e2e-migrate` label, the base as the old pin).
 
 To work against a local checkout of the c4 module, use an uncommitted
 `go.work` (`go work init . ../c4`) rather than a `replace` in `go.mod`.

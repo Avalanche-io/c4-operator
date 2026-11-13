@@ -1,0 +1,60 @@
+# The end-to-end suite (`make e2e`, hack/e2e/run.sh) on an eight-worker kind
+# cluster: the farm, its Garage store, and every phase. It takes hours, so
+# it runs only when asked: Actions, e2e, Run workflow (once this file is on
+# the default branch), or a pull request labelled e2e. What the phases
+# recorded (hack/e2e/out) is kept as an artifact.
+name: e2e
+on:
+  workflow_dispatch:
+    inputs:
+      phases:
+        description: the phases to run, in order (empty is all of them)
+        required: false
+        type: string
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'e2e'
+    name: the e2e phases on a kind farm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    env:
+      PHASES: ${{ inputs.phases }}
+    steps:
+    # Nine kind nodes, the images loaded into each, and P2's herds want the
+    # disk the runner's preinstalled toolchains hold.
+    - name: disk
+      run: |
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+        df -h /
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+    - uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+    - run: make tools && echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+    # P5's HUD screenshots (hack/e2e/hud-shots.sh) use chrome-headless-shell.
+    - name: chrome-headless-shell
+      run: |
+        npx -y @puppeteer/browsers install chrome-headless-shell@stable --path "$RUNNER_TEMP/chs" >/dev/null
+        echo "CHROME=$(find "$RUNNER_TEMP/chs" -type f -name chrome-headless-shell | head -1)" >> "$GITHUB_ENV"
+        echo "HUD_SHOTS_OUT=$RUNNER_TEMP/hud-shots" >> "$GITHUB_ENV"
+    - run: hack/e2e/run.sh
+    - if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: e2e
+        path: |
+          hack/e2e/out
+          ${{ runner.temp }}/hud-shots
+        if-no-files-found: warn
