@@ -393,3 +393,53 @@ func TestARenamedCommitWhosePatchIsTheSameIsMadeAgain(t *testing.T) {
 		t.Fatalf("the changeset made again: %v", err)
 	}
 }
+
+// A commit over a renamed parent whose own view the change left alone (it
+// removed what the change renamed, say) is made again the same way.
+func TestACommitOverARenamedParentIsMadeAgain(t *testing.T) {
+	ctx := context.Background()
+	r := newRepo(t)
+	r.write("d/a.txt", "a\n")
+	r.commit("one")
+	r.write("top.txt", "top\n")
+	r.commit("two")
+	sink := newTreeSink(t)
+	sum := r.importInto(t, sink, Options{Ref: "refs/heads/main", Records: view.StoreRecords(sink)})
+	parent := sum.Commits[1].ParentView
+	old := c4.Identify(strings.NewReader("as the library before gave " + parent.String()))
+	table := view.Renames{old: parent}
+	lines := append([]Commit(nil), sum.Commits...)
+	lines[0].View, lines[1].ParentView = old, old
+	made, err := view.ReadObject(sink, sum.Commits[1].Changeset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, ok := asWrittenOver(made, old)
+	if !ok {
+		t.Fatal("the changeset has no first line")
+	}
+	lines[1].Changeset = c4.Identify(bytes.NewReader(stored))
+	p := filepath.Join(t.TempDir(), "mapping.jsonl")
+	w, err := AppendMapping(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range lines {
+		w.Write(c)
+	}
+	w.Write(Renamed(lines, table))
+	w.Close()
+	m, err := ReadMapping(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m[1].View != sum.Commits[1].View || m[1].ParentView != parent {
+		t.Fatalf("line 2 reads as %+v", m[1])
+	}
+	if err := Remake(ctx, r.remakeOptions(t, sink, m), m[1]); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := view.ReadObject(sink, lines[1].Changeset); err != nil || !bytes.Equal(got, stored) {
+		t.Fatalf("the changeset made again: %v", err)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -129,7 +130,10 @@ func ReadRenames(st Store, table c4.ID) (Renames, error) {
 }
 
 // checked caches what ResolveOld found of a table line, by table and old
-// ID: a line is checked once, true or false, and objects never change.
+// ID: a line is checked once, true or false, and objects never change. It
+// is per process, not per store: a table byte-identical in two stores is
+// checked against the first, and a store lacking the new records then
+// fails its load, loudly.
 var checked sync.Map // [2]c4.ID -> checkedLine
 
 type checkedLine struct {
@@ -164,9 +168,14 @@ func ResolveOld(ctx context.Context, st Store, table, id c4.ID) (c4.ID, error) {
 	}
 	v, err := Reidentify(ctx, id, StoreRecords(st), 16)
 	if err != nil {
-		// Not cached: a store that could not be read, or a cancelled
-		// reader, says nothing about the line.
-		return id, fmt.Errorf("renames %s: %s: %w", table, id, err)
+		err = fmt.Errorf("renames %s: %s: %w", table, id, err)
+		// An old ID that is not a view's is so every time; a store that
+		// could not be read, or a cancelled reader, says nothing about the
+		// line, and is not kept.
+		if errors.Is(err, ErrNotAView) {
+			checked.Store(key, checkedLine{err: err})
+		}
+		return id, err
 	}
 	if v.ID != cur {
 		err := fmt.Errorf("renames %s says %s is now %s, and its records identify as %s", table, id, cur, v.ID)
