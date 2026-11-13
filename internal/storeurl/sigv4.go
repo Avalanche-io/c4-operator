@@ -131,3 +131,11 @@ func uriEncode(s string, encodeSlash bool) string {
 	}
 	return b.String()
 }
+
+// SignRequest signs req, which carries no body, for S3 with AWS Signature
+// Version 4 and an unsigned payload, as the store signs its own reads: for
+// a tool making a request the store does not, such as the e2e harness
+// listing and emptying a bucket.
+func SignRequest(req *http.Request, creds Credentials, region string) {
+	signV4(req, creds, region, time.Now().UTC())
+}

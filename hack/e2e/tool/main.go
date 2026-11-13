@@ -13,6 +13,8 @@
 //	c4e2e objects   --src DIR --shards s0,s1,s2        each object's shard, as "shard id" lines
 //	c4e2e s3get     --list FILE --bucket B --endpoint-fmt http://minio-%s.c4-store:9000
 //	                                                  read every listed object straight from S3
+//	c4e2e s3keys    --endpoint URL --bucket B [--prefix c4/] [--delete]
+//	                                                  count a bucket's keys, or empty it
 //	c4e2e probe     --url URL [--project P] [--token FILE]  one request to a cache tier; prints the status
 //	c4e2e frame     --out DIR [--cost 6s] [--heavy A-B:F]    a render unit (P5)
 //	c4e2e shard     [--mean 20s] [--flaky P]                 a CI test shard (P5)
@@ -61,6 +63,7 @@ func main() {
 		"hold":          hold,
 		"objects":       objectsCmd,
 		"s3get":         s3get,
+		"s3keys":        s3keys,
 		"probe":         probe,
 		"frame":         frameCmd,
 		"shard":         shardCmd,
