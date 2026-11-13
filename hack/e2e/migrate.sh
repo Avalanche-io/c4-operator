@@ -39,6 +39,14 @@ fail() {
 
 down() {
   note "teardown"
+  # What the phases left in each checkout's out/ (reports, the calls P6
+  # made), the small files only: the artifact keeps them.
+  for wt in "$OLD" "$NEW"; do
+    tag=old
+    [ "$wt" = "$NEW" ] && tag=new
+    (cd "$wt/hack/e2e/out" 2>/dev/null && find . -type f -size -5M \( -name '*.md' -o -name '*.csv' -o -name '*.json' -o -name '*.jsonl' -o -name '*.log' -o -name '*.txt' \) |
+      while read -r f; do mkdir -p "$R/out-$tag/$(dirname "$f")" && cp "$f" "$R/out-$tag/$f"; done)
+  done
   kind delete cluster --name "$CLUSTER" >>"$R/kind-delete.log" 2>&1 || echo "kind delete failed: see kind-delete.log"
   # The phases append to the committed results; neither checkout keeps it.
   for wt in "$OLD" "$NEW"; do git -C "$wt" checkout -- hack/e2e/out 2>/dev/null; done

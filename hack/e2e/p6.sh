@@ -27,7 +27,16 @@ log "answer the evaluation set through MCP"
   'c4_get_job {"namespace": "show-b", "name": "train-upres"}' \
   'c4_capacity_and_cost {}' \
   'c4_farm_status {}' \
-  'c4_list_jobs {"at_risk_only": true}' >"$OUT/p6-calls.jsonl"
+  'c4_list_jobs {"at_risk_only": true}' >"$OUT/p6-calls.jsonl" || {
+  s=$?
+  # Which calls the server answered with an error, and what it said.
+  python3 -I -c 'import json, sys
+for l in open(sys.argv[1]):
+    d = json.loads(l)
+    if d.get("isError"):
+        print("p6: %s answered an error: %s" % (d["tool"], str(d.get("text") or d.get("result"))[:600]), file=sys.stderr)' "$OUT/p6-calls.jsonl" || true
+  exit $s
+}
 
 python3 -I - "$OUT/p6-calls.jsonl" "$ROOT/docs/agents/eval.xml" >"$OUT/p6-eval.md" <<'PY'
 import json, sys, xml.etree.ElementTree as ET
