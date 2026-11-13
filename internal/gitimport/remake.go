@@ -68,8 +68,17 @@ func Remake(ctx context.Context, opts Options, line Commit) error {
 	if got.View == line.View && got.Changeset == line.Changeset {
 		return nil
 	}
-	if _, written := line.asWritten(); got.View == line.View && written != line.View {
-		return fmt.Errorf("commit %s comes to the view the mapping records, %s, which a c4 library change renamed from %s, and its changeset %s was made by the library before that change: this one makes another changeset for the same step, never that one. Cut the mapping back to before the commit's line and import the ref again; the cut takes the renamed line with it, so run migrate-pin again afterwards for the lines that stay", line.Commit, line.View, written, line.Changeset)
+	if parent, written := line.asWritten(); got.View == line.View && written != line.View {
+		// A step whose patch passes through no directory the change renamed
+		// is the same patch; only its first line names the parent anew. As
+		// written, it is the changeset recorded: that is put back.
+		if text, ok := asWrittenOver(got.Patch, parent); ok && c4.Identify(bytes.NewReader(text)) == line.Changeset {
+			if _, err := opts.Sink.Put(ctx, line.Changeset, int64(len(text)), bytes.NewReader(text)); err != nil {
+				return fmt.Errorf("commit %s: storing its changeset %s: %w", line.Commit, line.Changeset, err)
+			}
+			return nil
+		}
+		return fmt.Errorf("commit %s comes to the view the mapping records, %s, which a c4 library change renamed from %s, and its changeset %s was made by the library before that change: this one makes another changeset for the step, never that one. Cut the mapping back to before the commit's line and import the ref again; the cut takes the renamed line with it, so run migrate-pin again afterwards for the lines that stay", line.Commit, line.View, written, line.Changeset)
 	}
 	if got.View == line.View && oldForm(got.Patch, got.View, line.Changeset) {
 		return fmt.Errorf("commit %s comes to the view the mapping records, and the mapping records its changeset as %s, in the form written before 2026-11-09 (ending with the view's C4 ID), which is not written any more", line.Commit, line.Changeset)
@@ -125,4 +134,14 @@ func c4gitNote(c Commit) string {
 func oldForm(changeset []byte, produced, id c4.ID) bool {
 	old := append(append([]byte(nil), changeset...), produced.String()+"\n"...)
 	return c4.Identify(bytes.NewReader(old)) == id
+}
+
+// asWrittenOver is a changeset's text with its first line, the parent's C4
+// ID, naming parent instead.
+func asWrittenOver(changeset []byte, parent c4.ID) ([]byte, bool) {
+	i := bytes.IndexByte(changeset, '\n')
+	if i < 0 {
+		return nil, false
+	}
+	return append([]byte(parent.String()), changeset[i:]...), true
 }

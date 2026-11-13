@@ -133,6 +133,7 @@ type Commit struct {
 	// changeset's first line still names the parent, and a changeset
 	// stored before 2026-11-09 ends with the view.
 	parentWritten, viewWritten c4.ID
+	renamed                    bool // a renamed line has renamed it
 
 	// Git-level counts of files and symlinks (submodules excluded).
 	Added    int `json:"added"`

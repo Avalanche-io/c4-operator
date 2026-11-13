@@ -329,3 +329,67 @@ func TestARenamedCommitIsNotMadeAgainAndSaysWhy(t *testing.T) {
 		}
 	}
 }
+
+// A renamed commit whose step passes through no directory the change
+// renamed is made again: its changeset is the same patch, and with its
+// first line naming the parent as written it is the changeset recorded.
+func TestARenamedCommitWhosePatchIsTheSameIsMadeAgain(t *testing.T) {
+	ctx := context.Background()
+	r := newRepo(t)
+	r.write("d/a.txt", "a\n")
+	r.commit("one")
+	r.write("top.txt", "top\n")
+	r.commit("two")
+	sink := newTreeSink(t)
+	sum := r.importInto(t, sink, Options{Ref: "refs/heads/main", Records: view.StoreRecords(sink)})
+	table := view.Renames{}
+	old := func(id c4.ID) c4.ID {
+		for o, n := range table {
+			if n == id {
+				return o
+			}
+		}
+		o := c4.Identify(strings.NewReader("as the library before gave " + id.String()))
+		table[o] = id
+		return o
+	}
+	var lines []Commit
+	for _, c := range sum.Commits {
+		c.View, c.ParentView = old(c.View), old(c.ParentView)
+		lines = append(lines, c)
+	}
+	// The changeset as the library before stored it: this patch, over the
+	// parent as it was named then. It is not in the store.
+	made, err := view.ReadObject(sink, sum.Commits[1].Changeset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, ok := asWrittenOver(made, lines[1].ParentView)
+	if !ok {
+		t.Fatal("the changeset has no first line")
+	}
+	lines[1].Changeset = c4.Identify(bytes.NewReader(stored))
+	if sink.TS.Has(lines[1].Changeset) {
+		t.Fatal("the store holds the changeset as stored before, so this test shows nothing")
+	}
+	p := filepath.Join(t.TempDir(), "mapping.jsonl")
+	w, err := AppendMapping(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range lines {
+		w.Write(c)
+	}
+	w.Write(Renamed(lines, table))
+	w.Close()
+	m, err := ReadMapping(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Remake(ctx, r.remakeOptions(t, sink, m), m[1]); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := view.ReadObject(sink, lines[1].Changeset); err != nil || !bytes.Equal(got, stored) {
+		t.Fatalf("the changeset made again: %v", err)
+	}
+}

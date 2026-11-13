@@ -191,8 +191,8 @@ func (w *MappingWriter) Close() error { return w.f.Close() }
 func renameLines(m []Commit, r view.Renames) {
 	for i := range m {
 		c := &m[i]
-		if c.parentWritten.IsNil() {
-			c.parentWritten, c.viewWritten = c.ParentView, c.View
+		if !c.renamed {
+			c.renamed, c.parentWritten, c.viewWritten = true, c.ParentView, c.View
 		}
 		c.View, c.ParentView = r.Current(c.View), r.Current(c.ParentView)
 		if !c.ChainBase.IsNil() {
@@ -223,7 +223,7 @@ func Renamed(m []Commit, r view.Renames) Commit {
 
 // asWritten is the parent view and the view as the line was written.
 func (c *Commit) asWritten() (parent, view c4.ID) {
-	if !c.parentWritten.IsNil() {
+	if c.renamed {
 		return c.parentWritten, c.viewWritten
 	}
 	return c.ParentView, c.View
