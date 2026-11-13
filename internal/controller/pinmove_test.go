@@ -155,7 +155,10 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 		var out, log bytes.Buffer
 		// tool and toolout are views no holder here names, named outside;
 		// mixed-deep is held only by the farm tool's earlier version.
-		err := pinmove.Migrate(ctx, pinmove.Options{Client: k8s, Project: "pinned", Store: stores, Mappings: []string{mapping},
+		// Through no cache, as migrate-pin runs: the cached client can still
+		// hold the job as unfinished just after its status says Succeeded,
+		// and the run then refuses (found on CI, linux amd64).
+		err := pinmove.Migrate(ctx, pinmove.Options{Client: direct, Project: "pinned", Store: stores, Mappings: []string{mapping},
 			Named: []c4.ID{views["tool"], views["toolout"]}, FarmNamespace: "c4-system", Write: write, Out: &out, Log: &log})
 		t.Logf("write %v:\n%s%s", write, out.String(), log.String())
 		return out.String(), err
@@ -228,7 +231,7 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 	// Every stored view: re-identified, and each renamed one in the table
 	// the status names, its old ID loading through the shared function.
 	var p c4v1.Project
-	if err := k8s.Get(ctx, types.NamespacedName{Name: "pinned"}, &p); err != nil {
+	if err := direct.Get(ctx, types.NamespacedName{Name: "pinned"}, &p); err != nil {
 		t.Fatal(err)
 	}
 	table, err := c4.Parse(p.Status.Renames)
@@ -352,7 +355,7 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 		t.Error("the second run wrote the mapping")
 	}
 	var again c4v1.Project
-	if err := k8s.Get(ctx, types.NamespacedName{Name: "pinned"}, &again); err != nil || again.Status.Renames != p.Status.Renames || len(again.Spec.Grants) != 4 {
+	if err := direct.Get(ctx, types.NamespacedName{Name: "pinned"}, &again); err != nil || again.Status.Renames != p.Status.Renames || len(again.Spec.Grants) != 4 {
 		t.Fatalf("after the second run: %q, %d grants (%v)", again.Status.Renames, len(again.Spec.Grants), err)
 	}
 }
@@ -412,7 +415,7 @@ func TestARestartAfterTheMigrationResolvesTheMaterializationAgain(t *testing.T) 
 	}
 
 	var out, log bytes.Buffer
-	err = pinmove.Migrate(ctx, pinmove.Options{Client: k8s, Project: "pinned-store",
+	err = pinmove.Migrate(ctx, pinmove.Options{Client: direct, Project: "pinned-store",
 		Store: func(context.Context, *c4v1.Project) (pinmove.Store, error) { return st.store, nil }, Write: true, Out: &out, Log: &log})
 	if err != nil {
 		t.Fatal(err)
