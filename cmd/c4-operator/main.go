@@ -37,6 +37,7 @@ commands:
   import-git import a git repository's first-parent history into a store
   mcp        serve the farm's tools to agents (MCP, stdio or HTTP)
   egress-proxy  run the farm's egress proxy for units whose tool allows hosts
+  migrate-pin   re-identify a project's stored views after a c4 library change
 `
 
 func main() {
@@ -54,6 +55,7 @@ func main() {
 		"import-git":   runImportGit,
 		"mcp":          runMCP,
 		"egress-proxy": runEgressProxy,
+		"migrate-pin":  runMigratePin,
 	}
 	run, ok := commands[cmd]
 	if !ok {
