@@ -803,10 +803,12 @@ type WorkSuggestionRevision struct {
 type WorkOutput struct {
 	// View is the output after the latest fold.
 	View string `json:"view"`
-	// Chain is the head of the stored c4m chain: the newest block, one
-	// fold's changeset over the output before it, whose first line names
-	// the block before or, every 64 blocks, the view it was made over.
-	// View is the output after the last.
+	// Chain is "blocks:" and the head of the stored c4m chain: the newest
+	// block, one fold's changeset over the output before it, whose first
+	// line names the block before or, every 64 blocks, the view it was
+	// made over; or the input view itself before any fold changed it. An
+	// unmarked ID is a whole chain stored before blocks. View is the
+	// output after the last.
 	Chain string `json:"chain"`
 	// Changesets folded so far.
 	Changesets int32 `json:"changesets"`

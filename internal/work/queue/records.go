@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -121,9 +122,14 @@ func (q *Queue) sealJob(ctx context.Context, v *view, st *c4v1.WorkJobStatus, no
 	// chain's rests cut off, then the head), not the head alone, which is
 	// only the read path: stored here, once, as an ID list.
 	chain, err := q.storeHistory(ctx, v)
+	if errors.Is(err, errIndexNotConverted) {
+		return // tried again next tick, once the old index is converted
+	}
 	if err != nil {
-		q.Log.Error(err, "job record: the chain's history", "job", v.key)
-		return
+		// A history that cannot be read (a missing object, say) is left
+		// out of the record, said, rather than holding the record forever.
+		q.Log.Error(err, "job record: sealed without the chain's history", "job", v.key)
+		chain = ""
 	}
 	var subjects []provenance.Subject
 	for name, id := range map[string]string{"output": st.Output.View, "chain": chain, "index": st.Output.Provenance} {
