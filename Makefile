@@ -74,9 +74,11 @@ envtest:
 # package's last event in bin/test.json. go test's default (10m) once
 # ended the queue's package under a loaded machine (2026-11-12, a land
 # check's full suite: "test timed out after 10m0s", TestReplayLibraryPort
-# at 3m54s inside it).
-TEST_TIMEOUT ?= 20m
-TEST_BUDGET ?= 600
+# at 3m54s inside it). Rerun alone on that machine, still loaded, the queue
+# took 1342 s, the operator's commands 600 and hack/sim 534: 20m was not
+# enough either, so the timeout is 30m (2026-11-13).
+TEST_TIMEOUT ?= 30m
+TEST_BUDGET ?= 900
 test:
 	@mkdir -p bin
 	KUBEBUILDER_ASSETS="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(CURDIR)/bin/k8s -p path)" go test -json ./... -count=1 -timeout $(TEST_TIMEOUT) > bin/test.json; s=$$?; \
