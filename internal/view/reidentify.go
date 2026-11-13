@@ -20,9 +20,14 @@ import (
 // wrote 0). Each record is read through src, so its bytes are checked
 // against its own ID; what is not checked is that the root recomputes to
 // id, since that is the question asked. Records() gives the new records.
+//
+// Only a view is re-identified: a record any of whose entries is not as a
+// view holds it (a description's dates, a changeset's base line) is
+// refused (ErrNotAView, or the parse error), so a table never renames a
+// description or a changeset.
 func Reidentify(ctx context.Context, id c4.ID, src RecordSource, workers int) (*View, error) {
 	root := NewNode("")
-	if err := loadInto(ctx, root, id, src, workers); err != nil {
+	if err := loadInto(ctx, root, id, src, workers, fetchViewRecord); err != nil {
 		return nil, err
 	}
 	return FromNode(root), nil

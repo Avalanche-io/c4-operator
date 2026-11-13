@@ -474,6 +474,16 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
+              renames:
+                description: |-
+                  Renames is the C4 ID of the project store's renames table: one line
+                  per view a c4 library change gave a new ID, "<old> <new>" (DESIGN
+                  section 2.1). A reader given a view's ID from outside what it wrote
+                  resolves it through the table (view.ResolveOld). Written by
+                  `c4-operator migrate-pin`, after every record the table names is
+                  stored.
+                pattern: ^c4[1-9A-HJ-NP-Za-km-z]{88}$
+                type: string
             type: object
         type: object
     served: true

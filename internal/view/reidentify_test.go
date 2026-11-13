@@ -3,12 +3,15 @@ package view
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Avalanche-io/c4"
+	"github.com/Avalanche-io/c4/c4m"
 	"github.com/Avalanche-io/c4/store"
 )
 
@@ -194,5 +197,48 @@ func TestATableThatIsNotOneIsRefused(t *testing.T) {
 		if _, err := ParseRenames([]byte(text)); err == nil || !strings.Contains(err.Error(), "line") {
 			t.Errorf("%s: %v", name, err)
 		}
+	}
+}
+
+// What is not a view is not re-identified: a changeset (its first line is
+// its base), and a description whose entries hold dates.
+func TestOnlyAViewIsReidentified(t *testing.T) {
+	ctx := context.Background()
+	p := loadOldPin(t)
+	src := StoreRecords(p.ram)
+	index, err := os.ReadFile(filepath.Join("testdata", "pin19c9", "index.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := 0
+	for _, l := range strings.Split(string(index), "\n") {
+		f := strings.Fields(l)
+		if len(f) != 4 || f[0] != "changeset" {
+			continue
+		}
+		cs, err := c4.Parse(f[2])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v, err := Reidentify(ctx, cs, src, 4); err == nil {
+			t.Errorf("changeset %s re-identified as %s", f[1], v.ID)
+		}
+		refused++
+	}
+	if refused != 7 {
+		t.Fatalf("%d changesets in the fixture", refused)
+	}
+	dated := c4m.NewManifest()
+	dated.AddEntry(&c4m.Entry{Mode: 0o644, Timestamp: time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC), Size: 1, Name: "a.txt", C4ID: c4.Identify(strings.NewReader("a"))})
+	data, err := c4m.Marshal(dated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := p.ram.Put(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, err := Reidentify(ctx, id, src, 4); !errors.Is(err, ErrNotAView) {
+		t.Fatalf("a description with dates: %v, %v", v, err)
 	}
 }

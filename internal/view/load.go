@@ -34,7 +34,7 @@ func StoreRecords(st Store) RecordSource {
 // content is not rehashed.
 func Load(ctx context.Context, id c4.ID, src RecordSource, workers int) (*View, error) {
 	root := NewNode("")
-	if err := loadInto(ctx, root, id, src, workers); err != nil {
+	if err := loadInto(ctx, root, id, src, workers, fetchRecord); err != nil {
 		return nil, err
 	}
 	v := FromNode(root)
@@ -45,7 +45,7 @@ func Load(ctx context.Context, id c4.ID, src RecordSource, workers int) (*View, 
 }
 
 // loadInto fills n from the record id and every record below it.
-func loadInto(ctx context.Context, n *Node, id c4.ID, src RecordSource, workers int) error {
+func loadInto(ctx context.Context, n *Node, id c4.ID, src RecordSource, workers int, fetch func(context.Context, RecordSource, c4.ID) ([]*c4m.Entry, error)) error {
 	if workers <= 0 {
 		workers = 16
 	}
@@ -71,7 +71,7 @@ func loadInto(ctx context.Context, n *Node, id c4.ID, src RecordSource, workers 
 			go func(j job) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				entries, err := fetchRecord(ctx, src, j.id)
+				entries, err := fetch(ctx, src, j.id)
 				mu.Lock()
 				defer mu.Unlock()
 				if err != nil {
