@@ -8,19 +8,19 @@
 -->
 <evaluation>
   <qa_pair>
-    <question>The denoise job show-a/sh050-denoise-v001 mounted another job's output as its input. Which job produced that input? Answer as namespace/name.</question>
-    <answer>show-a/sh050-render-v001</answer>
+    <question>The denoise job show-a/sh050-denoise-v002 mounted another job's output as its input. Which job produced that input? Answer as namespace/name.</question>
+    <answer>show-a/sh050-render-v002</answer>
   </qa_pair>
   <qa_pair>
-    <question>According to its signed task records, which generative model did show-a/sh050-denoise-v001 declare, and at what level of human oversight? Answer as model,level.</question>
+    <question>According to its signed task records, which generative model did show-a/sh050-denoise-v002 declare, and at what level of human oversight? Answer as model,level.</question>
     <answer>denoise-v3,human_validated</answer>
   </qa_pair>
   <qa_pair>
-    <question>In the C2PA manifest definition the farm produces for frame 1004 of show-a/sh050-render-v001 (renders/sh050/sh050.1004.exr), what digital source type does the c2pa.created action carry? Give only the last segment of the IRI.</question>
+    <question>In the C2PA manifest definition the farm produces for frame 1004 of show-a/sh050-render-v002 (renders/sh050/sh050.1004.exr), what digital source type does the c2pa.created action carry? Give only the last segment of the IRI.</question>
     <answer>algorithmicMedia</answer>
   </qa_pair>
   <qa_pair>
-    <question>What C4 ID does the farm's task record give for the file renders/sh050/sh050.1004.exr written by show-a/sh050-render-v001?</question>
+    <question>What C4 ID does the farm's task record give for the file renders/sh050/sh050.1004.exr written by show-a/sh050-render-v002?</question>
     <answer>c44f7BwBRDCFeGq5z8Wj727QonKYLS7pyTGnCD9LCAqHFpB9m6dNQNqEWTNEHLN8dL2hKermesKWKvxHtEQ7aooWnj</answer>
   </qa_pair>
   <qa_pair>

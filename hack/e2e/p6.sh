@@ -18,8 +18,8 @@ record ""
 
 log "answer the evaluation set through MCP"
 "$ROOT/bin/mcpcheck" --server "$SERVER" \
-  'c4_trace_file {"namespace": "show-a", "name": "sh050-denoise-v001", "path": "renders/sh050-denoised/sh050-denoised.1004.exr"}' \
-  'c4_trace_file {"namespace": "show-a", "name": "sh050-render-v001", "path": "renders/sh050/sh050.1004.exr"}' \
+  'c4_trace_file {"namespace": "show-a", "name": "sh050-denoise-v002", "path": "renders/sh050-denoised/sh050-denoised.1004.exr"}' \
+  'c4_trace_file {"namespace": "show-a", "name": "sh050-render-v002", "path": "renders/sh050/sh050.1004.exr"}' \
   'c4_get_job {"namespace": "show-a", "name": "sh010-comp-v003"}' \
   'c4_list_nodes {"pool": "spot"}' \
   'c4_list_nodes {"pool": "gpu"}' \
