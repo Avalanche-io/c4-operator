@@ -228,6 +228,11 @@ type RecordedChain struct {
 	// Views are the views the changesets produce, as their lines record;
 	// the last is Head.
 	Views []c4.ID
+	// parents are the views the changesets apply to, as their lines
+	// record them, and written the same as the changesets name them on
+	// their first lines: another view only where a renamed line renamed
+	// it (Commit.Renamed).
+	parents, written []c4.ID
 	// MissingBefore is the last mapping line of the chain before which
 	// lines are missing from the mapping (the commits they recorded are no
 	// longer published): the line the chain starts at when it starts there
@@ -330,6 +335,8 @@ func chainsRecorded(m []Commit, only string) map[string]*RecordedChain {
 		cur.Lines = append(cur.Lines, i+1)
 		cur.Commits = append(cur.Commits, c.Commit)
 		cur.Views = append(cur.Views, c.View)
+		cur.parents = append(cur.parents, c.ParentView)
+		cur.written = append(cur.written, c.asWritten())
 		cur.Head = c.View
 	}
 	return out
@@ -355,7 +362,11 @@ func (rc RecordedChain) holds(ch *ChainFile) bool {
 // applied, and by hashing alone: the store is not read.
 func (rc RecordedChain) differs(c *view.Chain) (int, error) {
 	for i, sec := range c.Sections {
-		text, err := view.EncodeChangeset(sec.Base, sec.Patch)
+		base := sec.Base
+		if i < len(rc.parents) && base == rc.parents[i] {
+			base = rc.written[i] // as the changeset names it
+		}
+		text, err := view.EncodeChangeset(base, sec.Patch)
 		if err != nil {
 			return 0, err
 		}
@@ -438,7 +449,12 @@ func (rc RecordedChain) bytes(ctx context.Context, src view.RecordSource) ([]byt
 		if len(one.Sections) != 1 {
 			return nil, fmt.Errorf("the stored object %s (mapping line %d) is not one changeset: it reads as %d", id, rc.Lines[i], len(one.Sections))
 		}
-		c.Sections = append(c.Sections, view.Section{Base: one.Base, Patch: one.Sections[0].Patch})
+		if one.Base != rc.written[i] {
+			return nil, fmt.Errorf("the stored changeset %s (mapping line %d) is over %s, and the mapping records it over %s", id, rc.Lines[i], one.Base, rc.written[i])
+		}
+		// Over the parent as the mapping records it now: the view the
+		// changeset's first line names, or the ID a library change gave it.
+		c.Sections = append(c.Sections, view.Section{Base: rc.parents[i], Patch: one.Sections[0].Patch})
 		seals[i] = one.Seal
 	}
 	if len(c.Sections) > 0 {

@@ -1,0 +1,203 @@
+package gitimport
+
+import (
+	"bytes"
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/Avalanche-io/c4"
+	"github.com/Avalanche-io/c4/store"
+
+	"github.com/Avalanche-io/c4-operator/internal/view"
+)
+
+// oldPinImport is the view package's fixture written at the c4 pin before
+// the move (internal/view/testdata/pin19c9), read as an import of three
+// commits on one ref: link-depth2 over the empty view, then chain1 and
+// chain2, each changeset made by view.Apply at that pin as the importer
+// makes them.
+func oldPinImport(t *testing.T) (*store.RAM, []Commit) {
+	t.Helper()
+	dir := filepath.Join("..", "view", "testdata", "pin19c9")
+	ram := store.NewRAM()
+	files, err := os.ReadDir(filepath.Join(dir, "objects"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		data, err := os.ReadFile(filepath.Join(dir, "objects", f.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ram.Put(bytes.NewReader(data)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	index, err := os.ReadFile(filepath.Join(dir, "index.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	views, changesets := map[string]c4.ID{}, map[string]c4.ID{}
+	for _, l := range strings.Split(string(index), "\n") {
+		f := strings.Fields(l)
+		if len(f) < 3 || strings.HasPrefix(l, "#") {
+			continue
+		}
+		id, err := c4.Parse(f[2])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f[0] == "view" {
+			views[f[1]] = id
+		} else {
+			changesets[f[1]] = id
+		}
+	}
+	var m []Commit
+	parent := view.EmptyID()
+	for i, name := range []string{"link-depth2", "chain1", "chain2"} {
+		m = append(m, Commit{
+			Commit: strings.Repeat(string(rune('a'+i)), 40), Ref: "main",
+			View: views[name], ParentView: parent, Changeset: changesets[name],
+			ChainBase: view.EmptyID(), ChainSeq: i + 1,
+		})
+		parent = views[name]
+	}
+	return ram, m
+}
+
+// A mapping written before the pin moved records views by the IDs the
+// library then gave them, and its chain does not verify under the library
+// now. One renamed line appended, the mapping reads with every view as it
+// is now: the chain is made again from the same stored changesets and
+// verifies, a continued import starts from the new view, and the lines
+// written before it stay in the file as they were.
+func TestARenamedLineReadsAMappingWithItsViewsAsTheyAreNow(t *testing.T) {
+	ctx := context.Background()
+	ram, m := oldPinImport(t)
+	src := view.StoreRecords(ram)
+	dir := t.TempDir()
+	p := filepath.Join(dir, "mapping.jsonl")
+	w, err := AppendMapping(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range m {
+		if err := w.Write(c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.Close()
+	before, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain := filepath.Join(dir, "main.c4m")
+	read, err := ReadMapping(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := OpenRecordedChain(ctx, chain, src, read, "main"); err == nil {
+		t.Fatal("the old mapping's chain verifies under this library, so this test shows nothing")
+	}
+
+	// The migration's work: each view re-identified, its records stored.
+	table := view.Renames{}
+	for _, c := range m {
+		v, err := view.Reidentify(ctx, c.View, src, 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		recs, err := v.Records()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range recs {
+			if !ram.Has(r.ID) {
+				ram.Put(bytes.NewReader(r.Data))
+			}
+		}
+		if v.ID != c.View {
+			table[c.View] = v.ID
+		}
+	}
+	if len(table) != 3 {
+		t.Fatalf("%d of the mapping's views renamed, want 3", len(table))
+	}
+	line := Renamed(read, table)
+	if len(line.Renamed) != 3 {
+		t.Fatalf("the renamed line names %d views", len(line.Renamed))
+	}
+	w, err = AppendMapping(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Write(line)
+	w.Close()
+
+	now, err := ReadMapping(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(now) != len(m)+1 {
+		t.Fatalf("%d lines", len(now))
+	}
+	for i, c := range m {
+		if now[i].View != table[c.View] || now[i].ParentView != table.Current(c.ParentView) || now[i].Changeset != c.Changeset {
+			t.Fatalf("line %d reads as %+v", i+1, now[i])
+		}
+	}
+	if known := KnownViews(now); known[m[2].Commit] != table[m[2].View] {
+		t.Fatalf("an import continues from %s, want %s", known[m[2].Commit], table[m[2].View])
+	}
+	if LastByRef(now)["main"] != m[2].Commit {
+		t.Fatalf("main is at %q", LastByRef(now)["main"])
+	}
+	ch, repaired, err := OpenRecordedChain(ctx, chain, src, now, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repaired == "" || ch.Head != table[m[2].View] || ch.Sections != 3 {
+		t.Fatalf("the chain: %+v (%q)", ch, repaired)
+	}
+	// Made again, the file is the chain the mapping records: the next open
+	// finds nothing to repair, each section the changeset the mapping
+	// records for it.
+	if ch, repaired, err := OpenRecordedChain(ctx, chain, src, now, "main"); err != nil || repaired != "" || ch.Head != table[m[2].View] {
+		t.Fatalf("the chain opened again: %+v (%q, %v)", ch, repaired, err)
+	}
+	if again := Renamed(now, table); len(again.Renamed) != 0 {
+		t.Fatalf("a second run appends %v", again.Renamed)
+	}
+	after, _ := os.ReadFile(p)
+	if !bytes.HasPrefix(after, before) {
+		t.Fatal("the lines written before the renamed line changed")
+	}
+}
+
+// A renamed line applies to the lines before it, never to a line after.
+func TestARenamedLineRenamesOnlyTheLinesBeforeIt(t *testing.T) {
+	a, b := c4.Identify(strings.NewReader("a")), c4.Identify(strings.NewReader("b"))
+	var buf bytes.Buffer
+	for _, text := range []string{
+		`{"commit":"` + strings.Repeat("1", 40) + `","view":"` + a.String() + `","parentView":"` + a.String() + `"}`,
+		`{"renamed":["` + a.String() + " " + b.String() + `"]}`,
+		`{"commit":"` + strings.Repeat("2", 40) + `","view":"` + a.String() + `","parentView":"` + a.String() + `"}`,
+	} {
+		buf.WriteString(text + "\n")
+	}
+	m, err := DecodeMapping(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m[0].View != b || m[0].ParentView != b || m[2].View != a {
+		t.Fatalf("read as %s, %s; %s", m[0].View, m[0].ParentView, m[2].View)
+	}
+	bad := `{"renamed":["` + a.String() + " " + a.String() + `"]}` + "\n"
+	if _, err := DecodeMapping(strings.NewReader(bad)); err == nil || !strings.Contains(err.Error(), "mapping line 1") {
+		t.Fatalf("a renamed line that renames a view to itself: %v", err)
+	}
+}

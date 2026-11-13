@@ -123,6 +123,15 @@ type Commit struct {
 	// Record is the ID of the import record the importer signed for this
 	// commit (DESIGN.md section 9.2), when it signs.
 	Record c4.ID `json:"record,omitempty"`
+	// A line that records a c4 library change has Renamed and nothing
+	// else: the views the lines before it name that the change gave new
+	// IDs, each "<old> <new>" (view.Renames). The lines stay as they were
+	// written; they are read with their views renamed (DecodeMapping).
+	Renamed []string `json:"renamed,omitempty"`
+	// parentWritten is ParentView as the line was written, kept when a
+	// renamed line after it renames the view: the changeset's first line
+	// still names it.
+	parentWritten c4.ID
 
 	// Git-level counts of files and symlinks (submodules excluded).
 	Added    int `json:"added"`

@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/Avalanche-io/c4"
+
+	"github.com/Avalanche-io/c4-operator/internal/view"
 )
 
 // The mapping file records one JSON object per imported commit, oldest
@@ -56,6 +59,16 @@ func decodeMapping(r io.Reader) (out []Commit, whole int64, err error) {
 		if text := bytes.TrimSpace(line); len(text) > 0 {
 			var c Commit
 			switch err := json.Unmarshal(text, &c); {
+			case err == nil && len(c.Renamed) > 0:
+				r, perr := view.ParseRenames([]byte(strings.Join(c.Renamed, "\n")))
+				if perr != nil {
+					if !ended {
+						return out, whole, nil
+					}
+					return nil, 0, fmt.Errorf("mapping line %d: %w", n, perr)
+				}
+				renameLines(out, r)
+				out = append(out, c)
 			case err == nil:
 				out = append(out, c)
 			case ended:
@@ -173,3 +186,46 @@ func (w *MappingWriter) Write(c Commit) error { return w.enc.Encode(c) }
 
 // Close closes the file.
 func (w *MappingWriter) Close() error { return w.f.Close() }
+
+// renameLines reads lines with their views as a library change renamed
+// them: a renamed line applies to every line before it.
+func renameLines(m []Commit, r view.Renames) {
+	for i := range m {
+		c := &m[i]
+		if c.parentWritten.IsNil() {
+			c.parentWritten = c.ParentView
+		}
+		c.View, c.ParentView = r.Current(c.View), r.Current(c.ParentView)
+		if !c.ChainBase.IsNil() {
+			c.ChainBase = r.Current(c.ChainBase)
+		}
+	}
+}
+
+// Renamed is the renamed line a mapping needs for a library change whose
+// renames are r: the pairs, sorted, for every view m's lines name (View,
+// ParentView, ChainBase) that r gives a new ID. None when m names no view
+// r renames, as after the line is appended: appending it is done once.
+func Renamed(m []Commit, r view.Renames) Commit {
+	named := view.Renames{}
+	for _, c := range m {
+		for _, id := range []c4.ID{c.View, c.ParentView, c.ChainBase} {
+			if cur := r.Current(id); cur != id {
+				named[id] = cur
+			}
+		}
+	}
+	text := strings.TrimSuffix(string(named.Bytes()), "\n")
+	if text == "" {
+		return Commit{}
+	}
+	return Commit{Renamed: strings.Split(text, "\n")}
+}
+
+// asWritten is the parent view as the line was written.
+func (c *Commit) asWritten() c4.ID {
+	if !c.parentWritten.IsNil() {
+		return c.parentWritten
+	}
+	return c.ParentView
+}
