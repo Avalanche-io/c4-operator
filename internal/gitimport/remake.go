@@ -68,6 +68,9 @@ func Remake(ctx context.Context, opts Options, line Commit) error {
 	if got.View == line.View && got.Changeset == line.Changeset {
 		return nil
 	}
+	if _, written := line.asWritten(); got.View == line.View && written != line.View {
+		return fmt.Errorf("commit %s comes to the view the mapping records, %s, which a c4 library change renamed from %s, and its changeset %s was made by the library before that change: this one makes another changeset for the same step, never that one. Cut the mapping back to before the commit's line and import the ref again; the cut takes the renamed line with it, so run migrate-pin again afterwards for the lines that stay", line.Commit, line.View, written, line.Changeset)
+	}
 	if got.View == line.View && oldForm(got.Patch, got.View, line.Changeset) {
 		return fmt.Errorf("commit %s comes to the view the mapping records, and the mapping records its changeset as %s, in the form written before 2026-11-09 (ending with the view's C4 ID), which is not written any more", line.Commit, line.Changeset)
 	}

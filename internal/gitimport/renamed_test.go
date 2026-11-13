@@ -196,8 +196,136 @@ func TestARenamedLineRenamesOnlyTheLinesBeforeIt(t *testing.T) {
 	if m[0].View != b || m[0].ParentView != b || m[2].View != a {
 		t.Fatalf("read as %s, %s; %s", m[0].View, m[0].ParentView, m[2].View)
 	}
-	bad := `{"renamed":["` + a.String() + " " + a.String() + `"]}` + "\n"
-	if _, err := DecodeMapping(strings.NewReader(bad)); err == nil || !strings.Contains(err.Error(), "mapping line 1") {
-		t.Fatalf("a renamed line that renames a view to itself: %v", err)
+	bad := `{"renamed":["` + a.String() + " " + a.String() + `"]}`
+	for _, end := range []string{"\n", ""} {
+		if _, err := DecodeMapping(strings.NewReader(bad + end)); err == nil || !strings.Contains(err.Error(), "mapping line 1") {
+			t.Fatalf("a renamed line that renames a view to itself (ending %q): %v", end, err)
+		}
+	}
+}
+
+// A changeset stored before 2026-11-09 ends with the view it produces, as
+// the library then gave it. With a renamed line after it, the chain is
+// still made again: the seal is checked against the view as the line was
+// written, and the view produced against the line as renamed.
+func TestAChangesetEndingWithItsViewIsMadeAgainAfterARenamedLine(t *testing.T) {
+	ctx := context.Background()
+	ram, m := oldPinImport(t)
+	for i := range m {
+		data, err := view.ReadObject(ram, m[i].Changeset)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sealed := append(append([]byte(nil), data...), m[i].View.String()+"\n"...)
+		id, err := ram.Put(bytes.NewReader(sealed))
+		if err != nil {
+			t.Fatal(err)
+		}
+		m[i].Changeset = id
+	}
+	src := view.StoreRecords(ram)
+	dir := t.TempDir()
+	p := filepath.Join(dir, "mapping.jsonl")
+	w, err := AppendMapping(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range m {
+		w.Write(c)
+	}
+	w.Close()
+	table := view.Renames{}
+	for _, c := range m {
+		v, err := view.Reidentify(ctx, c.View, src, 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		recs, err := v.Records()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range recs {
+			if !ram.Has(r.ID) {
+				ram.Put(bytes.NewReader(r.Data))
+			}
+		}
+		if v.ID != c.View {
+			table[c.View] = v.ID
+		}
+	}
+	read, err := ReadMapping(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err = AppendMapping(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Write(Renamed(read, table))
+	w.Close()
+	now, err := ReadMapping(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain := filepath.Join(dir, "main.c4m")
+	ch, _, err := OpenRecordedChain(ctx, chain, src, now, "main")
+	if err != nil || ch.Head != table[m[2].View] {
+		t.Fatalf("the chain of sealed changesets: %+v, %v", ch, err)
+	}
+	if ch, repaired, err := OpenRecordedChain(ctx, chain, src, now, "main"); err != nil || repaired != "" || ch.Head != table[m[2].View] {
+		t.Fatalf("opened again: %+v (%q, %v)", ch, repaired, err)
+	}
+}
+
+// A commit whose line a renamed line renamed cannot be made again: the
+// changeset recorded was made by the library before the change, and this
+// one makes another for the same step. The error says so, and what to do.
+func TestARenamedCommitIsNotMadeAgainAndSaysWhy(t *testing.T) {
+	ctx := context.Background()
+	r := newRepo(t)
+	r.write("d/a.txt", "a\n")
+	r.commit("one")
+	r.write("d/a.txt", "a2\n")
+	r.commit("two")
+	sink := newTreeSink(t)
+	sum := r.importInto(t, sink, Options{Ref: "refs/heads/main", Records: view.StoreRecords(sink)})
+	// The lines as an earlier library would have written them: other IDs
+	// for the same views, and a changeset this library never made.
+	table := view.Renames{}
+	old := func(id c4.ID) c4.ID {
+		for o, n := range table {
+			if n == id {
+				return o
+			}
+		}
+		o := c4.Identify(strings.NewReader("as the library before gave " + id.String()))
+		table[o] = id
+		return o
+	}
+	var lines []Commit
+	for _, c := range sum.Commits {
+		c.View, c.ParentView = old(c.View), old(c.ParentView)
+		lines = append(lines, c)
+	}
+	lines[1].Changeset = c4.Identify(strings.NewReader("a changeset the library before made"))
+	p := filepath.Join(t.TempDir(), "mapping.jsonl")
+	w, err := AppendMapping(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range lines {
+		w.Write(c)
+	}
+	w.Write(Renamed(lines, table))
+	w.Close()
+	m, err := ReadMapping(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = Remake(ctx, r.remakeOptions(t, sink, m), m[1])
+	for _, want := range []string{"renamed from", "Cut the mapping back", "run migrate-pin again"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("remaking a renamed commit: %v\nwant %q in it", err, want)
+		}
 	}
 }

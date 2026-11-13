@@ -62,9 +62,8 @@ func decodeMapping(r io.Reader) (out []Commit, whole int64, err error) {
 			case err == nil && len(c.Renamed) > 0:
 				r, perr := view.ParseRenames([]byte(strings.Join(c.Renamed, "\n")))
 				if perr != nil {
-					if !ended {
-						return out, whole, nil
-					}
+					// It parsed as JSON, so it is a whole line, at the end of
+					// the file or not: damage, never a cut append.
 					return nil, 0, fmt.Errorf("mapping line %d: %w", n, perr)
 				}
 				renameLines(out, r)
@@ -193,7 +192,7 @@ func renameLines(m []Commit, r view.Renames) {
 	for i := range m {
 		c := &m[i]
 		if c.parentWritten.IsNil() {
-			c.parentWritten = c.ParentView
+			c.parentWritten, c.viewWritten = c.ParentView, c.View
 		}
 		c.View, c.ParentView = r.Current(c.View), r.Current(c.ParentView)
 		if !c.ChainBase.IsNil() {
@@ -222,10 +221,10 @@ func Renamed(m []Commit, r view.Renames) Commit {
 	return Commit{Renamed: strings.Split(text, "\n")}
 }
 
-// asWritten is the parent view as the line was written.
-func (c *Commit) asWritten() c4.ID {
+// asWritten is the parent view and the view as the line was written.
+func (c *Commit) asWritten() (parent, view c4.ID) {
 	if !c.parentWritten.IsNil() {
-		return c.parentWritten
+		return c.parentWritten, c.viewWritten
 	}
-	return c.ParentView
+	return c.ParentView, c.View
 }

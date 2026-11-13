@@ -128,10 +128,11 @@ type Commit struct {
 	// IDs, each "<old> <new>" (view.Renames). The lines stay as they were
 	// written; they are read with their views renamed (DecodeMapping).
 	Renamed []string `json:"renamed,omitempty"`
-	// parentWritten is ParentView as the line was written, kept when a
-	// renamed line after it renames the view: the changeset's first line
-	// still names it.
-	parentWritten c4.ID
+	// parentWritten and viewWritten are ParentView and View as the line
+	// was written, kept when a renamed line after it renames them: the
+	// changeset's first line still names the parent, and a changeset
+	// stored before 2026-11-09 ends with the view.
+	parentWritten, viewWritten c4.ID
 
 	// Git-level counts of files and symlinks (submodules excluded).
 	Added    int `json:"added"`
