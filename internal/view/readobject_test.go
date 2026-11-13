@@ -229,12 +229,12 @@ func TestTheOnceAMinuteRuleTellsShardsNamedAlikeApart(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		w, err := ts.Create(asked)
-		if err != nil {
+		// Planted as a disk fault leaves it: c4 refuses to write other
+		// bytes under an ID itself.
+		if err := os.WriteFile(filepath.Join(dir, asked.String()), []byte("not it"), 0o444); err != nil {
 			t.Fatal(err)
 		}
-		w.Write([]byte("not it"))
-		w.Close()
+		_ = ts
 		filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 			if err == nil && d.IsDir() {
 				os.Chmod(p, 0o555)

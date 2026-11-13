@@ -21,6 +21,19 @@ import (
 
 // treeWith is a one-shard tree store holding data under id, whatever data
 // is, and the path of its file.
+// plant puts data under id in a tree store's root as a disk fault leaves
+// it: written at the object's path, not through the store, which refuses
+// bytes that are not the ID's (c4 checks a write before it names it). A
+// fresh root has no split directories, so the path is the root's own.
+func plant(t *testing.T, root string, id c4.ID, data []byte) string {
+	t.Helper()
+	p := filepath.Join(root, id.String())
+	if err := os.WriteFile(p, data, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
 func treeWith(t *testing.T, id c4.ID, data []byte) (*Sharded, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -32,12 +45,7 @@ func treeWith(t *testing.T, id c4.ID, data []byte) (*Sharded, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w, err := ts.Create(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.Write(data)
-	w.Close()
+	plant(t, dir, id, data)
 	p, ok := ts.ContentPath(id)
 	if !ok {
 		t.Fatal("not stored")
@@ -110,10 +118,7 @@ func TestTheRefileKeepsWhatIsRight(t *testing.T) {
 	// is there to keep; they are set aside and placed under their own ID,
 	// and got takes its own (2026-11-11)
 	s, _ = treeWith(t, asked, wrong)
-	ts, _ := store.NewTreeStore(strings.TrimPrefix(s.For(got).Name(), "file://"))
-	w, _ := ts.Create(got)
-	io.WriteString(w, "neither")
-	w.Close()
+	plant(t, strings.TrimPrefix(s.For(got).Name(), "file://"), got, []byte("neither"))
 	if err := s.Refile(ctx, asked, got, wrong); err != nil {
 		t.Errorf("with other bytes under got: %v", err)
 	}
@@ -479,18 +484,20 @@ func TestTheRefileLeavesAnObjectBeingWritten(t *testing.T) {
 	ts.SetSyncMode(store.SyncBatch)
 	sh := &treeShard{root: ts.Root(), ts: ts}
 	asked := c4.Identify(strings.NewReader("the record"))
+	// Its own bytes: only pending, not wrong (c4 checks a write's bytes
+	// before it names them, a batch's included).
 	w, err := ts.Create(asked)
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.Write([]byte("not yet"))
+	w.Write([]byte("the record"))
 	w.Close()
 	if _, _, err := sh.setAside(asked); err == nil {
 		t.Error("an object pending publication was taken")
 	}
 	if p, ok := ts.ContentPath(asked); !ok {
 		t.Error("the pending object is gone")
-	} else if b, _ := os.ReadFile(p); string(b) != "not yet" {
+	} else if b, _ := os.ReadFile(p); string(b) != "the record" {
 		t.Errorf("the pending object holds %q", b)
 	}
 }
@@ -509,12 +516,7 @@ func swapped(t *testing.T, objs ...string) (*Sharded, string, []c4.ID) {
 		ids[i] = c4.Identify(strings.NewReader(o))
 	}
 	for i, o := range objs {
-		w, err := ts.Create(ids[(i+1)%len(objs)])
-		if err != nil {
-			t.Fatal(err)
-		}
-		io.WriteString(w, o)
-		w.Close()
+		plant(t, ts.Root(), ids[(i+1)%len(objs)], []byte(o))
 	}
 	s, err := OpenSharded([]Spec{{Name: "s0", URL: dir}}, Credentials{})
 	if err != nil {
