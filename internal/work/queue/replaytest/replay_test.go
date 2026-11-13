@@ -1,4 +1,4 @@
-package queue
+package replaytest
 
 import (
 	"context"
@@ -14,6 +14,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
+	"github.com/Avalanche-io/c4-operator/internal/work/queue"
 )
 
 // The library-port run (an agent run of 2026-10-19), replayed through the
@@ -38,7 +39,7 @@ type etaSample struct {
 
 // replayPort runs the port job once, its reviews marked in the survey's
 // document when mark is set, and returns its ETA curve and finish.
-func replayPort(t *testing.T, ns string, q *Queue, now *time.Time, put func(string) string, name string, mark bool) ([]etaSample, time.Time) {
+func replayPort(t *testing.T, ns string, q *queue.Queue, now *time.Time, put func(string) string, name string, mark bool) ([]etaSample, time.Time) {
 	t.Helper()
 	ctx := context.Background()
 	docs := map[string]string{}
@@ -122,7 +123,7 @@ func replayPort(t *testing.T, ns string, q *Queue, now *time.Time, put func(stri
 // Under the race detector it is skipped: it was 44% of the package's time
 // there (160 of 367 s), and with it CI's race step ran the package to
 // within seconds of its timeout. It adds nothing the race detector
-// watches that the package's other tests do not run: measured by line
+// watches that the queue package's tests do not run: measured by line
 // coverage, every block it reached was reached by another test but one
 // (suggest.go, the information point used), which
 // TestAnInformationPointMovesASuggestionOnce now reaches and pins. Nor
@@ -173,6 +174,7 @@ func TestReplayLibraryPort(t *testing.T) {
 			worstAbove, worstBelow = math.Max(worstAbove, d), math.Max(worstBelow, -d)
 			n++
 		}
+		t.Logf("%s: ended %s, %d samples, p90 mean error %.1f min, up to %.1f above and %.1f below the finish", name, end.Format(time.RFC3339), n, sum/float64(max(n, 1)), worstAbove, worstBelow)
 		if n == 0 || sum/float64(n) > 9 || worstAbove > 25 || worstBelow > 15 {
 			t.Errorf("%s: p90 mean error %.1f min, up to %.1f above and %.1f below the finish", name, sum/float64(max(n, 1)), worstAbove, worstBelow)
 		}
