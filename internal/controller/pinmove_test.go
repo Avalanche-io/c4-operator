@@ -11,6 +11,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
@@ -94,12 +95,8 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 	// A Materialization of an old ID, Ready as the operator before the move
 	// left it: its status names the view as stored.
 	putMat(t, ns, "frames", byID(views["null-depth2"]))
-	m := waitMat(t, ns, "frames", c4v1.PhaseReady, "Ready")
-	orig := m.DeepCopy()
-	m.Status.ViewID, m.Status.Layers = old("null-depth2"), []string{old("null-depth2")}
-	if err := k8s.Status().Patch(ctx, m, client.MergeFrom(orig)); err != nil {
-		t.Fatal(err)
-	}
+	waitMat(t, ns, "frames", c4v1.PhaseReady, "Ready")
+	plantView(t, ns, "frames", "pinned", old("null-depth2"))
 	// A changeset over a granted view: its base is recomputed with the
 	// library now, so the grant on the base's old ID does not cover it.
 	putMat(t, ns, "change", byID(changesets["chain1"]))
@@ -374,12 +371,8 @@ func TestARestartAfterTheMigrationResolvesTheMaterializationAgain(t *testing.T) 
 	}
 	putProject(t, "pinned-store", []string{ns}, st, c4v1.ScopeStore, nil)
 	putMat(t, ns, "frames", byID(views["null-depth2"]))
-	m := waitMat(t, ns, "frames", c4v1.PhaseReady, "Ready")
-	orig := m.DeepCopy()
-	m.Status.ViewID, m.Status.Layers = views["null-depth2"].String(), []string{views["null-depth2"].String()}
-	if err := k8s.Status().Patch(ctx, m, client.MergeFrom(orig)); err != nil {
-		t.Fatal(err)
-	}
+	waitMat(t, ns, "frames", c4v1.PhaseReady, "Ready")
+	plantView(t, ns, "frames", "pinned-store", views["null-depth2"].String())
 	signer, err := provenance.NewSigner(ctx, provenance.LocalIssuer(farmCA, provenance.ComponentIdentity("controller"), time.Hour))
 	if err != nil {
 		t.Fatal(err)
@@ -432,6 +425,76 @@ func TestARestartAfterTheMigrationResolvesTheMaterializationAgain(t *testing.T) 
 			break
 		} else if time.Now().After(deadline) {
 			t.Fatalf("after the migration a restart resolves frames to %s, want %s", got, want.ID)
+		}
+	}
+}
+
+// plantView sets a Ready Materialization's status to name id, as the
+// operator before the pin moved left it, while this package's reconciler
+// runs, and returns once the plant holds. The reconciler writes its status
+// with a merge patch from the object it read, through its cache: a
+// reconcile queued by any Project event that reads a copy older than the
+// plant resolves again and writes the view's new ID over it. So the plant
+// waits for the reconciler to have settled (Ready for the Materialization's
+// and its Project's generations), is made with an optimistic lock on what
+// the API server holds, is waited for in the cache (so a later reconcile
+// reads it and returns early), and must then hold for a quiet second;
+// otherwise it is made again. (Found on CI, linux amd64: the dry run read
+// frames at the new ID and did not rematerialize it.)
+func plantView(t *testing.T, ns, name, project, id string) {
+	t.Helper()
+	ctx := context.Background()
+	key := types.NamespacedName{Namespace: ns, Name: name}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: the planted view %s does not hold", key, id)
+		}
+		var m c4v1.Materialization
+		var p c4v1.Project
+		if err := direct.Get(ctx, key, &m); err != nil {
+			t.Fatal(err)
+		}
+		if err := direct.Get(ctx, types.NamespacedName{Name: project}, &p); err != nil {
+			t.Fatal(err)
+		}
+		st := m.Status
+		if st.Phase != c4v1.PhaseReady || st.ObservedGeneration != m.Generation || st.ProjectGeneration != p.Generation {
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+		if st.ViewID != id || len(st.Layers) != 1 || st.Layers[0] != id {
+			orig := m.DeepCopy()
+			m.Status.ViewID, m.Status.Layers = id, []string{id}
+			err := direct.Status().Patch(ctx, &m, client.MergeFromWithOptions(orig, client.MergeFromWithOptimisticLock{}))
+			if apierrors.IsConflict(err) {
+				continue
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		// The cache has it, so a reconcile from here on reads the plant.
+		for {
+			var cached c4v1.Materialization
+			if err := k8s.Get(ctx, key, &cached); err != nil {
+				t.Fatal(err)
+			}
+			if cached.Status.ViewID == id || time.Now().After(deadline) {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		held := true
+		for quiet := time.Now(); held && time.Since(quiet) < time.Second; time.Sleep(20 * time.Millisecond) {
+			var again c4v1.Materialization
+			if err := direct.Get(ctx, key, &again); err != nil {
+				t.Fatal(err)
+			}
+			held = again.Status.ViewID == id
+		}
+		if held {
+			return
 		}
 	}
 }
