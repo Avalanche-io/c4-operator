@@ -153,6 +153,15 @@ type projectCtx struct {
 }
 
 func (d *Daemon) projectCtx(ctx context.Context, p *c4v1.Project) (*projectCtx, error) {
+	if p.AccessMode() == c4v1.AccessDirect {
+		// Every node daemon writes a Direct project's store, so a shard on a
+		// path would have as many writers as the farm has nodes.
+		for _, sh := range p.Spec.Store.Shards {
+			if storeurl.Local(sh.URL) {
+				return nil, fmt.Errorf("project %s is Direct, and its shard %s is the local path %s: a path is a store for one process, and every node daemon writes a Direct project's store; give the shard a network URL (s3://, c4d://, http(s)://), or make the project Tiered", p.Name, sh.Name, sh.URL)
+			}
+		}
+	}
 	part := p.Partition()
 	cache, err := d.caches.Partition(part)
 	if err != nil {

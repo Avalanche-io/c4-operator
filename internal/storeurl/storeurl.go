@@ -81,6 +81,16 @@ func OpenWith(raw string, src CredentialSource) (Shard, error) {
 	return nil, fmt.Errorf("unsupported store URL %q (want s3://, c4d://, http(s)://, or an absolute path)", raw)
 }
 
+// Local reports whether a store URL is a path on this machine (file://, or
+// an absolute path): a c4 TreeStore, which is safe for one process only.
+// Two processes writing one, as two pods on a shared volume would, can
+// miss objects that are there while the other splits a directory, and can
+// publish one where no lookup finds it (c4 core's TreeStore, 2026-11-16).
+func Local(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	return strings.HasPrefix(raw, "file://") || strings.HasPrefix(raw, "/")
+}
+
 // Spec names one shard. Placement depends on Name, never on URL, so the
 // same store reached through different endpoints (a NodePort from a
 // laptop, a Service inside the cluster) places every object identically,
