@@ -116,6 +116,23 @@ var ErrNotAView = errors.New("not a view's record")
 // what the record does not hold. It checks only the records the edit
 // loads, the ones along its paths, one field comparison per entry.
 func fetchViewRecord(ctx context.Context, src RecordSource, id c4.ID) ([]*c4m.Entry, error) {
+	return fetchViewRecordAs(ctx, src, id, false)
+}
+
+// fetchStoredViewRecord is fetchViewRecord for the migration's reader
+// (Reidentify), which reads records as they were stored, by any earlier
+// projection: a link written with a null mode, before views kept a
+// link's type, whose target looks like a location (host:path, C:foo) is
+// read by the c4m library as a flow link, `->` and all. A view never
+// holds a flow link, so in a view's record that line is the link it was
+// written as, and is read so (decided 2026-11-13: this reads the bytes in
+// their own scope and invents nothing). Everywhere else such a line stays
+// what the library reads, and fetchViewRecord refuses it.
+func fetchStoredViewRecord(ctx context.Context, src RecordSource, id c4.ID) ([]*c4m.Entry, error) {
+	return fetchViewRecordAs(ctx, src, id, true)
+}
+
+func fetchViewRecordAs(ctx context.Context, src RecordSource, id c4.ID, stored bool) ([]*c4m.Entry, error) {
 	data, err := src.Record(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("record %s: %w", id, err)
@@ -126,12 +143,30 @@ func fetchViewRecord(ctx context.Context, src RecordSource, id c4.ID) ([]*c4m.En
 	}
 	out := make([]*c4m.Entry, len(raw))
 	for i, e := range raw {
+		if stored && e.FlowDirection == c4m.FlowOutbound && e.Mode == 0 && e.Target == "" {
+			cp := *e
+			cp.Target, cp.FlowDirection, cp.FlowTarget = e.FlowTarget, c4m.FlowNone, ""
+			e = &cp
+		}
 		out[i] = Project(e)
-		if !entriesIdentical(e, out[i]) {
+		if !heldAsAView(e, out[i]) {
 			return nil, fmt.Errorf("record %s: %w: %q is not as a view holds it", id, ErrNotAView, e.Name)
 		}
 	}
 	return out, nil
+}
+
+// heldAsAView reports whether a record's entry, as stored, is as a view
+// holds it (projected is Project of it). A link with a null mode is: views
+// wrote every link so until they kept its type (LinkMode, 2026-11-13), and
+// the projection now gives it that mode.
+func heldAsAView(stored, projected *c4m.Entry) bool {
+	if IsLink(stored) && stored.Mode == 0 {
+		cp := *stored
+		cp.Mode = LinkMode
+		return entriesIdentical(&cp, projected)
+	}
+	return entriesIdentical(stored, projected)
 }
 
 func fetchRecord(ctx context.Context, src RecordSource, id c4.ID) ([]*c4m.Entry, error) {

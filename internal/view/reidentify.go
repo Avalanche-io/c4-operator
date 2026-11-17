@@ -28,7 +28,7 @@ import (
 // description or a changeset.
 func Reidentify(ctx context.Context, id c4.ID, src RecordSource, workers int) (*View, error) {
 	root := NewNode("")
-	if err := loadInto(ctx, root, id, src, workers, fetchViewRecord); err != nil {
+	if err := loadInto(ctx, root, id, src, workers, fetchStoredViewRecord); err != nil {
 		return nil, err
 	}
 	return FromNode(root), nil

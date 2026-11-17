@@ -4,8 +4,13 @@
 // A view's identity is the C4 ID of its root record under one projection:
 // names, sizes, content IDs and symlink targets are real; timestamps are
 // null everywhere; mode is null everywhere except on executable regular
-// files, which record -rwxr-xr-x. A tree without executable files or
-// symlinks therefore has the ID `c4 id` reports in content mode.
+// files, which record -rwxr-xr-x, and symlinks, which record lrwxrwxrwx.
+// A symlink keeps its type character because a null mode leaves `->`
+// open: under one, a target like host:path or C:foo reads as a flow link
+// (core ruling, 2026-11-13: a writer never nulls a symlink's l). A
+// directory's type is its trailing "/", so its mode stays null. A tree
+// without executable files or symlinks therefore has the ID `c4 id`
+// reports in content mode.
 //
 // A record is the one-level canonical c4m listing of one directory's
 // children under that projection. Its bytes hash to the directory's ID,
@@ -17,6 +22,7 @@ package view
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -26,6 +32,12 @@ import (
 
 // ExecMode is the mode an executable regular file records.
 const ExecMode = 0o755
+
+// LinkMode is the mode a symlink records: its type, and the permissions
+// Linux reports for every symlink and git's 120000 checks out as. A
+// link's own permissions are inert (nothing chmods a symlink), so this is
+// a canonical value, like ExecMode, not an observation.
+const LinkMode = os.ModeSymlink | 0o777
 
 // emptyID is the ID of the empty listing: an empty directory's ID.
 var emptyID = c4.Identify(strings.NewReader(""))
@@ -45,7 +57,7 @@ func FileEntry(name string, size int64, id c4.ID, exec bool) *c4m.Entry {
 // SymlinkEntry returns the projected entry of a symlink: its target is
 // real, its size and ID are null.
 func SymlinkEntry(name, target string) *c4m.Entry {
-	return &c4m.Entry{Name: name, Size: -1, Target: target, Timestamp: c4m.NullTimestamp()}
+	return &c4m.Entry{Name: name, Mode: LinkMode, Size: -1, Target: target, Timestamp: c4m.NullTimestamp()}
 }
 
 // Project returns the projected copy of an entry read from any
@@ -57,6 +69,7 @@ func Project(e *c4m.Entry) *c4m.Entry {
 		cp.Name = strings.TrimSuffix(e.Name, "/") + "/"
 		cp.Target = ""
 	case e.Target != "" || e.IsSymlink():
+		cp.Mode = LinkMode
 		cp.Target = e.Target
 		cp.Size = -1
 		cp.C4ID = c4.ID{}
@@ -67,7 +80,9 @@ func Project(e *c4m.Entry) *c4m.Entry {
 }
 
 // IsExec reports whether a projected entry is an executable file.
-func IsExec(e *c4m.Entry) bool { return !e.IsDir() && e.Target == "" && e.Mode&0o111 != 0 }
+func IsExec(e *c4m.Entry) bool {
+	return !e.IsDir() && !IsLink(e) && e.Mode&0o111 != 0
+}
 
 // IsLink reports whether an entry is a symlink.
 func IsLink(e *c4m.Entry) bool { return e.Target != "" || e.IsSymlink() }
