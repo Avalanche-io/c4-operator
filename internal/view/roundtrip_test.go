@@ -3,6 +3,7 @@ package view
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -366,5 +367,47 @@ func TestCheckNameGuardsTheC4mRulesOnly(t *testing.T) {
 		if err := CheckName(n); err == nil {
 			t.Errorf("%q was taken", n)
 		}
+	}
+}
+
+// The read-back seam is for tests only: outside a _test.go file nothing in
+// the module calls MisreadForTest or assigns readBack (but its declaration
+// and MisreadForTest itself), so no build of a release can misread an entry.
+func TestTheReadBackSeamIsForTestsOnly(t *testing.T) {
+	root := filepath.Join("..", "..")
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && (d.Name() == ".worktrees" || d.Name() == "vendor" || d.Name() == "testdata" || strings.HasPrefix(d.Name(), ".")) && p != root {
+			return filepath.SkipDir
+		}
+		if d.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+			return nil
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		own := filepath.Base(p) == "roundtrip.go" && filepath.Base(filepath.Dir(p)) == "view"
+		for i, line := range strings.Split(string(data), "\n") {
+			code := strings.TrimSpace(line)
+			if strings.HasPrefix(code, "//") {
+				continue
+			}
+			if strings.Contains(code, "MisreadForTest(") && !(own && strings.HasPrefix(code, "func MisreadForTest(")) {
+				t.Errorf("%s:%d calls MisreadForTest outside a test", p, i+1)
+			}
+			if own {
+				continue
+			}
+			if strings.Contains(code, "readBack =") || strings.Contains(code, "readBack=") {
+				t.Errorf("%s:%d assigns the read-back seam", p, i+1)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

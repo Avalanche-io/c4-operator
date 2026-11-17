@@ -29,19 +29,23 @@ func (e *NotReadBack) Error() string {
 
 // readBack is applied to every entry the checks below read back, once the
 // library has decoded it and the projection has taken it. It is the
-// identity. It exists only so that a test can stand in for a decoder that
-// disagrees with the encoder, by altering one entry: the c4m library this
-// package is built with has no entry known not to read back (a null-mode
-// link to host:path was one until views kept a link's type). Nothing
-// outside the tests sets it.
+// identity, always, unless a test swaps it in Go code through
+// MisreadForTest: no environment variable, flag or build tag sets it, so no
+// build of a release can. It exists only so that a test can stand in for a
+// decoder that disagrees with the encoder, by altering one entry: the c4m
+// library this package is built with has no entry known not to read back (a
+// null-mode link to host:path was one until views kept a link's type).
+// TestTheReadBackSeamIsForTestsOnly holds this.
 var readBack = func(e *c4m.Entry) *c4m.Entry { return e }
 
 // MisreadForTest makes the read-back checks read every entry named name
 // with its link target altered, until restore is called: a decoder that
 // disagrees with the encoder, for the tests of this package and of those
 // that store what it writes (capture, ingest, the git import), which must
-// still show they refuse such an entry and store nothing. It is for tests
-// only: nothing else calls it, and it is not safe while checks run.
+// still show they refuse such an entry and store nothing. Only test code
+// calls it, in Go: no environment variable, flag or build tag reaches it,
+// and outside a test readBack is the identity
+// (TestTheReadBackSeamIsForTestsOnly). It is not safe while checks run.
 func MisreadForTest(name string) (restore func()) {
 	prev := readBack
 	readBack = func(e *c4m.Entry) *c4m.Entry {
