@@ -116,7 +116,8 @@ var ErrNotAView = errors.New("not a view's record")
 // what the record does not hold. It checks only the records the edit
 // loads, the ones along its paths, one field comparison per entry.
 func fetchViewRecord(ctx context.Context, src RecordSource, id c4.ID) ([]*c4m.Entry, error) {
-	return fetchViewRecordAs(ctx, src, id, false)
+	out, _, err := fetchViewRecordAs(ctx, src, id, false)
+	return out, err
 }
 
 // fetchStoredViewRecord is fetchViewRecord for the migration's reader
@@ -129,17 +130,21 @@ func fetchViewRecord(ctx context.Context, src RecordSource, id c4.ID) ([]*c4m.En
 // their own scope and invents nothing). Everywhere else such a line stays
 // what the library reads, and fetchViewRecord refuses it.
 func fetchStoredViewRecord(ctx context.Context, src RecordSource, id c4.ID) ([]*c4m.Entry, error) {
-	return fetchViewRecordAs(ctx, src, id, true)
+	out, _, err := fetchViewRecordAs(ctx, src, id, true)
+	return out, err
 }
 
-func fetchViewRecordAs(ctx context.Context, src RecordSource, id c4.ID, stored bool) ([]*c4m.Entry, error) {
+// fetchViewRecordAs returns a view's record projected, as every edit writes
+// it, and its entries as the record holds them, which a patch made over this
+// view restates to remove one (ApplyPatchFrom).
+func fetchViewRecordAs(ctx context.Context, src RecordSource, id c4.ID, stored bool) ([]*c4m.Entry, []*c4m.Entry, error) {
 	data, err := src.Record(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("record %s: %w", id, err)
+		return nil, nil, fmt.Errorf("record %s: %w", id, err)
 	}
 	raw, err := parseRecordRaw(data)
 	if err != nil {
-		return nil, fmt.Errorf("record %s: %w", id, err)
+		return nil, nil, fmt.Errorf("record %s: %w", id, err)
 	}
 	out := make([]*c4m.Entry, len(raw))
 	for i, e := range raw {
@@ -148,12 +153,13 @@ func fetchViewRecordAs(ctx context.Context, src RecordSource, id c4.ID, stored b
 			cp.Target, cp.FlowDirection, cp.FlowTarget = e.FlowTarget, c4m.FlowNone, ""
 			e = &cp
 		}
+		raw[i] = e
 		out[i] = Project(e)
 		if !heldAsAView(e, out[i]) {
-			return nil, fmt.Errorf("record %s: %w: %q is not as a view holds it", id, ErrNotAView, e.Name)
+			return nil, nil, fmt.Errorf("record %s: %w: %q is not as a view holds it", id, ErrNotAView, e.Name)
 		}
 	}
-	return out, nil
+	return out, raw, nil
 }
 
 // heldAsAView reports whether a record's entry, as stored, is as a view

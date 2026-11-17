@@ -116,8 +116,8 @@ func TestAnOldChangesetCarriedGivesItsHeadsNewID(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s as text over V's new ID: %v", s.name, err)
 		}
-		if wrong := as.ID != headNew; wrong != renamedDirRemoval[s.name] {
-			t.Errorf("%s as text over V's new ID: wrong %v, measured %v", s.name, wrong, renamedDirRemoval[s.name])
+		if wrong := as.ID != headNew; wrong != wrongAsText[s.name] {
+			t.Errorf("%s as text over V's new ID: wrong %v, measured %v", s.name, wrong, wrongAsText[s.name])
 		}
 	}
 	for name := range want {
@@ -125,9 +125,55 @@ func TestAnOldChangesetCarriedGivesItsHeadsNewID(t *testing.T) {
 	}
 }
 
-// renamedDirRemoval are the fixture's changesets whose text over V's new
-// ID means something else: each removes a directory #107 renamed.
-var renamedDirRemoval = map[string]bool{"rm-dir-deep-link": true, "rm-dir-deep-null": true, "rm-nested-dir-deep-link": true, "rm-nested-dir-deep-null": true}
+// wrongAsText are the fixture's changesets whose text over V's new ID means
+// something else, so they are carried: each removes a directory #107
+// renamed, or (since views record a link's type, lrwxrwxrwx) a link the
+// fixture recorded with a null mode, or the directory holding one, whose ID
+// that changes.
+var wrongAsText = map[string]bool{
+	"rm-dir-deep-link": true, "rm-dir-deep-null": true, "rm-nested-dir-deep-link": true, "rm-nested-dir-deep-null": true,
+	"rm-top-link": true, "rm-deep-link": true, "rm-dir-of-link": true,
+}
+
+// A patch made now, over a view as this library records it, removes what it
+// restates: its base's entries as recorded and as projected are the same, so
+// reading its meaning against the record changes nothing (ApplyPatch, here
+// for a link and a directory holding one, both written with lrwxrwxrwx).
+func TestAPatchMadeNowRemovesAsItSays(t *testing.T) {
+	ctx := context.Background()
+	ram := store.NewRAM()
+	src := StoreRecords(ram)
+	putBytes(t, ram, EmptyID(), nil)
+	put := func(a *Applied) {
+		t.Helper()
+		for _, r := range a.Records {
+			putBytes(t, ram, r.ID, r.Data)
+		}
+	}
+	base, err := Apply(ctx, EmptyID(), []Edit{
+		{Path: "tl", Entry: SymlinkEntry("tl", "a/t")},
+		{Path: "a/d/l", Entry: SymlinkEntry("l", "../t")},
+	}, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	put(base)
+	for _, path := range []string{"tl", "a/d/l", "a/d/"} {
+		made, err := Apply(ctx, base.ID, []Edit{{Path: path}}, src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		put(made)
+		ch, err := ReadChain(made.Changeset)
+		if err != nil {
+			t.Fatal(err)
+		}
+		again, err := ApplyPatch(ctx, base.ID, ch.Sections[0].Patch, src)
+		if err != nil || again.ID != made.ID {
+			t.Errorf("removing %s: the patch over its own base gives %s (%v), and the edit made %s", path, again.ID, err, made.ID)
+		}
+	}
+}
 
 func mustParse(t *testing.T, s string) c4.ID {
 	t.Helper()

@@ -325,13 +325,20 @@ func applyPatchFrom(tt, tb *atree, patch *c4m.Manifest, carried bool) error {
 		if err != nil {
 			return err
 		}
-		var existing *c4m.Entry
+		var existing, recorded *c4m.Entry
 		had := false
 		if from != nil {
 			existing, had = from.orig[name]
+			recorded = from.stored[name]
+		}
+		if recorded == nil {
+			recorded = existing
 		}
 		path := strings.Join(stack, "")
-		if had && !hasChildren && entriesIdentical(existing, e) {
+		// Identical to the base's entry as its record holds it (the spec's
+		// "as recorded"), not as projected: a patch made over a record
+		// written before a projection change restates the entry as written.
+		if had && !hasChildren && entriesIdentical(recorded, e) {
 			// An exact restatement: the patch removes the path. In another
 			// tree there may be nothing there to remove.
 			to := from

@@ -133,9 +133,13 @@ func SortEdits(edits []Edit) {
 // anode is a directory of the view being edited. Its children are read
 // from its base record only when an edit reaches it.
 type anode struct {
-	name   string
-	base   c4.ID                 // ID in the parent view; nil for a new directory
-	orig   map[string]*c4m.Entry // base children by name, once loaded
+	name string
+	base c4.ID                 // ID in the parent view; nil for a new directory
+	orig map[string]*c4m.Entry // base children by name, once loaded
+	// stored are the base children as the record holds them: what a patch
+	// made over this view restates to remove one (an entry written before
+	// a projection change, a link with a null mode, differs from orig).
+	stored map[string]*c4m.Entry
 	files  map[string]*c4m.Entry
 	dirs   map[string]*anode
 	loaded bool
@@ -161,14 +165,16 @@ func (t *atree) load(n *anode) error {
 	n.files = map[string]*c4m.Entry{}
 	n.dirs = map[string]*anode{}
 	n.orig = map[string]*c4m.Entry{}
+	n.stored = map[string]*c4m.Entry{}
 	if n.base.IsNil() || n.base == emptyID {
 		return nil
 	}
-	entries, err := fetchViewRecord(t.ctx, t.src, n.base)
+	entries, stored, err := fetchViewRecordAs(t.ctx, t.src, n.base, false)
 	if err != nil {
 		return err
 	}
-	for _, e := range entries {
+	for i, e := range entries {
+		n.stored[e.Name] = stored[i]
 		n.orig[e.Name] = e
 		if !e.IsDir() {
 			n.files[e.Name] = e
