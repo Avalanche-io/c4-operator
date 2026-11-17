@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,34 +32,59 @@ import (
 
 const nodeSA = "system:serviceaccount:c4-system:c4-node"
 
-func start(t *testing.T) (*rest.Config, client.Client) {
-	t.Helper()
+// The package's one API server (envtest), started by TestMain with the
+// CRDs and every policy installed, and shared by the tests. Each test
+// works in names of its own (unique), so the tests are independent of
+// each other and of earlier runs (-count). A policy and its binding take a
+// moment to reach the admission plugin, so tests still wait with enforced
+// before a case that needs one in force.
+var (
+	envCfg    *rest.Config
+	envClient client.Client
+	envSkip   string
+)
+
+func TestMain(m *testing.M) { os.Exit(run(m)) }
+
+func run(m *testing.M) int {
 	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
 		matches, _ := filepath.Glob("../../bin/k8s/k8s/*")
 		if len(matches) == 0 {
-			t.Skip("envtest binaries not found; run `make envtest`")
+			// the tests that need no server still run
+			envSkip = "envtest binaries not found; run `make envtest`"
+			return m.Run()
 		}
 		abs, _ := filepath.Abs(matches[len(matches)-1])
-		t.Setenv("KUBEBUILDER_ASSETS", abs)
+		os.Setenv("KUBEBUILDER_ASSETS", abs)
 	}
 	env := &envtest.Environment{CRDDirectoryPaths: []string{filepath.Join("..", "crd")}, ErrorIfCRDPathMissing: true}
 	cfg, err := env.Start()
 	if err != nil {
-		t.Fatal(err)
+		fmt.Fprintln(os.Stderr, "envtest:", err)
+		return 1
 	}
-	bootstrap, err := client.New(cfg, client.Options{})
-	if err != nil {
-		t.Fatal(err)
+	defer env.Stop()
+	if err := install(cfg); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
 	}
-	// the namespace a real cluster has for node leases
-	bootstrap.Create(context.Background(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "kube-node-lease"}})
-	t.Cleanup(func() { env.Stop() })
+	return m.Run()
+}
+
+// install makes the namespace a real cluster has for node leases and
+// creates every policy file (or those in $POLICY_FILES).
+func install(cfg *rest.Config) error {
+	ctx := context.Background()
 	s := runtime.NewScheme()
 	clientgoscheme.AddToScheme(s)
 	c4v1.AddToScheme(s)
 	c, err := client.New(cfg, client.Options{Scheme: s})
 	if err != nil {
-		t.Fatal(err)
+		return err
+	}
+	// (the API server may have made it already)
+	if err := c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "kube-node-lease"}}); err != nil && !apierrors.IsAlreadyExists(err) {
+		return err
 	}
 	files := []string{"node-writes.yaml", "workjob-owner.yaml", "workjob-controls.yaml", "host-runner.yaml", "lease-mounts.yaml", "submit-grants.yaml", "tracker-people.yaml", "tracker-sync.yaml", "host-pods.yaml", "deployment-bindings.yaml", "parties.yaml", "telemetry-setting.yaml", "reserved-tools.yaml", "../rbac/host-runner.yaml"}
 	if v := os.Getenv("POLICY_FILES"); v != "" {
@@ -67,7 +93,7 @@ func start(t *testing.T) (*rest.Config, client.Client) {
 	for _, f := range files {
 		data, err := os.ReadFile(f)
 		if err != nil {
-			t.Fatal(err)
+			return err
 		}
 		r := utilyaml.NewYAMLOrJSONDecoder(strings.NewReader(string(data)), 4096)
 		for {
@@ -78,13 +104,32 @@ func start(t *testing.T) (*rest.Config, client.Client) {
 			if len(u.Object) == 0 {
 				continue
 			}
-			if err := c.Create(context.Background(), &u); err != nil {
-				t.Fatalf("%s %s: %v", u.GetKind(), u.GetName(), err)
+			if err := c.Create(ctx, &u); err != nil {
+				return fmt.Errorf("%s: %s %s: %w", f, u.GetKind(), u.GetName(), err)
 			}
 		}
 	}
-	return cfg, c
+	envCfg, envClient = cfg, c
+	return nil
 }
+
+// start returns the shared API server's config and an admin client.
+func start(t *testing.T) (*rest.Config, client.Client) {
+	t.Helper()
+	if envSkip != "" {
+		t.Skip(envSkip)
+	}
+	return envCfg, envClient
+}
+
+var names atomic.Int64
+
+// unique returns a suffix no other test, or earlier run of a test, has
+// had on this server: a test names its namespaces and cluster-scoped
+// objects base+"-"+unique(). Names a policy depends on (c4-system, the
+// manager's and node daemon's accounts, kube-node-lease, the telemetry
+// setting, reserved tool names) keep their real values.
+func unique() string { return fmt.Sprintf("t%d", names.Add(1)) }
 
 // eventually retries f until it returns nil: a new policy takes a moment
 // to reach the admission plugin.
@@ -127,14 +172,16 @@ func TestNodeDaemonWrites(t *testing.T) {
 	ctx := context.Background()
 	s := runtime.NewScheme()
 	clientgoscheme.AddToScheme(s)
-	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "saltmarsh"}})
-	admin.Create(ctx, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "node-test"},
+	id := unique()
+	ns := "saltmarsh-" + id
+	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
+	admin.Create(ctx, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "node-test-" + id},
 		Rules: []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get", "patch"}}}})
-	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "node-test"},
-		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "node-test"},
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "node-test-" + id},
+		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "node-test-" + id},
 		Subjects: []rbacv1.Subject{{Kind: "User", Name: nodeSA}}})
 	pod := func(name, node string) *corev1.Pod {
-		p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "saltmarsh", Name: name},
+		p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
 			Spec: corev1.PodSpec{NodeName: node, Containers: []corev1.Container{{Name: "u", Image: "x"}}}}
 		if err := admin.Create(ctx, p); err != nil {
 			t.Fatal(err)
@@ -174,8 +221,10 @@ func TestNodeDaemonWrites(t *testing.T) {
 func TestWorkJobOwnerIsFixed(t *testing.T) {
 	_, c := start(t)
 	ctx := context.Background()
-	c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "saltmarsh"}})
-	j := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "saltmarsh", Name: "sm0140-light-v001",
+	id := unique()
+	ns := "saltmarsh-" + id
+	c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
+	j := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "sm0140-light-v001",
 		Annotations: map[string]string{c4v1.AnnotationOwner: "noor", c4v1.AnnotationSubmittedVia: "hud"}},
 		Spec: c4v1.WorkJobSpec{Class: "render", Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "u", Image: "x"}}}}}}
 	if err := c.Create(ctx, j); err != nil {
@@ -213,7 +262,7 @@ func TestWorkJobOwnerIsFixed(t *testing.T) {
 	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"answers":{"by":"lead"}}}`))); err == nil || !strings.Contains(err.Error(), c4v1.NoLeadMessage) {
 		t.Errorf("a job with no lead said its lead answers it: %v", err)
 	}
-	lj := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "saltmarsh", Name: "session-1",
+	lj := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "session-1",
 		Annotations: map[string]string{c4v1.AnnotationOwner: "noor", c4v1.AnnotationSubmittedVia: "mcp", c4v1.AnnotationLeadSession: "session-1"}},
 		Spec: c4v1.WorkJobSpec{Class: "graph", Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "u", Image: "x"}}}}}}
 	if err := c.Create(ctx, lj); err != nil {
@@ -245,7 +294,7 @@ func TestWorkJobOwnerIsFixed(t *testing.T) {
 	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"tool":{"name":"fetch","network":["studio-api"]}}}`))); err == nil {
 		t.Error("a tool was added to a running job")
 	}
-	tj := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "saltmarsh", Name: "sm0140-fetch-v001",
+	tj := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "sm0140-fetch-v001",
 		Annotations: map[string]string{c4v1.AnnotationOwner: "noor", c4v1.AnnotationSubmittedVia: "hud"}},
 		Spec: c4v1.WorkJobSpec{Class: "render", Tool: &c4v1.WorkTool{Name: "fetch"},
 			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "u", Image: "x"}}}}}}
@@ -262,7 +311,7 @@ func TestWorkJobOwnerIsFixed(t *testing.T) {
 	}
 
 	// a bundle's owner is fixed the same way: its member job carries it
-	b := &c4v1.AgentBundle{ObjectMeta: metav1.ObjectMeta{Namespace: "saltmarsh", Name: "team",
+	b := &c4v1.AgentBundle{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "team",
 		Annotations: map[string]string{c4v1.AnnotationOwner: "noor", c4v1.AnnotationSubmittedVia: "api"}},
 		Spec: c4v1.AgentBundleSpec{Pools: []string{"team"}, Members: []c4v1.AgentMemberSpec{{Name: "lead"}}}}
 	if err := c.Create(ctx, b); err != nil {
@@ -276,7 +325,7 @@ func TestWorkJobOwnerIsFixed(t *testing.T) {
 	}
 
 	// and a lease's creator: its holder is checked against it
-	l := &c4v1.CredentialLease{ObjectMeta: metav1.ObjectMeta{Namespace: "saltmarsh", Name: "mine",
+	l := &c4v1.CredentialLease{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "mine",
 		Annotations: map[string]string{c4v1.AnnotationOwner: "noor"}}, Spec: c4v1.CredentialLeaseSpec{
 		Account: "anthropic-max", Holder: "noor", BoundTo: c4v1.LeaseBinding{Owners: []string{"noor"}},
 		Mode: c4v1.LeaseHolderTransfer, Target: c4v1.LeaseTarget{Pools: []string{"blocks"}},
@@ -294,9 +343,11 @@ func TestWorkJobOwnerIsFixed(t *testing.T) {
 func TestWorkJobSubmittedAsIsFixed(t *testing.T) {
 	_, c := start(t)
 	ctx := context.Background()
-	c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "saltmarsh"}})
+	id := unique()
+	ns := "saltmarsh-" + id
+	c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
 	mk := func(name string, ann map[string]string) *c4v1.WorkJob {
-		j := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "saltmarsh", Name: name, Annotations: ann},
+		j := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, Annotations: ann},
 			Spec: c4v1.WorkJobSpec{Class: "render", Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "u", Image: "x"}}}}}}
 		if err := c.Create(ctx, j); err != nil {
 			t.Fatal(err)
@@ -328,8 +379,10 @@ func TestWorkJobSubmittedAsIsFixed(t *testing.T) {
 func TestSubmitGrantsOnlyFromTheHUD(t *testing.T) {
 	cfg, admin := start(t)
 	ctx := context.Background()
-	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "widgets"}})
-	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin"},
+	id := unique()
+	ns := "widgets-" + id
+	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin-" + id},
 		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
 		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: "c4-manager", Namespace: "c4-system"}}})
 	mc := rest.CopyConfig(cfg)
@@ -342,7 +395,7 @@ func TestSubmitGrantsOnlyFromTheHUD(t *testing.T) {
 		t.Fatal(err)
 	}
 	grant := func(name string) *c4v1.SubmitGrant {
-		return &c4v1.SubmitGrant{ObjectMeta: metav1.ObjectMeta{Namespace: "widgets", Name: name},
+		return &c4v1.SubmitGrant{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
 			Spec: c4v1.SubmitGrantSpec{Person: "noor", Tracker: "github", Until: metav1.NewTime(time.Now().Add(time.Hour))}}
 	}
 	enforced(t, "c4-submit-grants", func(try int) error {
@@ -363,7 +416,7 @@ func TestSubmitGrantsOnlyFromTheHUD(t *testing.T) {
 	}
 	// A grant goes with its namespace, or the namespace could never be
 	// deleted: once it is terminating, its grants may be deleted.
-	if err := admin.Delete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "widgets"}}); err != nil {
+	if err := admin.Delete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
 		t.Fatal(err)
 	}
 	eventually(t, "a grant deleted with its namespace", func() error { return admin.Delete(ctx, g) })
@@ -380,10 +433,16 @@ var errNotYet error = notYet{}
 func TestHostRunnerWrites(t *testing.T) {
 	cfg, admin := start(t)
 	ctx := context.Background()
+	id := unique()
+	ns := "saltmarsh-" + id
+	// Nodes and Leases are cluster-wide (Leases in kube-node-lease), so the
+	// runner's machine and the other node have names of their own: the
+	// policies take the host from the account's name, whatever it is.
+	host, w1 := "laptop-"+id, "w1-"+id
 	s := runtime.NewScheme()
 	clientgoscheme.AddToScheme(s)
-	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "saltmarsh"}})
-	admin.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "w1"}})
+	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
+	admin.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: w1}})
 	as := func(host string) client.Client {
 		hc := rest.CopyConfig(cfg)
 		hc.Impersonate = rest.ImpersonationConfig{UserName: "system:serviceaccount:c4-hosts:" + host,
@@ -394,33 +453,33 @@ func TestHostRunnerWrites(t *testing.T) {
 		}
 		return c
 	}
-	laptop := as("laptop-1")
+	laptop := as(host)
 	taint := []corev1.Taint{{Key: "c4.avalanche.io/host-runner", Value: "true", Effect: corev1.TaintEffectNoSchedule}}
 	node := func(name string, taints []corev1.Taint) *corev1.Node {
 		return &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{"c4.avalanche.io/pool": "agent",
 			"c4.avalanche.io/host": name}}, Spec: corev1.NodeSpec{Taints: taints}}
 	}
 	enforced(t, "c4-host-runner-nodes", func(int) error {
-		err := laptop.Create(ctx, node("someone-else", taint))
+		err := laptop.Create(ctx, node("someone-else-"+id, taint))
 		if err == nil {
-			admin.Delete(ctx, node("someone-else", nil))
+			admin.Delete(ctx, node("someone-else-"+id, nil))
 		}
 		return err
 	})
-	if err := laptop.Create(ctx, node("laptop-1", nil)); err == nil {
+	if err := laptop.Create(ctx, node(host, nil)); err == nil {
 		t.Fatal("a Node without the host-runner taint was created")
 	}
-	posing := node("laptop-1", taint)
+	posing := node(host, taint)
 	posing.Labels["c4.avalanche.io/host"] = "workstation-2"
 	if err := laptop.Create(ctx, posing); err == nil || !strings.Contains(err.Error(), "its own name as its c4.avalanche.io/host label") {
 		t.Fatalf("a Node under another machine's host label: %v", err)
 	}
-	owned := node("laptop-1", taint)
+	owned := node(host, taint)
 	owned.Annotations = map[string]string{c4v1.AnnotationNodeOwners: "noor"}
 	if err := laptop.Create(ctx, owned); err == nil {
 		t.Fatal("a runner named its own owners")
 	}
-	mine := node("laptop-1", taint)
+	mine := node(host, taint)
 	if err := laptop.Create(ctx, mine); err != nil {
 		t.Fatalf("its own Node: %v", err)
 	}
@@ -442,12 +501,12 @@ func TestHostRunnerWrites(t *testing.T) {
 	if err := patch(laptop, mine, `{"spec":{"taints":null}}`); err == nil {
 		t.Error("the runner removed its taint")
 	}
-	status := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "laptop-1"}}
+	status := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: host}}
 	if err := laptop.Status().Patch(ctx, status, client.RawPatch(types.MergePatchType,
 		[]byte(`{"status":{"conditions":[{"type":"Ready","status":"True","reason":"HostRunnerReady"}]}}`))); err != nil {
 		t.Errorf("its own status: %v", err)
 	}
-	other := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "w1"}}
+	other := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: w1}}
 	if err := laptop.Status().Patch(ctx, other, client.RawPatch(types.MergePatchType,
 		[]byte(`{"status":{"conditions":[{"type":"Ready","status":"False","reason":"x"}]}}`))); err == nil {
 		t.Error("the runner wrote another Node's status")
@@ -455,14 +514,14 @@ func TestHostRunnerWrites(t *testing.T) {
 
 	// pods: its own, bound to laptop-1, and one on w1
 	pod := func(name, node string) *corev1.Pod {
-		p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "saltmarsh", Name: name},
+		p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
 			Spec: corev1.PodSpec{NodeName: node, Containers: []corev1.Container{{Name: "m", Image: "x"}}}}
 		if err := admin.Create(ctx, p); err != nil {
 			t.Fatal(err)
 		}
 		return p
 	}
-	onMe, onW1, unbound := pod("member-0", "laptop-1"), pod("render-3", "w1"), pod("member-1", "")
+	onMe, onW1, unbound := pod("member-0", host), pod("render-3", w1), pod("member-1", "")
 	// the pods policy (which also covers Leases) comes into force apart
 	// from the Node one
 	enforced(t, "c4-host-runner-pods", func(try int) error {
@@ -493,15 +552,15 @@ func TestHostRunnerWrites(t *testing.T) {
 	}
 	bind := func(target string) error {
 		return laptop.SubResource("binding").Create(ctx, unbound, &corev1.Binding{
-			ObjectMeta: metav1.ObjectMeta{Namespace: "saltmarsh", Name: unbound.Name},
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: unbound.Name},
 			Target:     corev1.ObjectReference{Kind: "Node", Name: target}})
 	}
-	if err := bind("w1"); err == nil {
+	if err := bind(w1); err == nil {
 		t.Error("the runner bound a pod to another node")
 	}
 	// the queue creates host pods bound: a runner binds nothing, not even
 	// to itself
-	if err := bind("laptop-1"); !apierrors.IsForbidden(err) {
+	if err := bind(host); !apierrors.IsForbidden(err) {
 		t.Errorf("binding to itself: %v", err)
 	}
 
@@ -525,7 +584,7 @@ func TestHostRunnerWrites(t *testing.T) {
 	if err := del(onMe); err == nil {
 		t.Error("the runner deleted its pod the farm is not deleting")
 	}
-	ownPod, otherPod := held("member-2", "laptop-1"), held("render-4", "w1")
+	ownPod, otherPod := held("member-2", host), held("render-4", w1)
 	for _, p := range []*corev1.Pod{ownPod, otherPod} {
 		if err := admin.Delete(ctx, p); err != nil {
 			t.Fatal(err)
@@ -558,13 +617,13 @@ func TestHostRunnerWrites(t *testing.T) {
 	ls := runtime.NewScheme()
 	coordv1.AddToScheme(ls)
 	hc := rest.CopyConfig(cfg)
-	hc.Impersonate = rest.ImpersonationConfig{UserName: "system:serviceaccount:c4-hosts:laptop-1",
+	hc.Impersonate = rest.ImpersonationConfig{UserName: "system:serviceaccount:c4-hosts:" + host,
 		Groups: []string{"system:serviceaccounts", "system:serviceaccounts:c4-hosts", "system:authenticated"}}
 	lc, _ := client.New(hc, client.Options{Scheme: ls})
-	if err := lc.Create(ctx, lease("laptop-1")); err != nil {
+	if err := lc.Create(ctx, lease(host)); err != nil {
 		t.Errorf("its own Lease: %v", err)
 	}
-	if err := lc.Create(ctx, lease("w1")); err == nil {
+	if err := lc.Create(ctx, lease(w1)); err == nil {
 		t.Error("the runner made another node's Lease")
 	}
 }
@@ -575,9 +634,11 @@ func TestHostRunnerWrites(t *testing.T) {
 func TestLeaseMounts(t *testing.T) {
 	cfg, admin := start(t)
 	ctx := context.Background()
-	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "practice"}})
+	id := unique()
+	ns := "practice-" + id
+	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
 	// the manager's account, with the rights to create pods
-	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-pods"},
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-pods-" + id},
 		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
 		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: "c4-manager", Namespace: "c4-system"}}})
 	mc := rest.CopyConfig(cfg)
@@ -590,7 +651,7 @@ func TestLeaseMounts(t *testing.T) {
 	n := 0
 	pod := func(edit func(*corev1.Pod)) *corev1.Pod {
 		n++
-		p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "practice", Name: fmt.Sprintf("unit-%d", n)},
+		p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: fmt.Sprintf("unit-%d", n)},
 			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "block", Image: "x"}}}}
 		edit(p)
 		return p
@@ -639,8 +700,10 @@ func TestLeaseMounts(t *testing.T) {
 func TestOnlyTheQueueMakesUnitPods(t *testing.T) {
 	cfg, admin := start(t)
 	ctx := context.Background()
-	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "agents"}})
-	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-pods"},
+	id := unique()
+	ns := "agents-" + id
+	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-pods-" + id},
 		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
 		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: "c4-manager", Namespace: "c4-system"}}})
 	mc := rest.CopyConfig(cfg)
@@ -654,7 +717,7 @@ func TestOnlyTheQueueMakesUnitPods(t *testing.T) {
 	ref := []metav1.OwnerReference{{APIVersion: c4v1.GroupVersion.String(), Kind: "WorkJob", Name: "team",
 		UID: "6b1f0d4e-0000-4000-8000-000000000001", Controller: &yes}}
 	pod := func(name string, refs []metav1.OwnerReference) *corev1.Pod {
-		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "agents", Name: name, OwnerReferences: refs},
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, OwnerReferences: refs},
 			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "member", Image: "c4-agent"}}}}
 	}
 	enforced(t, "c4-host-pods", func(try int) error { return admin.Create(ctx, pod(fmt.Sprintf("forged-%d", try), ref)) })
@@ -687,8 +750,10 @@ func TestOnlyTheQueueMakesUnitPods(t *testing.T) {
 func TestControlsOnlyFromTheHUD(t *testing.T) {
 	cfg, admin := start(t)
 	ctx := context.Background()
-	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "saltmarsh"}})
-	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin"},
+	id := unique()
+	ns := "saltmarsh-" + id
+	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin-" + id},
 		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
 		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: "c4-manager", Namespace: "c4-system"}}})
 	mc := rest.CopyConfig(cfg)
@@ -701,7 +766,7 @@ func TestControlsOnlyFromTheHUD(t *testing.T) {
 		t.Fatal(err)
 	}
 	mk := func(name string, anno map[string]string) *c4v1.WorkJob {
-		return &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "saltmarsh", Name: name, Annotations: anno},
+		return &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, Annotations: anno},
 			Spec: c4v1.WorkJobSpec{Class: "render", Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "u", Image: "x"}}}}}}
 	}
 	j := mk("sm0140-light-v001", nil)
@@ -775,8 +840,10 @@ func c4Patch(ctx context.Context, c client.Client, o client.Object, body string)
 func TestTrackerPeopleOnlyFromTheHUD(t *testing.T) {
 	cfg, admin := start(t)
 	ctx := context.Background()
-	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "widgets"}})
-	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin"},
+	id := unique()
+	ns := "widgets-" + id
+	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin-" + id},
 		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
 		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: "c4-manager", Namespace: "c4-system"}}})
 	mc := rest.CopyConfig(cfg)
@@ -789,7 +856,7 @@ func TestTrackerPeopleOnlyFromTheHUD(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry := func(name, person string) *c4v1.TrackerPerson {
-		return &c4v1.TrackerPerson{ObjectMeta: metav1.ObjectMeta{Namespace: "widgets", Name: name},
+		return &c4v1.TrackerPerson{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
 			Spec: c4v1.TrackerPersonSpec{Tracker: "github", Login: "dana", Person: person,
 				Offer:    c4v1.TrackerPersonOffer{From: "spec.people", Generation: 1},
 				Accepted: c4v1.TrackerPersonAct{By: person, At: metav1.Now()}}}
@@ -805,7 +872,7 @@ func TestTrackerPeopleOnlyFromTheHUD(t *testing.T) {
 	if err := admin.Delete(ctx, e); err == nil {
 		t.Error("an entry was erased directly")
 	}
-	if err := admin.Delete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "widgets"}}); err != nil {
+	if err := admin.Delete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
 		t.Fatal(err)
 	}
 	eventually(t, "an entry deleted with its namespace", func() error { return admin.Delete(ctx, e) })
@@ -817,7 +884,8 @@ func TestTrackerPeopleOnlyFromTheHUD(t *testing.T) {
 func TestBindingsOnlyFromTheHUD(t *testing.T) {
 	cfg, admin := start(t)
 	ctx := context.Background()
-	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin"},
+	id := unique()
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin-" + id},
 		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
 		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: "c4-manager", Namespace: "c4-system"}}})
 	mc := rest.CopyConfig(cfg)
@@ -834,9 +902,17 @@ func TestBindingsOnlyFromTheHUD(t *testing.T) {
 			Owner: owner, To: "laptop-1/*", For: []string{"task/v1"}, Start: metav1.Now(), By: "noor"}}
 	}
 	enforced(t, "c4-deployment-bindings", func(try int) error {
-		return admin.Create(ctx, mk(fmt.Sprintf("probe-%d", try), "mallory"))
+		return admin.Create(ctx, mk(fmt.Sprintf("probe-%s-%d", id, try), "mallory"))
 	})
 	b := mk(c4v1.FarmBindingName, "noor")
+	// The farm binding keeps its real name, of which there is one per farm,
+	// so it goes when the test ends (only the HUD may delete it), and a
+	// later run (-count) binds the farm again.
+	t.Cleanup(func() {
+		if err := hud.Delete(ctx, mk(c4v1.FarmBindingName, "")); err != nil && !apierrors.IsNotFound(err) {
+			t.Errorf("removing the farm binding: %v", err)
+		}
+	})
 	if err := hud.Create(ctx, b); err != nil {
 		t.Fatalf("the HUD binds the farm: %v", err)
 	}
@@ -864,14 +940,14 @@ func TestBindingsOnlyFromTheHUD(t *testing.T) {
 
 	// A binding for one deployment names exactly one; its spec never
 	// changes, and its early end is set once, never changed or taken back.
-	for _, to := range []string{"laptop-1/node", "laptop-1/node/", "laptop-1/sa/show-a/x", "laptop-1/component/issuer", "laptop-1/node/Laptop"} {
-		bad := mk("bad-"+fmt.Sprint(len(to)), "noor")
+	for i, to := range []string{"laptop-1/node", "laptop-1/node/", "laptop-1/sa/show-a/x", "laptop-1/component/issuer", "laptop-1/node/Laptop"} {
+		bad := mk(fmt.Sprintf("bad-%s-%d", id, i), "noor")
 		bad.Spec.To = to
 		if err := hud.Create(ctx, bad); err == nil {
 			t.Errorf("a binding to %q", to)
 		}
 	}
-	node := mk("node-laptop-1", "noor")
+	node := mk("node-laptop-1-"+id, "noor")
 	node.Spec.To = "laptop-1/node/laptop-1"
 	if err := hud.Create(ctx, node); err != nil {
 		t.Fatalf("the HUD binds a node: %v", err)
@@ -899,7 +975,8 @@ func TestBindingsOnlyFromTheHUD(t *testing.T) {
 func TestPartiesOnlyFromTheHUD(t *testing.T) {
 	cfg, admin := start(t)
 	ctx := context.Background()
-	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin"},
+	id := unique()
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin-" + id},
 		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
 		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: "c4-manager", Namespace: "c4-system"}}})
 	mc := rest.CopyConfig(cfg)
@@ -916,9 +993,9 @@ func TestPartiesOnlyFromTheHUD(t *testing.T) {
 			Made: c4v1.PartyAct{By: "ines", At: metav1.NewTime(time.Now().Truncate(time.Second))}}}
 	}
 	enforced(t, "c4-parties", func(try int) error {
-		return admin.Create(ctx, mk(fmt.Sprintf("probe-%d", try), c4v1.PartyOrganisation))
+		return admin.Create(ctx, mk(fmt.Sprintf("probe-%s-%d", id, try), c4v1.PartyOrganisation))
 	})
-	p := mk("kestrel", c4v1.PartyOrganisation)
+	p := mk("kestrel-"+id, c4v1.PartyOrganisation)
 	if err := hud.Create(ctx, p); err != nil {
 		t.Fatalf("the HUD makes a party: %v", err)
 	}
@@ -957,8 +1034,9 @@ func TestPartiesOnlyFromTheHUD(t *testing.T) {
 func TestTelemetrySettingOnlyFromTheManager(t *testing.T) {
 	cfg, admin := start(t)
 	ctx := context.Background()
+	id := unique()
 	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "c4-system"}})
-	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin"},
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin-" + id},
 		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
 		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: "c4-manager", Namespace: "c4-system"}}})
 	mc := rest.CopyConfig(cfg)
@@ -970,6 +1048,9 @@ func TestTelemetrySettingOnlyFromTheManager(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The policy matches the setting by its real name in c4-system, so it
+	// keeps both; the manager's create below first removes one an earlier
+	// run (-count) left.
 	setting := func(tier string) *corev1.ConfigMap {
 		return &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "c4-system", Name: "c4-telemetry-setting"}, Data: map[string]string{"tier": tier}}
 	}
@@ -985,7 +1066,8 @@ func TestTelemetrySettingOnlyFromTheManager(t *testing.T) {
 	})
 	cm := setting("a")
 	eventually(t, "the manager's setting", func() error {
-		// a probe the policy came into force under may still be there
+		// a probe the policy came into force under, or an earlier run's
+		// setting, may still be there
 		if err := manager.Delete(ctx, setting("")); err != nil && !apierrors.IsNotFound(err) {
 			return err
 		}
@@ -1000,7 +1082,7 @@ func TestTelemetrySettingOnlyFromTheManager(t *testing.T) {
 	if err := manager.Patch(ctx, cm, client.RawPatch(types.MergePatchType, []byte(`{"data":{"tier":"b"}}`))); err != nil {
 		t.Errorf("the manager could not change the tier: %v", err)
 	}
-	other := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "c4-system", Name: "c4-other"}, Data: map[string]string{"x": "y"}}
+	other := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "c4-system", Name: "c4-other-" + id}, Data: map[string]string{"x": "y"}}
 	if err := admin.Create(ctx, other); err != nil {
 		t.Errorf("another ConfigMap was refused: %v", err)
 	}
@@ -1011,9 +1093,11 @@ func TestTelemetrySettingOnlyFromTheManager(t *testing.T) {
 func TestReservedToolNames(t *testing.T) {
 	cfg, admin := start(t)
 	ctx := context.Background()
-	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "saltmarsh"}})
+	id := unique()
+	ns := "saltmarsh-" + id
+	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
 	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "c4-system"}})
-	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin"},
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin-" + id},
 		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
 		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: "c4-manager", Namespace: "c4-system"}}})
 	mc := rest.CopyConfig(cfg)
@@ -1029,19 +1113,27 @@ func TestReservedToolNames(t *testing.T) {
 		return &c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}}
 	}
 	enforced(t, "c4-reserved-tools", func(try int) error {
-		return admin.Create(ctx, tool("saltmarsh", c4v1.NoneTool))
+		return admin.Create(ctx, tool(ns, c4v1.NoneTool))
 	})
 	for _, name := range c4v1.FarmTools {
-		for _, ns := range []string{"saltmarsh", "c4-system"} {
-			err := admin.Create(ctx, tool(ns, name))
+		for _, in := range []string{ns, "c4-system"} {
+			err := admin.Create(ctx, tool(in, name))
 			if err == nil || !strings.Contains(err.Error(), name+" is one of the farm's own tools") {
-				t.Errorf("%s/%s by an admin: %v", ns, name, err)
+				t.Errorf("%s/%s by an admin: %v", in, name, err)
 			}
 		}
 	}
-	if err := admin.Create(ctx, tool("saltmarsh", "render")); err != nil {
+	if err := admin.Create(ctx, tool(ns, "render")); err != nil {
 		t.Errorf("another name: %v", err)
 	}
+	// The farm's none keeps its real name in its real namespace, so it
+	// goes when the test ends (the policy holds creates and updates, not
+	// deletes), and a later run (-count) makes it again.
+	t.Cleanup(func() {
+		if err := admin.Delete(ctx, tool("c4-system", c4v1.NoneTool)); err != nil && !apierrors.IsNotFound(err) {
+			t.Errorf("removing the farm's none: %v", err)
+		}
+	})
 	if err := manager.Create(ctx, tool("c4-system", c4v1.NoneTool)); err != nil {
 		t.Errorf("the manager's none: %v", err)
 	}
@@ -1074,13 +1166,15 @@ func TestReservedToolNamesMatchTheFarm(t *testing.T) {
 func TestTrackerSyncOnlyAtInstall(t *testing.T) {
 	cfg, admin := start(t)
 	ctx := context.Background()
-	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "widgets"}})
-	admin.Create(ctx, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "tracker-editor"},
+	id := unique()
+	ns := "widgets-" + id
+	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
+	admin.Create(ctx, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "tracker-editor-" + id},
 		Rules: []rbacv1.PolicyRule{{APIGroups: []string{"c4.avalanche.io"}, Resources: []string{"trackers"}, Verbs: []string{"get", "create", "update", "patch"}}}})
-	admin.Create(ctx, &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Namespace: "widgets", Name: "lee-trackers"},
-		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "tracker-editor"},
+	admin.Create(ctx, &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "lee-trackers"},
+		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "tracker-editor-" + id},
 		Subjects: []rbacv1.Subject{{Kind: "User", Name: "lee"}}})
-	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin"},
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin-" + id},
 		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
 		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: "c4-manager", Namespace: "c4-system"}}})
 	as := func(user string, groups ...string) client.Client {
@@ -1098,7 +1192,7 @@ func TestTrackerSyncOnlyAtInstall(t *testing.T) {
 	manager := as("system:serviceaccount:c4-system:c4-manager", "system:serviceaccounts", "system:serviceaccounts:c4-system")
 	sync := &c4v1.TrackerSync{Namespace: "c4-system", ServiceAccount: "c4-sync"}
 	tracker := func(name string, s *c4v1.TrackerSync) *c4v1.Tracker {
-		return &c4v1.Tracker{ObjectMeta: metav1.ObjectMeta{Namespace: "widgets", Name: name},
+		return &c4v1.Tracker{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
 			Spec: c4v1.TrackerSpec{Kind: "github", Endpoint: "https://api.github.example", Credential: c4v1.TrackerCredential{Secret: c4v1.TrackerSecretKey{Name: "gh", Key: "token"}}, Sync: s}}
 	}
 	enforced(t, "c4-tracker-sync", func(try int) error {
@@ -1111,14 +1205,14 @@ func TestTrackerSyncOnlyAtInstall(t *testing.T) {
 	if err := lee.Patch(ctx, plain, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"people":{"dana":"dana"}}}`))); err != nil {
 		t.Errorf("a project editor changes the people map: %v", err)
 	}
-	if err := lee.Patch(ctx, plain, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"sync":{"namespace":"widgets","serviceAccount":"mine"}}}`))); err == nil {
+	if err := lee.Patch(ctx, plain, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"sync":{"namespace":"`+ns+`","serviceAccount":"mine"}}}`))); err == nil {
 		t.Error("a project editor named a sync")
 	}
 	installed := tracker("flow", sync)
 	if err := admin.Create(ctx, installed); err != nil {
 		t.Fatalf("a cluster admin names the sync at install: %v", err)
 	}
-	if err := lee.Patch(ctx, installed, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"sync":{"namespace":"widgets","serviceAccount":"mine"}}}`))); err == nil {
+	if err := lee.Patch(ctx, installed, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"sync":{"namespace":"`+ns+`","serviceAccount":"mine"}}}`))); err == nil {
 		t.Error("a project editor changed the sync")
 	}
 	if err := lee.Patch(ctx, installed, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"sync":null}}`))); err == nil {
@@ -1129,14 +1223,14 @@ func TestTrackerSyncOnlyAtInstall(t *testing.T) {
 	}
 	// a cluster admin by a binding, not system:masters (kind's and
 	// kubeadm's admin, kubeadm:cluster-admins)
-	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "kubeadm-admins"},
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "kubeadm-admins-" + id},
 		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
 		Subjects: []rbacv1.Subject{{Kind: "Group", Name: "kubeadm:cluster-admins"}}})
 	installer := as("kubernetes-admin", "kubeadm:cluster-admins")
 	eventually(t, "an installer bound to cluster-admin names a sync", func() error {
 		return installer.Create(ctx, tracker("mlflow", sync))
 	})
-	if err := manager.Create(ctx, tracker("kitsu", &c4v1.TrackerSync{Namespace: "widgets", ServiceAccount: "kitsu-sync"})); err != nil {
+	if err := manager.Create(ctx, tracker("kitsu", &c4v1.TrackerSync{Namespace: ns, ServiceAccount: "kitsu-sync"})); err != nil {
 		t.Errorf("the manager names a sync in the Tracker's namespace: %v", err)
 	}
 	if err := admin.Create(ctx, tracker("linear", &c4v1.TrackerSync{Namespace: "show-b", ServiceAccount: "c4-sync"})); err == nil ||
