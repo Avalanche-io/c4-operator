@@ -58,9 +58,12 @@ type fixture struct {
 	views, changesets map[string]c4.ID
 }
 
-// renamedByPin are the fixture's views c4 #107 gives new IDs: a
-// null-sized entry two or more directories down.
-var renamedByPin = []string{"chain1", "chain2", "link-depth2", "mixed-deep", "null-depth2", "tool", "toolout"}
+// renamed are the fixture's views re-identified to new IDs: those c4 #107
+// changes (a null-sized entry two or more directories down), and those
+// holding a link, which the fixture wrote with a null mode and a view now
+// records lrwxrwxrwx (LinkMode). link-depth1 is renamed for its link
+// alone; only plain keeps its ID.
+var renamed = []string{"chain1", "chain2", "link-depth1", "link-depth2", "mixed-deep", "null-depth2", "tool", "toolout"}
 
 func loadFixture(t *testing.T) fixture { return loadFixtureDir(t, "pin19c9") }
 
@@ -154,12 +157,12 @@ func TestASurveyRenamesTheViewsAndOnlyTheViews(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	renamed := p.Renames()
-	if len(renamed) != len(renamedByPin) {
-		t.Fatalf("%d renamed, want %d", len(renamed), len(renamedByPin))
+	got := p.Renames()
+	if len(got) != len(renamed) {
+		t.Fatalf("%d renamed, want %d", len(got), len(renamed))
 	}
-	for _, name := range renamedByPin {
-		if _, ok := renamed[f.views[name]]; !ok {
+	for _, name := range renamed {
+		if _, ok := got[f.views[name]]; !ok {
 			t.Errorf("%s not renamed", name)
 		}
 	}

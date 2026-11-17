@@ -464,9 +464,12 @@ func TestConsumedCaptureRefusesWhatCannotBeRead(t *testing.T) {
 }
 
 // A capture whose output holds what the c4m library cannot write in a form
-// it reads back (here a symlink whose target starts with "c4") fails,
-// naming the entry, and stores nothing: no record or changeset its readers
-// could not read.
+// it reads back fails, naming the entry, and stores nothing: no record or
+// changeset its readers could not read. No entry is known that the library
+// does not read back (a link to a C4 ID was one until c4 #92, and a
+// null-mode link to host:path until views recorded a link's type), so the
+// disagreement is injected (view.MisreadForTest). Without it the same
+// capture is taken, its link to host:path read back as that link.
 func TestCaptureRefusesWhatDoesNotReadBack(t *testing.T) {
 	f := newLiveFixture(t)
 	upper := filepath.Join(f.root, "upper")
@@ -474,8 +477,6 @@ func TestCaptureRefusesWhatDoesNotReadBack(t *testing.T) {
 	f.sink.mu.Lock()
 	before := len(f.sink.objs)
 	f.sink.mu.Unlock()
-	// A link target c4's library does not read back as written (a C4 ID
-	// did until c4 #92; a colon still does not).
 	target := "host:path"
 	if err := os.Symlink(target, filepath.Join(upper, "bin", "latest")); err != nil {
 		t.Fatal(err)
@@ -490,7 +491,9 @@ func TestCaptureRefusesWhatDoesNotReadBack(t *testing.T) {
 		}
 		return out, err
 	}
+	restore := view.MisreadForTest("latest")
 	_, err := Run(context.Background(), in)
+	restore()
 	var nr *view.NotReadBack
 	if !errors.As(err, &nr) || nr.Entry != "bin/latest" {
 		t.Fatalf("the capture: %v", err)
@@ -500,5 +503,16 @@ func TestCaptureRefusesWhatDoesNotReadBack(t *testing.T) {
 	f.sink.mu.Unlock()
 	if after != before {
 		t.Errorf("the store took %d objects from a refused capture", after-before)
+	}
+	res, err := Run(context.Background(), in)
+	if err != nil {
+		t.Fatalf("the capture of a link to %s: %v", target, err)
+	}
+	v, err := view.Load(context.Background(), res.Output, in.Records, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := v.Root.Dir("bin/").Files["latest"]; e == nil || !view.IsLink(e) || e.Target != target || e.Mode != view.LinkMode {
+		t.Fatalf("the output's entry for the link: %+v", e)
 	}
 }

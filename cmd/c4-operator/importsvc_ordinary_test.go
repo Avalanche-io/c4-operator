@@ -729,6 +729,12 @@ func (o *ordinary) refs() map[string]map[string]string {
 // stays in the branch's first-parent history, so each later push of the
 // branch is refused the same way until the operator is on a c4m library
 // that reads it; other branches go on.
+//
+// No entry is known that the library does not read back (a null-mode link
+// to host:path was one until views recorded a link's type), so the
+// disagreement is injected (view.MisreadForTest), and taken away again to
+// stand for a library that reads the commit: the branch then imports, its
+// link to host:path read back as that link.
 func TestACommitTheLibraryCannotReadBackIsRefused(t *testing.T) {
 	o := newOrdinary(t, 0)
 	o.commit(map[string]string{"a.txt": "a\n"})
@@ -742,6 +748,8 @@ func TestACommitTheLibraryCannotReadBackIsRefused(t *testing.T) {
 	}
 	o.git(o.work, "add", "-A")
 	o.git(o.work, "commit", "-q", "-m", "a link whose target the c4m library does not read back")
+	restore := view.MisreadForTest("link")
+	defer restore()
 	for i := range 2 {
 		code, body := o.push("main")
 		if code == http.StatusOK || !strings.Contains(body, `entry "link"`) || !strings.Contains(body, "so it is not stored") {
@@ -760,11 +768,37 @@ func TestACommitTheLibraryCannotReadBackIsRefused(t *testing.T) {
 	o.git(o.work, "checkout", "-q", "dev")
 	o.commit(map[string]string{"dev.txt": "dev\n"})
 	o.ok("another branch", "dev")
+
+	// On a library that reads the commit, the branch imports, and its
+	// view holds the link to host:path as a link.
+	restore()
+	o.git(o.work, "checkout", "-q", "main")
+	o.ok("main once the library reads it", "main")
+	rec := httptest.NewRecorder()
+	o.h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/chains/refs/heads/main", nil))
+	c, err := view.ReadChain(rec.Body.Bytes())
+	if err != nil {
+		t.Fatalf("the chain of main: %d %v", rec.Code, err)
+	}
+	heads, err := c.Verify(context.Background(), o.svc.base.Records)
+	if err != nil || len(heads) == 0 {
+		t.Fatalf("the chain of main: %v", err)
+	}
+	v, err := view.Load(context.Background(), heads[len(heads)-1], o.svc.base.Records, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := v.Root.Files["link"]; e == nil || !view.IsLink(e) || e.Target != "host:path" || e.Mode != view.LinkMode {
+		t.Fatalf("main's view holds the link as %+v", e)
+	}
 }
 
 // An ingest of a tree whose description the c4m library does not read back
 // is refused before anything is uploaded: the store is left as it was, and
-// the error names the entry. The same tree without that link is ingested.
+// the error names the entry. The disagreement is injected
+// (view.MisreadForTest): no entry is known that the library does not read
+// back, a null-mode link to host:path having been one until views recorded
+// a link's type. Without it the same tree, link and all, is ingested.
 func TestAnIngestThatDoesNotReadBackStoresNothing(t *testing.T) {
 	tree, store := t.TempDir(), t.TempDir()
 	if err := os.WriteFile(filepath.Join(tree, "f"), []byte("f\n"), 0o644); err != nil {
@@ -787,14 +821,15 @@ func TestAnIngestThatDoesNotReadBackStoresNothing(t *testing.T) {
 	devnull, _ := os.Open(os.DevNull)
 	os.Stdout = devnull
 	defer func() { os.Stdout = stdout; devnull.Close() }()
+	restore := view.MisreadForTest("latest")
 	err := runIngest([]string{"-q", "-shard", "s0=" + store, tree})
+	restore()
 	var nr *view.NotReadBack
 	if !errors.As(err, &nr) || nr.Entry != "latest" || count() != 0 {
 		t.Fatalf("the ingest: %v, and the store holds %d objects", err, count())
 	}
-	os.Remove(filepath.Join(tree, "latest"))
 	if err := runIngest([]string{"-q", "-shard", "s0=" + store, tree}); err != nil || count() == 0 {
-		t.Fatalf("the ingest without the link: %v, %d objects", err, count())
+		t.Fatalf("the ingest of a link to host:path: %v, %d objects", err, count())
 	}
 }
 

@@ -27,6 +27,46 @@ func (e *NotReadBack) Error() string {
 	return fmt.Sprintf("the c4m library writes the entry %q of a %s in a form it does not read back as written (%s), so it is not stored", e.Entry, e.What, e.Reason)
 }
 
+// readBack is applied to every entry the checks below read back, once the
+// library has decoded it and the projection has taken it. It is the
+// identity. It exists only so that a test can stand in for a decoder that
+// disagrees with the encoder, by altering one entry: the c4m library this
+// package is built with has no entry known not to read back (a null-mode
+// link to host:path was one until views kept a link's type). Nothing
+// outside the tests sets it.
+var readBack = func(e *c4m.Entry) *c4m.Entry { return e }
+
+// MisreadForTest makes the read-back checks read every entry named name
+// with its link target altered, until restore is called: a decoder that
+// disagrees with the encoder, for the tests of this package and of those
+// that store what it writes (capture, ingest, the git import), which must
+// still show they refuse such an entry and store nothing. It is for tests
+// only: nothing else calls it, and it is not safe while checks run.
+func MisreadForTest(name string) (restore func()) {
+	prev := readBack
+	readBack = func(e *c4m.Entry) *c4m.Entry {
+		if e.Name != name {
+			return e
+		}
+		cp := *e
+		cp.Target += "~misread"
+		return &cp
+	}
+	return func() { readBack = prev }
+}
+
+// readBackRecord is ParseRecord as the checks read a record.
+func readBackRecord(data []byte) ([]*c4m.Entry, error) {
+	back, err := ParseRecord(data)
+	if err != nil {
+		return nil, err
+	}
+	for i, e := range back {
+		back[i] = readBack(e)
+	}
+	return back, nil
+}
+
 // checkRecord reads a record as every reader does (ParseRecord) and
 // requires it to write again to the same bytes. dir is the record's
 // directory in its view ("" for the root, else ending in "/").
@@ -35,7 +75,7 @@ func checkRecord(data []byte, entries []*c4m.Entry, dir string) error {
 	for i, e := range entries {
 		paths[i] = dir + e.Name
 	}
-	back, err := ParseRecord(data)
+	back, err := readBackRecord(data)
 	if err != nil {
 		return notReadBack("record", entries, paths, err.Error())
 	}
@@ -74,7 +114,7 @@ func checkChangeset(parent c4.ID, data []byte, entries []*c4m.Entry) error {
 	}
 	read := c4m.NewManifest()
 	for _, e := range c.Sections[0].Patch.Entries {
-		read.Entries = append(read.Entries, Project(e))
+		read.Entries = append(read.Entries, readBack(Project(e)))
 	}
 	again, err := EncodeChangeset(c.Base, read)
 	if err != nil {
@@ -96,7 +136,7 @@ func notReadBack(what string, entries []*c4m.Entry, paths []string, reason strin
 		cp := *e
 		cp.Depth = 0
 		one := listingOf([]*c4m.Entry{&cp}).Canonical()
-		back, err := ParseRecord([]byte(one))
+		back, err := readBackRecord([]byte(one))
 		if err != nil {
 			return &NotReadBack{What: what, Entry: paths[i], Reason: fmt.Sprintf("written as %q, read back: %v", strings.TrimSpace(one), err)}
 		}

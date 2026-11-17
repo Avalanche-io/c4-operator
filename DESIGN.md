@@ -523,14 +523,27 @@ makes its records before it uploads anything, so a refused tree leaves the
 store as it was; a git import uploads a commit's file contents as it reads
 them, so those of a refused commit stay in the store, named by nothing.
 
-The c4m library the operator pins writes a symlink whose target starts with
-`c4`, under the null mode every view gives a link, as a line it cannot parse
-(it takes the target for the C4 ID field), and reads a target that looks
-like a location (`host:path`, `C:foo`) back as a flow link with no target.
-Such a git commit is refused, and each later push of its branch with it,
-until the operator is on a c4m library with the decoder fixed (c4 PR #92);
-other branches go on; a capture or an ingest holding such a link is refused
-too. A changeset stored before the guard that does not read is an error
+A view records a symlink with its type, `lrwxrwxrwx` (`view.LinkMode`), and
+never with a null mode (a core ruling, 2026-11-13: a writer never nulls a
+symlink's `l`). Under a null mode `->` is open: a target that looks like a
+location (`host:path`, `C:foo`) reads back as a flow link with no target,
+and the guard refused every such commit, capture and ingest; recorded as a
+link, every target reads back, and is stored. *Updated 2026-11-17:* this
+paragraph first said such links are refused until the library is fixed;
+the fix is on the writer's side, and the guard's tests now trigger it with
+an injected disagreement (`view.MisreadForTest`), since the library this
+pin carries reads back every link target and name tried. A record stored
+before the change holds its links with a null mode: every reader accepts
+such a link as a view's, and the migration's reader (`view.Reidentify`)
+also reads a null-mode `-> host:path` line, which the library decodes as a
+flow link, as the link it was written as, since a view never holds a flow
+link; the ordinary reader refuses that line (`ErrNotAView`). A patch's
+removal compares with its base's entries as the record holds them, not as
+projected (the spec's "as recorded"): a changeset made over such a record
+restates its links with the null mode it was written with. Every view
+holding a link has a new ID (the next pin move's migration renames it); a
+stored view no holder names is renamed only when named (`--view`), as any
+other. A changeset stored before the guard that does not read is an error
 naming its mapping line: a library that reads it makes the chain again with
 no edit, and until then the cut is what is left. The check decodes and
 encodes again every listing on a changed path, whole: measured by the

@@ -156,11 +156,14 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 		var out, log bytes.Buffer
 		// tool and toolout are views no holder here names, named outside;
 		// mixed-deep is held only by the farm tool's earlier version.
+		// link-depth1 is named outside too: it holds a link, which the
+		// fixture wrote with a null mode and a view now records lrwxrwxrwx,
+		// so it is renamed, and a view nothing holds is not migrated.
 		// Through no cache, as migrate-pin runs: the cached client can still
 		// hold the job as unfinished just after its status says Succeeded,
 		// and the run then refuses (found on CI, linux amd64).
 		err := pinmove.Migrate(ctx, pinmove.Options{Client: direct, Project: ns, Store: stores, Mappings: []string{mapping},
-			Named: []c4.ID{views["tool"], views["toolout"]}, FarmNamespace: "c4-system", Write: write, Out: &out, Log: &log})
+			Named: []c4.ID{views["tool"], views["toolout"], views["link-depth1"]}, FarmNamespace: "c4-system", Write: write, Out: &out, Log: &log})
 		t.Logf("write %v:\n%s%s", write, out.String(), log.String())
 		return out.String(), err
 	}
@@ -170,7 +173,9 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), ns+"/live") || !strings.Contains(err.Error(), "Drain these, then run again") {
 		t.Fatalf("a dry run with a live job: %v", err)
 	}
-	renamed := []string{"chain1", "chain2", "link-depth2", "mixed-deep", "null-depth2", "tool", "toolout"}
+	// Renamed: the views c4 #107 changes, and link-depth1, for its link
+	// alone (now recorded lrwxrwxrwx). Only plain keeps its ID.
+	renamed := []string{"chain1", "chain2", "link-depth1", "link-depth2", "mixed-deep", "null-depth2", "tool", "toolout"}
 	// The mapping's renamed line: its 3 views, and the 3 changesets carried over them.
 	for _, want := range []string{"unfinished " + ns + "/live", "rematerialize " + ns + "/frames",
 		"tool c4-system/" + farmTool + " " + old("link-depth2"), "tool " + ns + "/own-tool " + old("null-depth2"), "mapping " + mapping + " 6 3", "table - c4", "grant " + ns + " "} {

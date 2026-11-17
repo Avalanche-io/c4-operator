@@ -55,19 +55,35 @@ func pinnedTree(t *testing.T, dir string) {
 // The two changeset IDs changed on purpose on 2026-11-09, and nothing else
 // did. Until then a changeset ended with the bare ID of the view it
 // produces; a c4m file never ends with a bare C4 ID, so that line is gone.
-// before0 and before1 are the IDs pinned until then, kept to prove the
-// line is the whole difference: a changeset with its output's ID put back
-// after it is, byte for byte, the changeset that was stored before.
+// The test proved the line was the whole difference: each changeset with
+// its output's ID put back after it hashed to the ID pinned before.
+//
+// Every ID changed on purpose with the link-mode change (2026-11-13): the
+// tree holds two symlinks, which a view recorded with a null mode and now
+// records lrwxrwxrwx (view.LinkMode), so their directories' records, and
+// every ID above them, changed. Measured 2026-11-17 on the link-mode
+// branch: with the links' null mode restored (SymlinkEntry, Project and
+// heldAsAView as on main), every ID pinned until then came back, the
+// pre-2026-11-09 ones included, so the link mode is the whole difference.
+// The pre-2026-11-09 comparison is retired with it, since those bytes held
+// null-mode links, which no view writes now. The IDs pinned until then:
+//
+//	view       c44Ks7KVUA4sB6ztN22vmPRccF9r22hoezTt8wVkDrghVFJFKxjzpDHwRVG4D8o6qQjhyKk12HaoYifireeWpYz6ok
+//	layer      f4Ks7KVUA4sB6ztN22vmPRccF9r22hoezTt8wVkDr
+//	output 0   c43oADB1QZ3Pbr144Z1KgqrEAXveUZRmMbNnXgDxPXRddULz9NN8k2rSue5dZtg1xHWcjrT8EKJB4TFmyyNdpwGDBg
+//	changeset0 c43RnMseaR6uSZsts7SdiaqARqN2h4KvpYLvHUpyakYvUkM4KZ5uYZ5c3Zc2KqRbZBEvtZ2B5BN4QJuNVEHmpfQcMa
+//	before 0   c429NdXmipqgQjXvStenbzKKUEHMSAcMzByxt3QqUeFjtMYw7GNBF9BYcV8qGHX1FcxxT9orotwmVmFVvgLbeDDN8h
+//	output 1   c41n5DrBBCB5KmWqKqLZNDGPMknzdmF3vnCWsXNETwAyrGHC6mrNsNGz793Esi9bppcPQSFW1iSxb1PUX5jF8ybWfm
+//	changeset1 c456JAMjrwWbrdRBZMqQfXXihcJoS4jAobsTnt1m6DwCAyXsxrWF7nYY7EtZwnD8QgX4wiRdLMeaM4zV7X829GoA6Y
+//	before 1   c41hYFqy7XQ2mZqtr4c5FZ1sRcM6VprzVSaAkzvpn3aKCpFFFoVQo2o9WZSSYrViD93r1Sv1sisZHMkMHXJYofx687
 func TestIDsArePinned(t *testing.T) {
 	const (
-		baseView   = "c44Ks7KVUA4sB6ztN22vmPRccF9r22hoezTt8wVkDrghVFJFKxjzpDHwRVG4D8o6qQjhyKk12HaoYifireeWpYz6ok"
-		baseLayer  = "f4Ks7KVUA4sB6ztN22vmPRccF9r22hoezTt8wVkDr"
-		out0       = "c43oADB1QZ3Pbr144Z1KgqrEAXveUZRmMbNnXgDxPXRddULz9NN8k2rSue5dZtg1xHWcjrT8EKJB4TFmyyNdpwGDBg"
-		changeset0 = "c43RnMseaR6uSZsts7SdiaqARqN2h4KvpYLvHUpyakYvUkM4KZ5uYZ5c3Zc2KqRbZBEvtZ2B5BN4QJuNVEHmpfQcMa"
-		before0    = "c429NdXmipqgQjXvStenbzKKUEHMSAcMzByxt3QqUeFjtMYw7GNBF9BYcV8qGHX1FcxxT9orotwmVmFVvgLbeDDN8h"
-		out1       = "c41n5DrBBCB5KmWqKqLZNDGPMknzdmF3vnCWsXNETwAyrGHC6mrNsNGz793Esi9bppcPQSFW1iSxb1PUX5jF8ybWfm"
-		changeset1 = "c456JAMjrwWbrdRBZMqQfXXihcJoS4jAobsTnt1m6DwCAyXsxrWF7nYY7EtZwnD8QgX4wiRdLMeaM4zV7X829GoA6Y"
-		before1    = "c41hYFqy7XQ2mZqtr4c5FZ1sRcM6VprzVSaAkzvpn3aKCpFFFoVQo2o9WZSSYrViD93r1Sv1sisZHMkMHXJYofx687"
+		baseView   = "c42R7FtHEfXBuLSCDcvwHm8v4CBXRdijjd39Gw1xbdP8g7t9uq4cAafj9xsT3RqvdHHw7GNa8dzb7C8oX3oHoMQ2As"
+		baseLayer  = "f2R7FtHEfXBuLSCDcvwHm8v4CBXRdijjd39Gw1xbd"
+		out0       = "c428JvSfpbKepF4rxTJPzLLJLAgZsX32ynvqtpNojpE8kT38eAXgBVvgRUSe7PpHU7JEi9vfy525Rmetk3pyFohKDa"
+		changeset0 = "c42r8z7fDrQ8BKPoAygudcNsL1BHeYGyoRMysoGgNd4qw1Zk46yirkN3M6FeoGZQY2P3gYjMTsakQez1enwBd8C4qo"
+		out1       = "c43JeBsa2cJvTt9jWaHziZu7kr19h5Niwf1s6feHZ2n3ot3bf47VBWzpsUE72scSDy5sor5xD9KdYo39TM1R3aU1Kk"
+		changeset1 = "c42ApJFARudB1ZiiiYUZgGy7L8DhFLGMivpXBPGXfPhewCeqjJPkL3WySeQNqDfSpmhhFBeRvrcw4wQaEepggXbfuS"
 	)
 	root := t.TempDir()
 	src := filepath.Join(root, "src")
@@ -100,12 +116,12 @@ func TestIDsArePinned(t *testing.T) {
 
 	parent := v.ID
 	for step, c := range []struct {
-		files                     map[string]string
-		gone                      []string
-		output, changeset, before string
+		files             map[string]string
+		gone              []string
+		output, changeset string
 	}{
-		{map[string]string{"a/b/c/deep.txt": "deeper\n", "new/added.txt": "added\n"}, []string{"data/same2.bin", "empty"}, out0, changeset0, before0},
-		{map[string]string{"README.md": "readme v3\n", "bin/tool.sh": "#!/bin/sh\n"}, nil, out1, changeset1, before1},
+		{map[string]string{"a/b/c/deep.txt": "deeper\n", "new/added.txt": "added\n"}, []string{"data/same2.bin", "empty"}, out0, changeset0},
+		{map[string]string{"README.md": "readme v3\n", "bin/tool.sh": "#!/bin/sh\n"}, nil, out1, changeset1},
 	} {
 		upper := filepath.Join(root, "upper", string(rune('0'+step)))
 		var entries []overlay.Entry
@@ -138,14 +154,9 @@ func TestIDsArePinned(t *testing.T) {
 		if got := c4.Identify(bytes.NewReader(stored)); got != res.Changeset {
 			t.Fatalf("capture %d: the stored changeset hashes to %s", step, got)
 		}
-		// The changeset starts with its parent and ends on an entry; with
-		// its output's ID after it, it is the changeset stored before.
+		// The changeset starts with its parent and ends on an entry.
 		if !bytes.HasPrefix(stored, []byte(parent.String()+"\n")) || bytes.HasSuffix(stored, []byte(res.Output.String()+"\n")) {
 			t.Fatalf("capture %d: the changeset does not start with its parent, or ends with its output\n%s", step, stored)
-		}
-		old := append(append([]byte(nil), stored...), res.Output.String()+"\n"...)
-		if got := c4.Identify(bytes.NewReader(old)).String(); got != c.before {
-			t.Fatalf("capture %d: with its output's ID after it the changeset hashes to %s; before 2026-11-09 it was %s", step, got, c.before)
 		}
 		parent = res.Output
 	}

@@ -62,6 +62,23 @@ func loadOldPin(t *testing.T) oldPin {
 // sequence frame) two or more directories down.
 var renamedByPin = map[string]bool{"link-depth2": true, "null-depth2": true, "mixed-deep": true, "chain1": true, "chain2": true, "tool": true, "toolout": true}
 
+// The views that hold a link. The fixture wrote every link with a null
+// mode; a view now records a link's type (LinkMode, lrwxrwxrwx), so each
+// of these records, and the view's ID, changes too.
+var holdsALink = map[string]bool{"link-depth1": true, "link-depth2": true, "mixed-deep": true, "chain1": true, "chain2": true, "tool": true, "toolout": true}
+
+// renamed are the fixture's views Reidentify gives new IDs: those c4 #107
+// changes and those holding a link. Only plain is left alone.
+var renamed = func() map[string]bool {
+	out := map[string]bool{}
+	for _, set := range []map[string]bool{renamedByPin, holdsALink} {
+		for name := range set {
+			out[name] = true
+		}
+	}
+	return out
+}()
+
 // A view stored before the pin moved no longer loads under its ID when its
 // records identify differently; Reidentify gives the ID they have now, its
 // records load under it, and the tree is the same tree, file for file.
@@ -78,8 +95,8 @@ func TestAViewStoredBeforeThePinMovedIsReidentified(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		if renamedByPin[name] != (v.ID != old) {
-			t.Errorf("%s: renamed %v, want %v", name, v.ID != old, renamedByPin[name])
+		if renamed[name] != (v.ID != old) {
+			t.Errorf("%s: renamed %v, want %v", name, v.ID != old, renamed[name])
 		}
 		if (loadErr == nil) != (v.ID == old) {
 			t.Errorf("%s: Load of the old ID: %v, and the ID now is %s", name, loadErr, v.ID)
@@ -87,6 +104,27 @@ func TestAViewStoredBeforeThePinMovedIsReidentified(t *testing.T) {
 		recs, err := v.Records()
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
+		}
+		// Every link is recorded with its type now: the cause of the
+		// views holdsALink names being renamed.
+		links := 0
+		for _, r := range recs {
+			raw, err := parseRecordRaw(r.Data)
+			if err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+			for _, e := range raw {
+				if !IsLink(e) {
+					continue
+				}
+				links++
+				if e.Mode != LinkMode {
+					t.Errorf("%s: the link %q is recorded with mode %v", name, e.Name, e.Mode)
+				}
+			}
+		}
+		if (links > 0) != holdsALink[name] {
+			t.Errorf("%s: %d links recorded, holds a link: %v", name, links, holdsALink[name])
 		}
 		for _, r := range recs {
 			if !p.ram.Has(r.ID) {
@@ -148,8 +186,8 @@ func TestAnOldIDResolvesThroughTheTable(t *testing.T) {
 			table[old] = v.ID
 		}
 	}
-	if len(table) != len(renamedByPin) {
-		t.Fatalf("%d renames, want %d", len(table), len(renamedByPin))
+	if len(table) != len(renamed) {
+		t.Fatalf("%d renames, want %d", len(table), len(renamed))
 	}
 	tid, err := p.ram.Put(bytes.NewReader(table.Bytes()))
 	if err != nil {
@@ -160,7 +198,7 @@ func TestAnOldIDResolvesThroughTheTable(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if want := table.Current(old); got != want || (renamedByPin[name] && got == old) {
+		if want := table.Current(old); got != want || (renamed[name] && got == old) {
 			t.Errorf("%s: resolves to %s, want %s", name, got, want)
 		}
 	}
@@ -255,5 +293,111 @@ func TestAFalseTableLineIsRefused(t *testing.T) {
 	got, err := ResolveOld(context.Background(), p.ram, table, old)
 	if err == nil || got != old || !strings.Contains(err.Error(), "identify as") {
 		t.Fatalf("a false line: %s, %v", got, err)
+	}
+}
+
+// A view stored before views kept a link's type holds every link with a
+// null mode, and one to a location (host:path, C:foo) as a line the c4m
+// library decodes as an outbound flow link. The migration's reader
+// (Reidentify) reads it as the link it was written as, since a view never
+// holds a flow link, and gives the view an ID whose records hold the link
+// with its type. The ordinary reader does not take that line as a link:
+// an edit over the old ID is refused, and the old ID does not load.
+func TestAPreGuardLinkIsReidentifiedAsALink(t *testing.T) {
+	ctx := context.Background()
+	ram := store.NewRAM()
+	src := StoreRecords(ram)
+	// The projection before LinkMode: SymlinkEntry with a null mode.
+	oldLink := func(name, target string) *c4m.Entry {
+		return &c4m.Entry{Name: name, Size: -1, Target: target, Timestamp: c4m.NullTimestamp()}
+	}
+	root := NewNode("")
+	root.Files["top"] = oldLink("top", "C:foo")
+	root.Files["keep.txt"] = FileEntry("keep.txt", 4, c4.Identify(strings.NewReader("keep")), false)
+	a := root.Dir("a/")
+	a.Files["l"] = oldLink("l", "host:path")
+	a.Files["near"] = oldLink("near", "t.txt")
+	a.Files["t.txt"] = FileEntry("t.txt", 1, c4.Identify(strings.NewReader("t")), false)
+	old := root.Identify()
+	aOld := a.Entry.C4ID
+	// Stored as the old writer stored them, each directory's canonical
+	// listing. Records refuses them now, as the read-back guard does.
+	root.Walk("", func(_ string, n *Node) error { putBytes(t, ram, n.Entry.C4ID, n.Record()); return nil })
+	var nr *NotReadBack
+	if _, err := root.Records(); !errors.As(err, &nr) {
+		t.Fatalf("the old records are taken by the guard: %v", err)
+	}
+	// The premise: the library decodes the old lines as flow links.
+	for id, want := range map[c4.ID][2]string{old: {"top", "C:foo"}, aOld: {"l", "host:path"}} {
+		data, err := ReadObject(ram, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := parseRecordRaw(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		flows := 0
+		for _, e := range raw {
+			if e.Name != want[0] {
+				continue
+			}
+			if e.FlowDirection != c4m.FlowOutbound || e.FlowTarget != want[1] || e.Target != "" || e.Mode != 0 {
+				t.Fatalf("%s: the old line decodes as mode %v, target %q, flow %v %q, not as a flow link", want[0], e.Mode, e.Target, e.FlowDirection, e.FlowTarget)
+			}
+			flows++
+		}
+		if flows != 1 {
+			t.Fatalf("%s: not in the old record:\n%s", want[0], data)
+		}
+	}
+
+	v, err := Reidentify(ctx, old, src, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.ID == old {
+		t.Fatal("the view keeps its old ID")
+	}
+	wantLinks := []Symlink{{"a/l", "host:path"}, {"a/near", "t.txt"}, {"top", "C:foo"}}
+	if len(v.Symlinks) != len(wantLinks) || len(v.Files) != 2 {
+		t.Fatalf("re-identified as links %v and %d files", v.Symlinks, len(v.Files))
+	}
+	for i, l := range wantLinks {
+		if v.Symlinks[i] != l {
+			t.Errorf("link %d: %v, want %v", i, v.Symlinks[i], l)
+		}
+	}
+	recs, err := v.Records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	readsBackAsLink(t, recordOf(t, recs, "a/"), "l", "host:path")
+	readsBackAsLink(t, recordOf(t, recs, "a/"), "near", "t.txt")
+	readsBackAsLink(t, recordOf(t, recs, ""), "top", "C:foo")
+	for _, r := range recs {
+		putBytes(t, ram, r.ID, r.Data)
+	}
+	now, err := Load(ctx, v.ID, src, 4)
+	if err != nil || !sameTree(now, v) {
+		t.Fatalf("the new ID loads as another tree: %v", err)
+	}
+	if _, err := Apply(ctx, v.ID, []Edit{fileEdit("a/new.txt", "n")}, src); err != nil {
+		t.Fatalf("an edit over the new ID: %v", err)
+	}
+
+	// The ordinary reader: not a view's record, not a link.
+	for _, id := range []c4.ID{old, aOld} {
+		if entries, err := fetchViewRecord(ctx, src, id); !errors.Is(err, ErrNotAView) {
+			t.Errorf("fetchViewRecord of an old record: %v, %v", entries, err)
+		}
+	}
+	for _, path := range []string{"x.txt", "a/new.txt"} {
+		if res, err := Apply(ctx, old, []Edit{fileEdit(path, "n")}, src); !errors.Is(err, ErrNotAView) || res != nil {
+			t.Errorf("an edit of %s over the old ID: %v", path, err)
+		}
+	}
+	if lv, err := Load(ctx, old, src, 4); err == nil {
+		t.Errorf("the old ID loads, with links %v", lv.Symlinks)
 	}
 }
