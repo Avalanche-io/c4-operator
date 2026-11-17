@@ -543,7 +543,10 @@ projected (the spec's "as recorded"): a changeset made over such a record
 restates its links with the null mode it was written with. Every view
 holding a link has a new ID (the next pin move's migration renames it); a
 stored view no holder names is renamed only when named (`--view`), as any
-other. A changeset stored before the guard that does not read is an error
+other, and every run says so: the survey reads what something here names
+and never lists the store, so a view handed out with no holder (an ID an
+ingest printed, a tracker's link) is found where it was handed out. Once
+the operator journals what it stores, the journal names those too. A changeset stored before the guard that does not read is an error
 naming its mapping line: a library that reads it makes the chain again with
 no edit, and until then the cut is what is left. The check decodes and
 encodes again every listing on a changed path, whole: measured by the

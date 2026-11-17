@@ -208,6 +208,7 @@ func Migrate(ctx context.Context, o Options) error {
 	}
 	renames := plan.Renames()
 	say("project %s: %d C4 IDs named, %d not views, %d views renamed by this run, %d by earlier runs", p.Name, len(plan.Findings), notViews, len(renames), len(priorTable))
+	say("%s", unheldNote)
 	table := prior
 	if len(renames) > 0 {
 		table = c4.Identify(strings.NewReader(string(plan.Table.Bytes())))
@@ -369,6 +370,14 @@ func appendRenamed(path string, r, changesets view.Renames) error {
 	}
 	return err
 }
+
+// unheldNote is said on every run: what the survey cannot see. It reads
+// the views something here names, and the store is never listed, so a view
+// handed out with no holder is renamed only when named.
+const unheldNote = "views no holder here names are not renamed unless named with --view (or --views FILE): " +
+	"an ID an ingest printed or wrote to its -record-out file (the record's subject is the view), " +
+	"a tracker's or a document's link to a view, an ID handed to a client; " +
+	"find them where they were handed out, and run again naming them"
 
 func renamedIn(r view.Renames, ids []string) bool {
 	for _, s := range ids {

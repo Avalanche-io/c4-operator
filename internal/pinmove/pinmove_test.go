@@ -461,6 +461,11 @@ func TestACarryThatFailsWritesNothingForTheProject(t *testing.T) {
 		if back.Status.Renames == "" || !strings.Contains(out.String(), "mapping "+mapping+" 4 2") {
 			t.Fatalf("status.renames %q; report:\n%s", back.Status.Renames, out.String())
 		}
+		// Every run says what the survey cannot see, in its narration, not
+		// its report.
+		if !strings.Contains(log.String(), "views no holder here names are not renamed unless named with --view") || strings.Contains(out.String(), "no holder here names") {
+			t.Fatalf("the run's narration does not say how unheld views are renamed:\n%s", log.String())
+		}
 		// The line names changesets the store holds: stored before it.
 		for _, c := range m[:2] {
 			if !f.st.Has(c.Changeset) {
