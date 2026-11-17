@@ -50,11 +50,11 @@ type Registry struct {
 	Secrets   client.Reader
 	Namespace string
 	// RefuseLocal refuses a project with a shard on a local path (LocalShard).
-	// The node and regional commands set it. A farm's store is written by
-	// several processes (every node daemon of a Direct project, every
-	// regional replica of a Tiered one, and the manager), and a path is a
-	// c4 TreeStore, safe for one process only. The manager and the tests,
-	// which run it alone, leave it off.
+	// Every farm command sets it (manager, node, regional): a farm's store
+	// is written by several processes (every node daemon of a Direct
+	// project, every regional replica of a Tiered one, and the manager), and
+	// a path is a c4 TreeStore, safe for one process only. The tests build
+	// their own registries, in one process, and leave it off.
 	RefuseLocal bool
 
 	mu     sync.Mutex

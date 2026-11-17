@@ -22,13 +22,10 @@ import (
 // grants are well formed. It reports the result as the Ready condition.
 type ProjectReconciler struct {
 	client.Client
+	// Projects opens each Project's store to check it. In a farm it refuses
+	// a shard on a local path (project.Registry.RefuseLocal), so the
+	// Project's Ready condition names that refusal, where a person looks.
 	Projects *project.Registry
-	// RefuseLocal reports a shard on a local path as a problem: the farm's
-	// node daemons and regional tier refuse one (project.Registry.RefuseLocal),
-	// and a person looks for that on the Project, not in each pod's events.
-	// The manager command sets it; the tests, which give their Projects path
-	// shards and run the manager alone, leave it off.
-	RefuseLocal bool
 }
 
 // Reconcile validates one Project.
@@ -56,9 +53,6 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 func (r *ProjectReconciler) validate(ctx context.Context, p *c4v1.Project) []string {
 	var problems []string
-	if sh, ok := project.LocalShard(p); ok && r.RefuseLocal {
-		problems = append(problems, project.LocalShardProblem(sh))
-	}
 	all, err := r.Projects.List(ctx)
 	if err != nil {
 		return []string{err.Error()}
