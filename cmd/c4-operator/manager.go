@@ -247,7 +247,7 @@ func runManager(args []string) error {
 		}
 	}
 	reg := &project.Registry{Cache: mgr.GetClient(), Secrets: mgr.GetAPIReader(), Namespace: *namespace}
-	if err := (&controller.ProjectReconciler{Client: mgr.GetClient(), Projects: reg}).SetupWithManager(mgr); err != nil {
+	if err := (&controller.ProjectReconciler{Client: mgr.GetClient(), Projects: reg, RefuseLocal: true}).SetupWithManager(mgr); err != nil {
 		return err
 	}
 	if err := (&controller.MaterializationReconciler{Client: mgr.GetClient(), Projects: reg, Retry: *retry,

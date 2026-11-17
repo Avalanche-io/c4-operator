@@ -49,6 +49,13 @@ type Registry struct {
 	// that must not hold store credentials).
 	Secrets   client.Reader
 	Namespace string
+	// RefuseLocal refuses a project with a shard on a local path (LocalShard).
+	// The node and regional commands set it. A farm's store is written by
+	// several processes (every node daemon of a Direct project, every
+	// regional replica of a Tiered one, and the manager), and a path is a
+	// c4 TreeStore, safe for one process only. The manager and the tests,
+	// which run it alone, leave it off.
+	RefuseLocal bool
 
 	mu     sync.Mutex
 	stores map[string]storeEntry
@@ -128,6 +135,9 @@ func (r *Registry) VerifiesFills(ctx context.Context, p *c4v1.Project) bool {
 // Store opens (or returns the cached) sharded store of p with its
 // credentials.
 func (r *Registry) Store(ctx context.Context, p *c4v1.Project) (*storeurl.Sharded, error) {
+	if sh, ok := LocalShard(p); ok && r.RefuseLocal {
+		return nil, fmt.Errorf("project %s: %s", p.Name, LocalShardProblem(sh))
+	}
 	creds, version, err := r.credentials(ctx, p)
 	if err != nil {
 		return nil, err
@@ -207,4 +217,20 @@ func Current(ctx context.Context, c client.Reader, st view.Store, name string, i
 		return id, fmt.Errorf("project %s status.renames: %w", name, err)
 	}
 	return view.ResolveOld(ctx, st, table, id)
+}
+
+// LocalShard returns the first of p's shards on a local path (file://, or an
+// absolute path: storeurl.Local), and whether there is one.
+func LocalShard(p *c4v1.Project) (c4v1.StoreShard, bool) {
+	for _, sh := range p.Spec.Store.Shards {
+		if storeurl.Local(sh.URL) {
+			return sh, true
+		}
+	}
+	return c4v1.StoreShard{}, false
+}
+
+// LocalShardProblem says why a farm refuses sh, a shard on a local path.
+func LocalShardProblem(sh c4v1.StoreShard) string {
+	return fmt.Sprintf("shard %s is the local path %s, which a farm's node daemons and regional tier refuse: a path is a store for one process (tests, the CLI commands), and a farm writes a project's store from several; give the shard a network URL (s3://, c4d://, http(s)://)", sh.Name, storeurl.Redact(sh.URL))
 }

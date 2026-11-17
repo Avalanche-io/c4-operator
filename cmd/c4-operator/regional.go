@@ -74,7 +74,7 @@ func runRegional(args []string) error {
 	if !watch.WaitForCacheSync(ctx) {
 		return errors.New("watch caches did not sync")
 	}
-	reg := &project.Registry{Cache: watch, Secrets: direct, Namespace: *namespace}
+	reg := &project.Registry{Cache: watch, Secrets: direct, Namespace: *namespace, RefuseLocal: true}
 	caches, err := objcache.OpenSet(*root, objcache.Options{Mode: 0o444, Budget: budget.Value()})
 	if err != nil {
 		return err

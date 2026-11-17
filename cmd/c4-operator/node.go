@@ -103,7 +103,7 @@ func runNode(args []string) error {
 			Retain: *retain, GCInterval: *gcEvery, Version: version,
 		},
 		Kube:     direct,
-		Projects: &project.Registry{Cache: watch, Secrets: direct, Namespace: *namespace},
+		Projects: &project.Registry{Cache: watch, Secrets: direct, Namespace: *namespace, RefuseLocal: true},
 		Members: &membership.Members{
 			Cache: watch, LocalityKey: *localityKey, Locality: locality, PeerPort: *peerPort,
 			RegionalNamespace: *namespace, RegionalService: *regionalService,
