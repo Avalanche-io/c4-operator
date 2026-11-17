@@ -99,9 +99,13 @@ RACE_PKGS ?= ./internal/tier/... ./internal/fill/... ./internal/objcache/... ./i
 # the package still reached. A package's budget is RACE_BUDGET, half the
 # timeout: one past it is named in a warning, so it is looked at before
 # it reaches the timeout. Both are set by hand: RACE_BUDGET is whole
-# seconds, and overriding RACE_TIMEOUT does not move it.
-RACE_TIMEOUT ?= 20m
-RACE_BUDGET ?= 600
+# seconds, and overriding RACE_TIMEOUT does not move it. On a loaded Mac
+# (2026-11-16) the queue's race run reached 20m twice with its code
+# unchanged from a run of 359 s: once ended at 1203 s, at load 20 to 33,
+# and once passing alone in 1524 s, at load 8 to 13. So the timeout is
+# 30m, as make test's is.
+RACE_TIMEOUT ?= 30m
+RACE_BUDGET ?= 900
 test-race:
 	@mkdir -p bin; rm -f bin/test-race.status
 	{ KUBEBUILDER_ASSETS="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(CURDIR)/bin/k8s -p path)" go test -race -count=1 -timeout $(RACE_TIMEOUT) $(RACE_PKGS) 2>&1; echo $$? > bin/test-race.status; } | tee bin/test-race.txt
