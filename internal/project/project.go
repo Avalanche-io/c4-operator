@@ -136,7 +136,7 @@ func (r *Registry) VerifiesFills(ctx context.Context, p *c4v1.Project) bool {
 // credentials.
 func (r *Registry) Store(ctx context.Context, p *c4v1.Project) (*storeurl.Sharded, error) {
 	if sh, ok := LocalShard(p); ok && r.RefuseLocal {
-		return nil, fmt.Errorf("project %s: %s", p.Name, LocalShardProblem(sh))
+		return nil, fmt.Errorf("project %s: %s: %w", p.Name, LocalShardProblem(sh), storeurl.ErrLocalRefused)
 	}
 	creds, version, err := r.credentials(ctx, p)
 	if err != nil {

@@ -3,8 +3,8 @@ package storeurl
 import "testing"
 
 // Local names exactly the URLs OpenWith opens as a TreeStore on this
-// machine: checked against OpenWith itself, so a path form added there and
-// not here fails.
+// machine, checked against OpenWith itself for every URL in the table (a
+// path form added to OpenWith is caught only once it is in the table).
 func TestLocalIsThePathForms(t *testing.T) {
 	dir := t.TempDir()
 	for url, want := range map[string]bool{

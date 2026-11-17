@@ -284,7 +284,7 @@ func (s *Server) head(w http.ResponseWriter, r *http.Request, project string, ca
 	}
 	st, err := s.Store(project)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), storeErrStatus(err))
 		return
 	}
 	size, err := st.Head(r.Context(), id)
@@ -320,7 +320,7 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request, project string, 
 	}
 	st, err := s.Store(project)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), storeErrStatus(err))
 		return
 	}
 	tmp, err := cache.TempFile()
@@ -443,4 +443,15 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 		}
 	}
 	return written, nil
+}
+
+// storeErrStatus is the status for a project whose store cannot be opened:
+// 400 when it is refused for good (a shard on a local path, which a farm's
+// tier never opens), so a node's upload stops instead of retrying; 500
+// otherwise.
+func storeErrStatus(err error) int {
+	if errors.Is(err, storeurl.ErrLocalRefused) {
+		return http.StatusBadRequest
+	}
+	return http.StatusInternalServerError
 }

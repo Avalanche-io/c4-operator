@@ -85,9 +85,9 @@ type StoreShard struct {
 	// s3://bucket/runs would store them beside the folder (runs<id>). The
 	// c4 CLI's instance-role parameter is refused: a Project never borrows
 	// a component's machine role. A local path (file://, or an absolute
-	// path) is for tests and the CLI commands only, one process: two
-	// processes writing one can miss objects it holds. A farm's node
-	// daemons and regional tier refuse one, and the Project reports it.
+	// path) is for tests only, one process: two processes writing one can
+	// miss objects it holds. A farm's node daemons and regional tier refuse
+	// one, and the Project reports it.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:XValidation:rule="!self.startsWith('s3://') || self.matches('^s3://[^/?]+(/([^?]*/)?)?([?].*)?$')",message="an S3 prefix must end in \"/\" (s3://bucket/prefix/): objects are stored as prefix+ID, so without it they would land beside the folder"
