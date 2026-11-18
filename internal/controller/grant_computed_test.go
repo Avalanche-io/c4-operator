@@ -4,42 +4,20 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Avalanche-io/c4"
 	"github.com/Avalanche-io/c4/c4m"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/view"
 )
-
-// newNamespace makes a namespace of the test's own.
-// nsSeq numbers the namespaces the package's tests make.
-var nsSeq atomic.Int64
-
-// newNamespace makes a namespace for one test, named so that no two are
-// alike in a process: envtest never deletes one, and a name from the clock
-// alone (once, the nanoseconds within the second, which macOS counts in
-// microseconds) was made twice in 2 of 750 runs under -race, and the test
-// failed on "already exists".
-func newNamespace(t *testing.T, prefix string) string {
-	t.Helper()
-	ns := fmt.Sprintf("%s-%d-%d", prefix, nsSeq.Add(1), time.Now().UnixNano()%1e6)
-	if err := k8s.Create(context.Background(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
-		t.Fatal(err)
-	}
-	return ns
-}
 
 // marshal writes a c4m of entries with the library.
 func marshal(t *testing.T, entries ...*c4m.Entry) []byte {
@@ -78,7 +56,7 @@ func TestGrantsMatchOnlyComputedIDs(t *testing.T) {
 
 	t.Run("a c4m copying a granted view's root lines over another file is refused", func(t *testing.T) {
 		ns := newNamespace(t, "forge-a")
-		putProject(t, "forge-a", []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: v.ID.String()}})
+		putProject(t, ns, []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: v.ID.String()}})
 		var top []*c4m.Entry
 		for _, e := range v.Manifest().Entries {
 			if e.Depth == 0 {
@@ -113,7 +91,7 @@ func TestGrantsMatchOnlyComputedIDs(t *testing.T) {
 
 	t.Run("a grant of one description does not grant another with the same root lines", func(t *testing.T) {
 		ns := newNamespace(t, "forge-b")
-		putProject(t, "forge-b", []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: resOne.View().ID.String()}})
+		putProject(t, ns, []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: resOne.View().ID.String()}})
 		putMat(t, ns, "one", byConfigMap(t, ns, "one", one))
 		waitMat(t, ns, "one", c4v1.PhaseReady, "Ready")
 		putMat(t, ns, "two", byConfigMap(t, ns, "two", two))
@@ -122,14 +100,14 @@ func TestGrantsMatchOnlyComputedIDs(t *testing.T) {
 
 	t.Run("a grant naming the shared root lines' ID grants neither", func(t *testing.T) {
 		ns := newNamespace(t, "forge-c")
-		putProject(t, "forge-c", []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: resOne.RootID.String()}})
+		putProject(t, ns, []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: resOne.RootID.String()}})
 		putMat(t, ns, "one", byConfigMap(t, ns, "one", one))
 		waitMat(t, ns, "one", c4v1.PhaseFailed, "NotGranted")
 	})
 
 	t.Run("a plain description is granted by the view it resolves to, under an include", func(t *testing.T) {
 		ns := newNamespace(t, "plain")
-		putProject(t, "plain", []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: resOne.View().ID.String()}})
+		putProject(t, ns, []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: resOne.View().ID.String()}})
 		putMat(t, ns, "a-only", byConfigMap(t, ns, "a-only", one), "a/")
 		m := waitMat(t, ns, "a-only", c4v1.PhaseReady, "Ready")
 		if m.Status.Files != 1 {
@@ -175,7 +153,7 @@ func TestGrantCheckRefusesBytesThatAreNotTheirID(t *testing.T) {
 		t.Fatal(err)
 	}
 	ns := newNamespace(t, "swap")
-	putProject(t, "swap", []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: v.ID.String()}})
+	putProject(t, ns, []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: v.ID.String()}})
 	putMat(t, ns, "swapped", byID(csID))
 	// It fails as a resolve that read bad bytes does, not as a grant that
 	// did not match. The read that found them re-filed them under their
@@ -293,7 +271,7 @@ func TestAGrantIsMatchedAgainstWhatIsMounted(t *testing.T) {
 		t.Fatal(err)
 	}
 	ns := newNamespace(t, "restate")
-	putProject(t, "restate", []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: g.ID.String()}})
+	putProject(t, ns, []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: g.ID.String()}})
 	putMat(t, ns, "restated", byConfigMap(t, ns, "restated", cs))
 	waitMat(t, ns, "restated", c4v1.PhaseFailed, "NotGranted")
 }
@@ -339,7 +317,7 @@ func TestAChangesetOverAStoredChangesetIsGrantedByItsView(t *testing.T) {
 		t.Fatal(err)
 	}
 	ns := newNamespace(t, "stack")
-	putProject(t, "stack", []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: res.View().ID.String()}})
+	putProject(t, ns, []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: res.View().ID.String()}})
 	putMat(t, ns, "stacked", byConfigMap(t, ns, "stacked", cs2))
 	m := waitMat(t, ns, "stacked", c4v1.PhaseReady, "Ready")
 	if m.Status.ViewID != res.View().ID.String() {

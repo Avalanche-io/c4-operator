@@ -82,12 +82,10 @@ func oldPinStore(t *testing.T) (*tree, map[string]c4.ID, map[string]c4.ID) {
 func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 	ctx := context.Background()
 	st, views, changesets := oldPinStore(t)
-	const ns = "pinned"
-	if err := k8s.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
-		t.Fatal(err)
-	}
+	// The project is named for its one namespace.
+	ns := newNamespace(t, "pinned")
 	old := func(name string) string { return views[name].String() }
-	putProject(t, "pinned", []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{
+	putProject(t, ns, []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{
 		{Tree: old("link-depth2"), Paths: []string{"a/"}},
 		{Tree: old("null-depth2")},
 	})
@@ -96,7 +94,7 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 	// left it: its status names the view as stored.
 	putMat(t, ns, "frames", byID(views["null-depth2"]))
 	waitMat(t, ns, "frames", c4v1.PhaseReady, "Ready")
-	plantView(t, ns, "frames", "pinned", old("null-depth2"))
+	plantView(t, ns, "frames", ns, old("null-depth2"))
 	// A changeset over a granted view: its base is recomputed with the
 	// library now, so the grant on the base's old ID does not cover it.
 	putMat(t, ns, "change", byID(changesets["chain1"]))
@@ -129,10 +127,16 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 		}
 	}
 	// The farm tool's second version is another project's, and its earlier
-	// one names no project: neither is this project's to translate.
-	putTool("c4-system", "farm-tool", c4v1.ToolStatus{
+	// one names no project: neither is this project's to translate. It is
+	// in the operator's namespace, by its real name (the run's
+	// FarmNamespace), so it has a name of its own and is removed after.
+	farmTool := "farm-tool-" + unique()
+	t.Cleanup(func() {
+		k8s.Delete(context.Background(), &c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Namespace: "c4-system", Name: farmTool}})
+	})
+	putTool("c4-system", farmTool, c4v1.ToolStatus{
 		Versions: []c4v1.ToolVersion{
-			{Version: "v1", View: old("link-depth2"), Project: "pinned", At: metav1.Now(), Test: c4v1.ToolTest{State: c4v1.ToolTestOK}},
+			{Version: "v1", View: old("link-depth2"), Project: ns, At: metav1.Now(), Test: c4v1.ToolTest{State: c4v1.ToolTestOK}},
 			{Version: "v2", View: old("null-depth2"), Project: "elsewhere", At: metav1.Now(), Test: c4v1.ToolTest{State: c4v1.ToolTestOK}},
 		},
 		Earlier: []c4v1.ToolVersionRef{{Version: "v0", View: old("mixed-deep")}},
@@ -155,7 +159,7 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 		// Through no cache, as migrate-pin runs: the cached client can still
 		// hold the job as unfinished just after its status says Succeeded,
 		// and the run then refuses (found on CI, linux amd64).
-		err := pinmove.Migrate(ctx, pinmove.Options{Client: direct, Project: "pinned", Store: stores, Mappings: []string{mapping},
+		err := pinmove.Migrate(ctx, pinmove.Options{Client: direct, Project: ns, Store: stores, Mappings: []string{mapping},
 			Named: []c4.ID{views["tool"], views["toolout"]}, FarmNamespace: "c4-system", Write: write, Out: &out, Log: &log})
 		t.Logf("write %v:\n%s%s", write, out.String(), log.String())
 		return out.String(), err
@@ -169,12 +173,12 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 	renamed := []string{"chain1", "chain2", "link-depth2", "mixed-deep", "null-depth2", "tool", "toolout"}
 	// The mapping's renamed line: its 3 views, and the 3 changesets carried over them.
 	for _, want := range []string{"unfinished " + ns + "/live", "rematerialize " + ns + "/frames",
-		"tool c4-system/farm-tool " + old("link-depth2"), "tool " + ns + "/own-tool " + old("null-depth2"), "mapping " + mapping + " 6 3", "table - c4", "grant pinned "} {
+		"tool c4-system/" + farmTool + " " + old("link-depth2"), "tool " + ns + "/own-tool " + old("null-depth2"), "mapping " + mapping + " 6 3", "table - c4", "grant " + ns + " "} {
 		if !strings.Contains(report, want) {
 			t.Errorf("the dry run's report has no %q", want)
 		}
 	}
-	if strings.Contains(report, "tool c4-system/farm-tool "+old("null-depth2")) || strings.Contains(report, "tool c4-system/farm-tool "+old("mixed-deep")) {
+	if strings.Contains(report, "tool c4-system/"+farmTool+" "+old("null-depth2")) || strings.Contains(report, "tool c4-system/"+farmTool+" "+old("mixed-deep")) {
 		t.Error("the dry run would translate another project's farm version, or an earlier one")
 	}
 	for _, name := range []string{"link-depth2", "null-depth2"} {
@@ -185,7 +189,7 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 	nothingWritten := func(when string) {
 		t.Helper()
 		var p c4v1.Project
-		if err := k8s.Get(ctx, types.NamespacedName{Name: "pinned"}, &p); err != nil {
+		if err := k8s.Get(ctx, types.NamespacedName{Name: ns}, &p); err != nil {
 			t.Fatal(err)
 		}
 		if p.Status.Renames != "" || len(p.Spec.Grants) != 2 {
@@ -228,7 +232,7 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 	// Every stored view: re-identified, and each renamed one in the table
 	// the status names, its old ID loading through the shared function.
 	var p c4v1.Project
-	if err := direct.Get(ctx, types.NamespacedName{Name: "pinned"}, &p); err != nil {
+	if err := direct.Get(ctx, types.NamespacedName{Name: ns}, &p); err != nil {
 		t.Fatal(err)
 	}
 	table, err := c4.Parse(p.Status.Renames)
@@ -270,7 +274,7 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 	// The tools' versions name the new trees.
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
 		var farm, own c4v1.Tool
-		if err := k8s.Get(ctx, types.NamespacedName{Namespace: "c4-system", Name: "farm-tool"}, &farm); err != nil {
+		if err := k8s.Get(ctx, types.NamespacedName{Namespace: "c4-system", Name: farmTool}, &farm); err != nil {
 			t.Fatal(err)
 		}
 		if err := k8s.Get(ctx, types.NamespacedName{Namespace: ns, Name: "own-tool"}, &own); err != nil {
@@ -293,7 +297,7 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("grants %+v", p.Spec.Grants)
 		}
-		if err := k8s.Get(ctx, types.NamespacedName{Name: "pinned"}, &p); err != nil {
+		if err := k8s.Get(ctx, types.NamespacedName{Name: ns}, &p); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -352,7 +356,7 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 		t.Error("the second run wrote the mapping")
 	}
 	var again c4v1.Project
-	if err := direct.Get(ctx, types.NamespacedName{Name: "pinned"}, &again); err != nil || again.Status.Renames != p.Status.Renames || len(again.Spec.Grants) != 4 {
+	if err := direct.Get(ctx, types.NamespacedName{Name: ns}, &again); err != nil || again.Status.Renames != p.Status.Renames || len(again.Spec.Grants) != 4 {
 		t.Fatalf("after the second run: %q, %d grants (%v)", again.Status.Renames, len(again.Spec.Grants), err)
 	}
 }
@@ -365,14 +369,11 @@ func TestThePinMoveMigratesAProjectWrittenBeforeIt(t *testing.T) {
 func TestARestartAfterTheMigrationResolvesTheMaterializationAgain(t *testing.T) {
 	ctx := context.Background()
 	st, views, _ := oldPinStore(t)
-	const ns = "pinned-store"
-	if err := k8s.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
-		t.Fatal(err)
-	}
-	putProject(t, "pinned-store", []string{ns}, st, c4v1.ScopeStore, nil)
+	ns := newNamespace(t, "pinned-store")
+	putProject(t, ns, []string{ns}, st, c4v1.ScopeStore, nil)
 	putMat(t, ns, "frames", byID(views["null-depth2"]))
 	waitMat(t, ns, "frames", c4v1.PhaseReady, "Ready")
-	plantView(t, ns, "frames", "pinned-store", views["null-depth2"].String())
+	plantView(t, ns, "frames", ns, views["null-depth2"].String())
 	signer, err := provenance.NewSigner(ctx, provenance.LocalIssuer(farmCA, provenance.ComponentIdentity("controller"), time.Hour))
 	if err != nil {
 		t.Fatal(err)
@@ -408,7 +409,7 @@ func TestARestartAfterTheMigrationResolvesTheMaterializationAgain(t *testing.T) 
 	}
 
 	var out, log bytes.Buffer
-	err = pinmove.Migrate(ctx, pinmove.Options{Client: direct, Project: "pinned-store",
+	err = pinmove.Migrate(ctx, pinmove.Options{Client: direct, Project: ns,
 		Store: func(context.Context, *c4v1.Project) (pinmove.Store, error) { return st.store, nil }, Write: true, Out: &out, Log: &log})
 	if err != nil {
 		t.Fatal(err)

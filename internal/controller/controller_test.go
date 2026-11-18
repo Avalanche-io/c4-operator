@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -103,10 +104,11 @@ func TestMain(m *testing.M) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go mgr.Start(ctx)
 	k8s = mgr.GetClient()
-	for _, ns := range []string{"c4-system", "a", "b", "vendor", "scoped", "dup-1", "signed"} {
-		if err := k8s.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
-			panic(err)
-		}
+	// The operator's own namespace, by its real name: the registry reads
+	// it, and the pin move surveys the farm's Tools there. Every other
+	// namespace is a test's own (newNamespace).
+	if err := k8s.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "c4-system"}}); err != nil {
+		panic(err)
 	}
 	code := m.Run()
 	cancel()
@@ -119,6 +121,30 @@ func zapLevel() zapcore.Level {
 		return zapcore.DebugLevel
 	}
 	return zapcore.ErrorLevel
+}
+
+// names numbers what the package's tests make.
+var names atomic.Int64
+
+// unique returns a suffix no other test, or earlier run of a test in this
+// process (-count), has used. The tests share one API server, and its
+// reconcilers act on every object in it, so each test works in names of
+// its own: its namespaces, Projects (cluster-scoped), and what it makes in
+// c4-system, the operator's namespace, which keeps its real name.
+func unique() string { return fmt.Sprintf("t%d", names.Add(1)) }
+
+// newNamespace makes a namespace for one test, prefix-unique(). envtest
+// runs no namespace controller, so a deleted namespace stays Terminating:
+// a name is never used twice. (A name from the clock alone, once, was made
+// twice in 2 of 750 runs under -race, and the test failed on "already
+// exists".)
+func newNamespace(t *testing.T, prefix string) string {
+	t.Helper()
+	ns := prefix + "-" + unique()
+	if err := k8s.Create(context.Background(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
+		t.Fatal(err)
+	}
+	return ns
 }
 
 // tree is a store on local disk holding one or more views.
@@ -297,19 +323,21 @@ func TestIsolationBetweenProjects(t *testing.T) {
 	storeA, storeB := newStore(t), newStore(t)
 	va := storeA.ingest(t, show("a"))
 	storeB.ingest(t, map[string]string{"own.txt": "b's own"})
-	putProject(t, "a", []string{"a"}, storeA, "", nil)
-	putProject(t, "b", []string{"b"}, storeB, "", nil)
+	// Each project is named for its one namespace.
+	a, b := newNamespace(t, "a"), newNamespace(t, "b")
+	putProject(t, a, []string{a}, storeA, "", nil)
+	putProject(t, b, []string{b}, storeB, "", nil)
 
 	t.Run("own view resolves", func(t *testing.T) {
-		putMat(t, "a", "own", byID(va.ID))
-		m := waitMat(t, "a", "own", c4v1.PhaseReady, "Ready")
-		if m.Status.ViewID != va.ID.String() || m.Status.Files != int64(len(va.Files)) || m.Status.Project != "a" {
+		putMat(t, a, "own", byID(va.ID))
+		m := waitMat(t, a, "own", c4v1.PhaseReady, "Ready")
+		if m.Status.ViewID != va.ID.String() || m.Status.Files != int64(len(va.Files)) || m.Status.Project != a {
 			t.Fatalf("status %+v", m.Status)
 		}
 	})
 	t.Run("another project's view ID does not resolve", func(t *testing.T) {
-		putMat(t, "b", "by-id", byID(va.ID))
-		m := waitMat(t, "b", "by-id", c4v1.PhaseFailed, "ResolveFailed")
+		putMat(t, b, "by-id", byID(va.ID))
+		m := waitMat(t, b, "by-id", c4v1.PhaseFailed, "ResolveFailed")
 		if m.Status.ViewID != "" {
 			t.Fatalf("resolved a view: %s", m.Status.ViewID)
 		}
@@ -319,8 +347,8 @@ func TestIsolationBetweenProjects(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		putMat(t, "b", "by-c4m", byConfigMap(t, "b", "stolen", listing))
-		m := waitMat(t, "b", "by-c4m", c4v1.PhaseFailed, "ContentMissing")
+		putMat(t, b, "by-c4m", byConfigMap(t, b, "stolen", listing))
+		m := waitMat(t, b, "by-c4m", c4v1.PhaseFailed, "ContentMissing")
 		if m.Status.Missing != int64(len(va.Objects())) {
 			t.Fatalf("missing %d of %d objects", m.Status.Missing, len(va.Objects()))
 		}
@@ -339,22 +367,23 @@ func TestGrants(t *testing.T) {
 	v := st.ingest(t, show("g"))
 	secret := st.ingest(t, map[string]string{"shots/sh900/plates/sh900.1001.exr": "unreleased"})
 	sh010 := countUnder(v, "shots/sh010/")
-	putProject(t, "vendor", []string{"vendor"}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: v.ID.String(), Paths: []string{"shots/sh010/"}}})
+	vendor := newNamespace(t, "vendor")
+	putProject(t, vendor, []string{vendor}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: v.ID.String(), Paths: []string{"shots/sh010/"}}})
 
 	t.Run("granted tree is cut to the grant's paths", func(t *testing.T) {
-		putMat(t, "vendor", "granted", byID(v.ID))
-		m := waitMat(t, "vendor", "granted", c4v1.PhaseReady, "Ready")
+		putMat(t, vendor, "granted", byID(v.ID))
+		m := waitMat(t, vendor, "granted", c4v1.PhaseReady, "Ready")
 		if m.Status.Files != int64(sh010) {
 			t.Fatalf("%d files, want the %d under shots/sh010/", m.Status.Files, sh010)
 		}
 	})
 	t.Run("an include outside the grant is refused, not mounted empty", func(t *testing.T) {
-		putMat(t, "vendor", "outside", byID(v.ID), "shots/sh020/")
-		waitMat(t, "vendor", "outside", c4v1.PhaseFailed, "NotGranted")
+		putMat(t, vendor, "outside", byID(v.ID), "shots/sh020/")
+		waitMat(t, vendor, "outside", c4v1.PhaseFailed, "NotGranted")
 	})
 	t.Run("a tree in the same store that is not granted is refused", func(t *testing.T) {
-		putMat(t, "vendor", "secret", byID(secret.ID))
-		waitMat(t, "vendor", "secret", c4v1.PhaseFailed, "NotGranted")
+		putMat(t, vendor, "secret", byID(secret.ID))
+		waitMat(t, vendor, "secret", c4v1.PhaseFailed, "NotGranted")
 	})
 	t.Run("a hand-written c4m of granted files is not the granted tree", func(t *testing.T) {
 		sub, err := view.FromID(v.ID, st.store, mustFilter(t, "shots/sh010/"))
@@ -365,8 +394,8 @@ func TestGrants(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		putMat(t, "vendor", "handmade", byConfigMap(t, "vendor", "handmade", listing))
-		waitMat(t, "vendor", "handmade", c4v1.PhaseFailed, "NotGranted")
+		putMat(t, vendor, "handmade", byConfigMap(t, vendor, "handmade", listing))
+		waitMat(t, vendor, "handmade", c4v1.PhaseFailed, "NotGranted")
 	})
 	t.Run("a changeset on the granted tree is covered by its base's grant", func(t *testing.T) {
 		ctx := context.Background()
@@ -387,20 +416,20 @@ func TestGrants(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		putMat(t, "vendor", "changeset", byID(csID))
-		m := waitMat(t, "vendor", "changeset", c4v1.PhaseReady, "Ready")
+		putMat(t, vendor, "changeset", byID(csID))
+		m := waitMat(t, vendor, "changeset", c4v1.PhaseReady, "Ready")
 		if m.Status.Files != int64(sh010+1) || len(m.Status.Layers) != 2 {
 			t.Fatalf("%d files in %d layers, want %d in 2", m.Status.Files, len(m.Status.Layers), sh010+1)
 		}
 	})
 	t.Run("revoking the last grant refuses everything", func(t *testing.T) {
-		putProject(t, "vendor", []string{"vendor"}, st, c4v1.ScopeGrants, nil)
-		m := waitMat(t, "vendor", "granted", c4v1.PhaseFailed, "NotGranted")
+		putProject(t, vendor, []string{vendor}, st, c4v1.ScopeGrants, nil)
+		m := waitMat(t, vendor, "granted", c4v1.PhaseFailed, "NotGranted")
 		if !strings.Contains(readyMessage(m), "no grants") {
 			t.Fatalf("message %q", readyMessage(m))
 		}
 		var p c4v1.Project
-		if err := k8s.Get(context.Background(), types.NamespacedName{Name: "vendor"}, &p); err != nil {
+		if err := k8s.Get(context.Background(), types.NamespacedName{Name: vendor}, &p); err != nil {
 			t.Fatal(err)
 		}
 		if m.Status.ProjectGeneration != p.Generation {
@@ -422,33 +451,37 @@ func mustFilter(t *testing.T, patterns ...string) view.Filter {
 func TestProjectValidation(t *testing.T) {
 	st := newStore(t)
 	v := st.ingest(t, show("v"))
+	// The namespaces the cases name are never made: validation reads only
+	// the Projects. The last two cases name one namespace, as before.
+	id := unique()
+	owner, owned, scoped, dup := "ns-owner-"+id, "owned-"+id, "scoped-"+id, "dup-1-"+id
 	// The project whose namespace the second case claims again: made here,
 	// so the case doesn't depend on another test having run first.
-	putProject(t, "ns-owner", []string{"owned"}, st, "", nil)
+	putProject(t, owner, []string{owned}, st, "", nil)
 	cases := []struct {
 		name    string
 		spec    func(p *c4v1.Project)
 		problem string
 	}{
 		{"grants need scope Grants", func(p *c4v1.Project) {
-			p.Spec.Namespaces = []string{"scoped"}
+			p.Spec.Namespaces = []string{scoped}
 			p.Spec.Grants = []c4v1.Grant{{Tree: v.ID.String()}}
 		}, "scope is not Grants"},
 		{"a namespace belongs to one project", func(p *c4v1.Project) {
-			p.Spec.Namespaces = []string{"owned"}
-		}, "already belongs to project ns-owner"},
+			p.Spec.Namespaces = []string{owned}
+		}, "already belongs to project " + owner},
 		{"shared needs a group", func(p *c4v1.Project) {
-			p.Spec.Namespaces = []string{"dup-1"}
+			p.Spec.Namespaces = []string{dup}
 			p.Spec.Isolation = c4v1.IsolationShared
 		}, "needs a sharingGroup"},
 		{"no credentials in shard URLs", func(p *c4v1.Project) {
-			p.Spec.Namespaces = []string{"dup-1"}
+			p.Spec.Namespaces = []string{dup}
 			p.Spec.Store.Shards = []c4v1.StoreShard{{Name: "s0", URL: "s3://key:secret@bucket/c4/?endpoint=http://x"}}
 		}, "carries credentials"},
 	}
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			p := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("invalid-%d", i)}}
+			p := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("invalid-%d-%s", i, id)}}
 			p.Spec.Store.Shards = []c4v1.StoreShard{{Name: "s0", URL: st.dir}}
 			tc.spec(p)
 			if err := k8s.Create(context.Background(), p); err != nil {
@@ -473,6 +506,7 @@ func TestProjectValidation(t *testing.T) {
 // A shard URL whose S3 prefix doesn't end in "/" is refused when the
 // Project is applied, with the reason, not later when its store opens.
 func TestShardURLPrefixAdmission(t *testing.T) {
+	id := unique()
 	for i, c := range []struct {
 		url string
 		ok  bool
@@ -486,8 +520,8 @@ func TestShardURLPrefixAdmission(t *testing.T) {
 		{"s3://bucket/a/b?region=us-west-2", false},
 		{"s3://bucket/runs/?instance-role=true", false},
 	} {
-		p := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("prefix-%d", i)}}
-		p.Spec.Namespaces = []string{fmt.Sprintf("prefix-%d", i)}
+		p := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("prefix-%d-%s", i, id)}}
+		p.Spec.Namespaces = []string{fmt.Sprintf("prefix-%d-%s", i, id)}
 		p.Spec.Store.Shards = []c4v1.StoreShard{{Name: "s0", URL: c.url}}
 		err := k8s.Create(context.Background(), p)
 		if c.ok != (err == nil) {
@@ -542,16 +576,22 @@ func TestResolutionRecords(t *testing.T) {
 	st := newStore(t)
 	v := st.ingest(t, show("signed"))
 	other := st.ingest(t, map[string]string{"plates/x.exr": "another tree"})
-	putProject(t, "signed", []string{"signed"}, st, "", nil)
+	ns := newNamespace(t, "signed")
+	putProject(t, ns, []string{ns}, st, "", nil)
+	// Another project, of one namespace, whose workload signs the foreign
+	// record below. (Its namespace is never made: the check reads only the
+	// signer's namespace against this project's.)
+	elsewhere := "b-" + unique()
+	putProject(t, elsewhere, []string{elsewhere}, st, "", nil)
 	roots := x509.NewCertPool()
 	roots.AddCert(farmCA.Cert)
 	ingest := map[string]any{"source": "plates"}
-	good := signedAs(t, st, provenance.ServiceAccountIdentity("signed", "ingest"), provenance.PredicateIngest,
+	good := signedAs(t, st, provenance.ServiceAccountIdentity(ns, "ingest"), provenance.PredicateIngest,
 		[]provenance.Subject{provenance.SubjectFor("view", v.ID)}, ingest)
 
 	t.Run("a resolution is signed by the controller and links the ingest record", func(t *testing.T) {
-		putMatWithRecord(t, "signed", "plates", byID(v.ID), good)
-		m := waitMat(t, "signed", "plates", c4v1.PhaseReady, "Ready")
+		putMatWithRecord(t, ns, "plates", byID(v.ID), good)
+		m := waitMat(t, ns, "plates", c4v1.PhaseReady, "Ready")
 		if m.Status.SourceRecord != good || m.Status.Record == "" {
 			t.Fatalf("status record %q, source record %q", m.Status.Record, m.Status.SourceRecord)
 		}
@@ -572,17 +612,17 @@ func TestResolutionRecords(t *testing.T) {
 		}
 	})
 	t.Run("an ingest record from another project's workload is refused", func(t *testing.T) {
-		foreign := signedAs(t, st, provenance.ServiceAccountIdentity("b", "ingest"), provenance.PredicateIngest,
+		foreign := signedAs(t, st, provenance.ServiceAccountIdentity(elsewhere, "ingest"), provenance.PredicateIngest,
 			[]provenance.Subject{provenance.SubjectFor("view", v.ID)}, ingest)
-		putMatWithRecord(t, "signed", "foreign", byID(v.ID), foreign)
-		m := waitMat(t, "signed", "foreign", c4v1.PhaseFailed, "SourceRecordInvalid")
-		if !strings.Contains(readyMessage(m), "not a workload of project signed") {
+		putMatWithRecord(t, ns, "foreign", byID(v.ID), foreign)
+		m := waitMat(t, ns, "foreign", c4v1.PhaseFailed, "SourceRecordInvalid")
+		if !strings.Contains(readyMessage(m), "not a workload of project "+ns) {
 			t.Fatal(readyMessage(m))
 		}
 	})
 	t.Run("a record for another tree does not vouch for this one", func(t *testing.T) {
-		putMatWithRecord(t, "signed", "mismatch", byID(other.ID), good)
-		m := waitMat(t, "signed", "mismatch", c4v1.PhaseFailed, "SourceRecordInvalid")
+		putMatWithRecord(t, ns, "mismatch", byID(other.ID), good)
+		m := waitMat(t, ns, "mismatch", c4v1.PhaseFailed, "SourceRecordInvalid")
 		if !strings.Contains(readyMessage(m), "does not name the source") {
 			t.Fatal(readyMessage(m))
 		}
@@ -590,20 +630,20 @@ func TestResolutionRecords(t *testing.T) {
 	t.Run("a node cannot vouch for a source", func(t *testing.T) {
 		byNode := signedAs(t, st, provenance.NodeIdentity("w1"), provenance.PredicateIngest,
 			[]provenance.Subject{provenance.SubjectFor("view", v.ID)}, ingest)
-		putMatWithRecord(t, "signed", "by-node", byID(v.ID), byNode)
-		waitMat(t, "signed", "by-node", c4v1.PhaseFailed, "SourceRecordInvalid")
+		putMatWithRecord(t, ns, "by-node", byID(v.ID), byNode)
+		waitMat(t, ns, "by-node", c4v1.PhaseFailed, "SourceRecordInvalid")
 	})
 	t.Run("a record signed outside the farm is refused", func(t *testing.T) {
 		otherCA, _ := provenance.NewCA(time.Now())
-		sg, _ := provenance.NewSigner(context.Background(), provenance.LocalIssuer(otherCA, provenance.ServiceAccountIdentity("signed", "ingest"), time.Hour))
+		sg, _ := provenance.NewSigner(context.Background(), provenance.LocalIssuer(otherCA, provenance.ServiceAccountIdentity(ns, "ingest"), time.Hour))
 		rec, _ := provenance.SignStatement(context.Background(), sg, provenance.PredicateIngest,
 			[]provenance.Subject{provenance.SubjectFor("view", v.ID)}, ingest, time.Now())
 		id, err := st.store.PutBytes(context.Background(), rec)
 		if err != nil {
 			t.Fatal(err)
 		}
-		putMatWithRecord(t, "signed", "outsider", byID(v.ID), id.String())
-		m := waitMat(t, "signed", "outsider", c4v1.PhaseFailed, "SourceRecordInvalid")
+		putMatWithRecord(t, ns, "outsider", byID(v.ID), id.String())
+		m := waitMat(t, ns, "outsider", c4v1.PhaseFailed, "SourceRecordInvalid")
 		if !strings.Contains(readyMessage(m), "chain") {
 			t.Fatal(readyMessage(m))
 		}

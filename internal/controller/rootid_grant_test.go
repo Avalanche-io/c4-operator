@@ -36,7 +36,7 @@ func TestGrantByTheViewAChangesetMakes(t *testing.T) {
 		t.Fatal(err)
 	}
 	ns := newNamespace(t, "rootid")
-	putProject(t, "rootid", []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: applied.ID.String()}})
+	putProject(t, ns, []string{ns}, st, c4v1.ScopeGrants, []c4v1.Grant{{Tree: applied.ID.String()}})
 	putMat(t, ns, "whole", byID(csID))
 	m := waitMat(t, ns, "whole", c4v1.PhaseReady, "Ready")
 	if m.Status.RootID != applied.ID.String() {

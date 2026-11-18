@@ -21,8 +21,10 @@ func TestALocalShardIsAProblemInAFarm(t *testing.T) {
 	dir := "file://" + t.TempDir()
 	farm := &project.Registry{Cache: k8s, Namespace: "c4-system", RefuseLocal: true}
 	alone := &project.Registry{Cache: k8s, Namespace: "c4-system"}
-	p := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: "local-shard"}, Spec: c4v1.ProjectSpec{
-		Namespaces: []string{"local-shard"},
+	// Never created: validate reads it, and the other Projects, only.
+	name := "local-shard-" + unique()
+	p := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: c4v1.ProjectSpec{
+		Namespaces: []string{name},
 		Store:      c4v1.ProjectStore{Shards: []c4v1.StoreShard{{Name: "s0", URL: "c4d://store:7000"}, {Name: "s1", URL: dir}}},
 	}}
 	count := func(problems []string) int {
