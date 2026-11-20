@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -480,9 +481,9 @@ func openTree(root string) (Shard, error) {
 func (s *treeShard) Name() string { return "file://" + s.root }
 
 func (s *treeShard) Get(_ context.Context, id c4.ID, offset int64) (io.ReadCloser, int64, int64, error) {
-	p, ok := s.ts.ContentPath(id)
-	if !ok {
-		return nil, 0, 0, fmt.Errorf("%s: %w", id, ErrNotFound)
+	p, err := s.lookup(id)
+	if err != nil {
+		return nil, 0, 0, err
 	}
 	f, err := os.Open(p)
 	if err != nil {
@@ -500,10 +501,22 @@ func (s *treeShard) Get(_ context.Context, id c4.ID, offset int64) (io.ReadClose
 	return f, st.Size(), offset, nil
 }
 
+// lookup is the tree store's three-way answer (TreeStore.Lookup): the
+// object's path; ErrNotFound when no level of the store holds a copy; or
+// the error a lookup met (a permission error, EIO), when whether the object
+// is there is unknown, which is never read as absent.
+func (s *treeShard) lookup(id c4.ID) (string, error) {
+	p, err := s.ts.Lookup(id)
+	if err != nil && (os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist)) {
+		return "", fmt.Errorf("%s: %w", id, ErrNotFound)
+	}
+	return p, err
+}
+
 func (s *treeShard) Head(_ context.Context, id c4.ID) (int64, error) {
-	p, ok := s.ts.ContentPath(id)
-	if !ok {
-		return 0, fmt.Errorf("%s: %w", id, ErrNotFound)
+	p, err := s.lookup(id)
+	if err != nil {
+		return 0, err
 	}
 	st, err := os.Stat(p)
 	if err != nil {

@@ -50,10 +50,18 @@ func OpenTreeSource(dir string) (*TreeSource, error) {
 }
 
 // Stat returns the stored size of id.
+//
+// Absent is an error wrapping os.ErrNotExist; a lookup that met another
+// error (a permission error, EIO) returns it, since whether the object is
+// there is then unknown, and an import that took it for absent would
+// record the file with a null size (TreeStore.Lookup).
 func (s *TreeSource) Stat(id c4.ID) (int64, error) {
-	p, ok := s.TS.ContentPath(id)
-	if !ok {
+	p, err := s.TS.Lookup(id)
+	if err != nil && (os.IsNotExist(err) || errors.Is(err, os.ErrNotExist)) {
 		return 0, fmt.Errorf("%s: %w", id, os.ErrNotExist)
+	}
+	if err != nil {
+		return 0, err
 	}
 	st, err := os.Stat(p)
 	if err != nil {
@@ -163,9 +171,12 @@ type Sizer interface {
 
 // Size implements Sizer.
 func (s *TreeSink) Size(_ context.Context, id c4.ID) (int64, bool, error) {
-	p, ok := s.TS.ContentPath(id)
-	if !ok {
+	p, err := s.TS.Lookup(id)
+	if err != nil && (os.IsNotExist(err) || errors.Is(err, os.ErrNotExist)) {
 		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
 	}
 	st, err := os.Stat(p)
 	if err != nil {

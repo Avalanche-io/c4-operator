@@ -200,9 +200,12 @@ type asideTaker interface {
 // name, named by the ID it was under, and answers its bytes. A store
 // opened again places whatever is left aside (Sharded.mend).
 func (s *treeShard) setAside(id c4.ID) (string, []byte, error) {
-	p, ok := s.ts.ContentPath(id)
-	if !ok {
+	p, err := s.lookup(id)
+	if errors.Is(err, ErrNotFound) {
 		return "", nil, nil
+	}
+	if err != nil {
+		return "", nil, err
 	}
 	if filepath.Base(p) != id.String() {
 		return "", nil, fmt.Errorf("%s is still being written", id)
