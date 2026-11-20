@@ -49,6 +49,13 @@ deepens a directory its base knows only by its ID, the description lists that
 directory's children only in part, and whether its ID is derived from the
 part, kept, or nulled is a format question awaiting a ruling.
 
+`view`, its records and `view.c4m` were made again on 2026-11-17, from the
+same tree, by the view package once views record a link as `lrwxrwxrwx`
+(the pin move to c4 f1bbcda): the view's ID went from c42HpRu… to the one
+in `root-ids.txt`, which c4 master's `c4 id -q view.c4m` also reports. The
+records made before stay in `records/`: `deepen-collapsed.c4m` is a
+changeset over the old view's root record.
+
 The tree: `a/f.txt` holding `f` and a newline, `a/l`, a link to `f.txt`, and
 `h.txt` holding `h` and a newline, every entry's time set to
 2026-11-11T00:00 local with `touch -h -t 202611110000`. `tree2` is the same
