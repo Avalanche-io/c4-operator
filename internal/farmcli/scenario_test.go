@@ -304,7 +304,10 @@ func TestLoadIssues(t *testing.T) {
 // and a project that never comes ends the load in the farm's words.
 func TestLoadScenarioWaitsForItsProjects(t *testing.T) {
 	defer func(w, r time.Duration) { ProjectWait, projectRetry = w, r }(ProjectWait, projectRetry)
-	ProjectWait, projectRetry = time.Second, time.Millisecond
+	// The wait bounds the whole first load, which a full suite's load can
+	// slow past a second; the retries are a millisecond, so a load that
+	// passes returns as soon as the projects arrive, however long the wait.
+	ProjectWait, projectRetry = 10*time.Second, time.Millisecond
 	hud := &fakeHUD{lag: map[string]int{"glassworks": 3, "copperline": 1}}
 	srv := httptest.NewServer(hud)
 	defer srv.Close()
