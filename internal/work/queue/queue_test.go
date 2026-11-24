@@ -63,6 +63,16 @@ func TestMain(m *testing.M) {
 // farmSeq numbers the farms the package's tests make.
 var farmSeq atomic.Int64
 
+var uniqueSeq atomic.Int64
+
+// unique returns a suffix no other test, or earlier run of a test in this
+// process (go test -count=N), has had on this API server: a test that
+// names an object outside a farm's namespace names it base+"-"+unique().
+// envtest runs no namespace controller, so a deleted namespace stays
+// Terminating and a name is never used twice. Names the queue or a test's
+// assertions depend on keep their real values.
+func unique() string { return fmt.Sprintf("t%d", uniqueSeq.Add(1)) }
+
 func farm(t *testing.T, pool string, nodes, slots int) (string, *Queue, *time.Time) {
 	t.Helper()
 	ctx := context.Background()

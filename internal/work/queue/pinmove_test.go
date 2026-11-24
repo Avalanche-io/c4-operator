@@ -49,13 +49,16 @@ func TestAToolsOldIDIsReadThroughTheTable(t *testing.T) {
 			}
 		}
 	}
-	pr := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: "pinned-tools"}, Spec: c4v1.ProjectSpec{Namespaces: []string{"pinned-tools"},
+	// a name of its own: a Project left by an earlier run would already
+	// carry that run's renames table
+	project := "pinned-tools-" + unique()
+	pr := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: project}, Spec: c4v1.ProjectSpec{Namespaces: []string{project},
 		Store: c4v1.ProjectStore{Shards: []c4v1.StoreShard{{Name: "s0", URL: dir}}}}}
 	if err := k8s.Create(ctx, pr); err != nil {
 		t.Fatal(err)
 	}
 	q := &Queue{Client: k8s, Stores: func(context.Context, string) (*storeurl.Sharded, error) { return st, nil }}
-	if _, err := q.declaredNetworks(ctx, "pinned-tools", old.String()); err == nil {
+	if _, err := q.declaredNetworks(ctx, project, old.String()); err == nil {
 		t.Fatal("an old tool ID with no table was read, so this test shows nothing")
 	}
 
@@ -83,7 +86,7 @@ func TestAToolsOldIDIsReadThroughTheTable(t *testing.T) {
 	// The client here reads through a cache.
 	var nets []string
 	for i := 0; ; i++ {
-		if nets, err = q.declaredNetworks(ctx, "pinned-tools", old.String()); err == nil || i == 100 {
+		if nets, err = q.declaredNetworks(ctx, project, old.String()); err == nil || i == 100 {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
